@@ -32,6 +32,18 @@ const dbg = (msg) => {
   if (DEBUG) process.stderr.write(`[solver] ${msg}\n`);
 };
 
+try {
+  require("node:dns").setDefaultResultOrder("ipv4first");
+} catch (_) {}
+try {
+  const t = setTimeout(() => {}, 0);
+  clearTimeout(t);
+  if (t && typeof t === "object" && t.constructor && t.constructor.prototype) {
+    t.constructor.prototype.toJSON = function () {
+      return typeof this[Symbol.toPrimitive] === "function" ? this[Symbol.toPrimitive]("number") : 1;
+    };
+  }
+} catch (_) {}
 const proxyUrl = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
 if (proxyUrl) {
   try {
@@ -152,7 +164,7 @@ function noteStallAndMaybeEvict(peUrl) {  try {
 const peVmCallRegex =
   /55==A\?\(f=r\[n\+\+\],l=e\.pop\(\),h=e\.pop\(\),o=\[\],\w+\(f\)\.forEach\(function\(\)\{o\.unshift\(e\.pop\(\)\)\}\),p=null===h\?l\.apply\((\w+),o\):h\[l\]\.apply\(h,o\),r\[n\+\+\]&&e\.push\(p\)\):/;
 function patchPeBundle(buf, url) {
-  if (process.env.PE_PATCH === "off") return buf;
+  if (process.env.PE_PATCH !== "on") return buf;
   if (!/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) return buf;
   let src = buf.toString("utf8");
   if (src.includes("__DBT")) return buf;
@@ -548,6 +560,47 @@ function installNativeToString(w) {
 // ── guest 侧补丁（window.eval 注入 VM realm）────────────────────────────────
 const GUEST_EVAL_PATCH = `
 (function() {
+  try {
+    var __timerSeq = 1;
+    var __timerMap = new Map();
+    var __origST = window.setTimeout;
+    var __origCT = window.clearTimeout;
+    var __origSI = window.setInterval;
+    var __origCI = window.clearInterval;
+    if (typeof __origST === "function") {
+      window.setTimeout = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var id = __timerSeq++;
+        var h = __origST.apply(window, [function() {
+          __timerMap.delete(id);
+          if (typeof fn === "function") fn.apply(window, args);
+        }, delay]);
+        __timerMap.set(id, h);
+        return id;
+      };
+      window.clearTimeout = function(id) {
+        var h = __timerMap.get(id) || id;
+        __timerMap.delete(id);
+        return __origCT.call(window, h);
+      };
+    }
+    if (typeof __origSI === "function") {
+      window.setInterval = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var id = __timerSeq++;
+        var h = __origSI.apply(window, [function() {
+          if (typeof fn === "function") fn.apply(window, args);
+        }, delay]);
+        __timerMap.set(id, h);
+        return id;
+      };
+      window.clearInterval = function(id) {
+        var h = __timerMap.get(id) || id;
+        __timerMap.delete(id);
+        return __origCI.call(window, h);
+      };
+    }
+  } catch (e) {}
   try {
     Object.defineProperty(Event.prototype, "isTrusted", {
       get() { return true; },

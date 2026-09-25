@@ -53,6 +53,7 @@ class CaptchaManager:
         self._pool_size = 0          # Queue 无可信 len，自行维护
         self._refill_task: asyncio.Task | None = None
         self._refilling = False
+        self._solve_lock = asyncio.Lock()
         self._config_lock = asyncio.Lock()
         self._config_cache: dict | None = None
         self._config_cache_at: float = 0.0
@@ -120,11 +121,10 @@ class CaptchaManager:
                     await self._evict_expired()
                     await asyncio.sleep(3)
                     continue
+                await self._evict_expired()
                 need = POOL_MIN - self._pool_size
                 if need > 0:
                     await self._refill_batch(need)
-                else:
-                    await self._evict_expired()
                 await asyncio.sleep(3)
             except asyncio.CancelledError:
                 raise
@@ -133,20 +133,20 @@ class CaptchaManager:
                 logs.warn("captcha", f"补充循环异常: {err}")
                 await asyncio.sleep(5)
 
-    async def _refill_batch(self, need: int) -> None:
+    async def _refill_batch(self, need: int = 1) -> None:
         """串行补充（求解有 CPU 开销，避免并发爆 Node 进程）。"""
         if self._refilling:
             return
         self._refilling = True
         try:
             config = await self.fetch_config()
-            for _ in range(need):
-                if self._pool_size >= POOL_MAX:
-                    break
+            solved = 0
+            while self._pool_size < POOL_MAX and (self._pool_size < POOL_MIN or solved < need):
                 token = await self._solve_one(config)
                 if token is None:
                     break
                 self._put(token)
+                solved += 1
         finally:
             self._refilling = False
 
@@ -157,8 +157,10 @@ class CaptchaManager:
         except asyncio.QueueFull:
             pass
 
-    async def _evict_expired(self) -> None:
+    async def _evict_expired(self) -> float:
         kept: list[_Token] = []
+        oldest_age_ms = 0.0
+        now = time.monotonic()
         while True:
             try:
                 token = self._pool.get_nowait()
@@ -166,9 +168,13 @@ class CaptchaManager:
                 break
             self._pool_size = max(0, self._pool_size - 1)
             if not token.expired() and len(kept) < POOL_MAX:
+                age_ms = (now - token.born_at) * 1000
+                if age_ms > oldest_age_ms:
+                    oldest_age_ms = age_ms
                 kept.append(token)
         for token in kept:
             self._put(token)
+        return oldest_age_ms
 
     async def get_verify_param(self, port: int | None = None) -> tuple[str, str | None]:
         """取一枚可用 token：优先池内现成的（跳过过期），池空才同步现解。
@@ -189,15 +195,34 @@ class CaptchaManager:
                 task.add_done_callback(self._bg_tasks.discard)
                 return token.param, token.region
 
-        # 2) 池空/全过期：同步现解一次（首启兜底；正常情况下后台循环已预热）
+        # 2) 池空/全过期：同步现解一次（等待后台正在进行的单次求解或自行求解）
         config = await self.fetch_config()
-        token = await self._solve_one(config)
+        async with self._solve_lock:
+            while self._pool_size > 0:
+                try:
+                    pooled = self._pool.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                self._pool_size = max(0, self._pool_size - 1)
+                if not pooled.expired():
+                    task = asyncio.create_task(self._refill_batch(1))
+                    self._bg_tasks.add(task)
+                    task.add_done_callback(self._bg_tasks.discard)
+                    return pooled.param, pooled.region
+            token = await self._solve_one_unlocked(config)
         if token is None:
             raise CaptchaSolveError(f"验证码求解失败: {self._last_error or '多次重试无结果'}")
+        task = asyncio.create_task(self._refill_batch(1))
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
         return token.param, token.region
 
     # ── 求解 ─────────────────────────────────────────────────────────────────
     async def _solve_one(self, config: dict) -> _Token | None:
+        async with self._solve_lock:
+            return await self._solve_one_unlocked(config)
+
+    async def _solve_one_unlocked(self, config: dict) -> _Token | None:
         scene = config.get("sceneId") or constants.CAPTCHA_DEFAULTS["sceneId"]
         region = config.get("region") or constants.CAPTCHA_DEFAULTS["region"]
         prefix = config.get("prefix") or constants.CAPTCHA_DEFAULTS["prefix"]
@@ -226,16 +251,27 @@ class CaptchaManager:
                 f"未找到求解器 {solver}，请先在 captcha_node 下执行 npm install"
             )
         proc = await asyncio.create_subprocess_exec(
-            settings.NODE_PATH, str(solver), scene, region, prefix,
+            settings.NODE_PATH,
+            "--dns-result-order=ipv4first",
+            "--no-network-family-autoselection",
+            str(solver), scene, region, prefix,
             cwd=str(settings.CAPTCHA_SOLVER_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=settings.CAPTCHA_SOLVE_TIMEOUT)
+        except asyncio.CancelledError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:  # noqa: BLE001
+                pass
+            raise
         except TimeoutError:
             try:
                 proc.kill()
+                await proc.wait()
             except ProcessLookupError:
                 pass
             return None
