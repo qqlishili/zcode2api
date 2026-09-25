@@ -24,3 +24,9 @@ node_modules/
 # 秘钥 / 凭证导出
 *accounts*.json
 zcode-accounts*.json
+.env.*
+!.env.example
+*.pem
+*.key
+*secret*.json
+*token*.json
