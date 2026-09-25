@@ -1,7 +1,8 @@
 """OpenAI Chat Completions 兼容层 —— /v1/chat/completions ↔ Anthropic Messages 双向转换。
 
 入站：OpenAI 请求体 → Anthropic messages 体（system/developer 提取为 system 参数、
-content 分块、tool_calls / tool_result / 图片(data URL) best-effort 映射）。
+content 分块、tool_calls / tool_result / 图片(data URL) best-effort 映射、
+reasoning_effort / thinking / output_config 推理参数透传）。
 出站：Anthropic 响应（JSON 或 SSE 事件流）→ OpenAI 格式。
 
 与 body_transform 同一原则：对畸形输入保持宽容，映射不了的部件安静跳过，
@@ -75,6 +76,38 @@ def _blocks_from_user_content(content: object) -> list[dict]:
     return blocks or [{"type": "text", "text": ""}]
 
 
+def _apply_reasoning_params(payload: dict, body: dict) -> None:
+    """将 OpenAI 兼容端的 reasoning_effort / reasoning / thinking / output_config 映射到 Anthropic 体。"""
+    # 1) 直接透传客户端显式带的 thinking / output_config 字典
+    if isinstance(payload.get("thinking"), dict):
+        body["thinking"] = dict(payload["thinking"])
+    elif isinstance(payload.get("enable_thinking"), bool):
+        body["thinking"] = {"type": "enabled" if payload["enable_thinking"] else "disabled"}
+
+    if isinstance(payload.get("output_config"), dict):
+        body["output_config"] = dict(payload["output_config"])
+
+    # 2) OpenAI reasoning_effort 或 reasoning.effort
+    effort = payload.get("reasoning_effort")
+    if effort is None and isinstance(payload.get("reasoning"), dict):
+        effort = payload["reasoning"].get("effort")
+    if isinstance(effort, str) and effort.strip():
+        eff_low = effort.strip().lower()
+        if eff_low in ("disabled", "none", "off"):
+            body["thinking"] = {"type": "disabled"}
+            if isinstance(body.get("output_config"), dict):
+                body["output_config"].pop("effort", None)
+                if not body["output_config"]:
+                    body.pop("output_config", None)
+        elif eff_low in ("minimal", "low", "medium", "high", "xhigh", "max"):
+            body["thinking"] = {"type": "enabled"}
+            out_cfg = dict(body.get("output_config")) if isinstance(body.get("output_config"), dict) else {}
+            out_cfg["effort"] = eff_low
+            body["output_config"] = out_cfg
+        elif eff_low in ("enabled", "adaptive", "auto"):
+            body["thinking"] = {"type": "enabled"}
+
+
 def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     """OpenAI 请求体 → Anthropic messages 体。非法时返回 (None, 错误信息)。"""
     model = payload.get("model")
@@ -106,6 +139,9 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
             })
         elif role == "assistant":
             blocks: list[dict] = []
+            reasoning_text = msg.get("reasoning_content")
+            if isinstance(reasoning_text, str) and reasoning_text.strip():
+                blocks.append({"type": "thinking", "thinking": reasoning_text})
             text = _text_from_content(content)
             if text:
                 blocks.append({"type": "text", "text": text})
@@ -156,6 +192,14 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     if payload.get("stream"):
         body["stream"] = True
 
+    _apply_reasoning_params(payload, body)
+
+    user_tag = payload.get("user")
+    if isinstance(user_tag, str) and user_tag.strip():
+        meta = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
+        meta["session_id"] = user_tag.strip()
+        body["metadata"] = meta
+
     tools = payload.get("tools")
     if isinstance(tools, list) and tools:
         mapped = []
@@ -186,11 +230,14 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
 def anthropic_to_openai(data: dict, model: str) -> dict:
     """Anthropic message 响应 → OpenAI chat.completion。"""
     text_parts: list[str] = []
+    thinking_parts: list[str] = []
     tool_calls: list[dict] = []
     for block in data.get("content") or []:
         if not isinstance(block, dict):
             continue
-        if block.get("type") == "text" and isinstance(block.get("text"), str):
+        if block.get("type") == "thinking" and isinstance(block.get("thinking"), str):
+            thinking_parts.append(block["thinking"])
+        elif block.get("type") == "text" and isinstance(block.get("text"), str):
             text_parts.append(block["text"])
         elif block.get("type") == "tool_use":
             tool_calls.append({
@@ -205,6 +252,8 @@ def anthropic_to_openai(data: dict, model: str) -> dict:
     in_tok = _as_int(usage.get("input_tokens")) or 0
     out_tok = _as_int(usage.get("output_tokens")) or 0
     message: dict = {"role": "assistant", "content": "".join(text_parts) or None}
+    if thinking_parts:
+        message["reasoning_content"] = "".join(thinking_parts)
     if tool_calls:
         message["tool_calls"] = tool_calls
     return {
@@ -273,6 +322,8 @@ class StreamConverter:
             return []
         if etype == "content_block_delta":
             delta = evt.get("delta") or {}
+            if delta.get("type") == "thinking_delta" and isinstance(delta.get("thinking"), str):
+                return [self._chunk({"reasoning_content": delta["thinking"]})]
             if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
                 return [self._chunk({"content": delta["text"]})]
             if delta.get("type") == "input_json_delta" and isinstance(delta.get("partial_json"), str):

@@ -131,6 +131,19 @@ class TestOpenaiToAnthropic:
         assert openai_to_anthropic({"model": "glm-5.3", "messages": "x"})[1] is not None
 
 
+    def test_reasoning_effort_and_user_session_mapped(self):
+        body, err = openai_to_anthropic({
+            "model": "glm-5.3-flash",
+            "reasoning_effort": "medium",
+            "user": "sess-custom-42",
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert err is None and body is not None
+        assert body["thinking"] == {"type": "enabled"}
+        assert body["output_config"] == {"effort": "medium"}
+        assert body["metadata"]["session_id"] == "sess-custom-42"
+
+
 class TestAnthropicToOpenai:
     def test_text_response(self):
         out = anthropic_to_openai({
