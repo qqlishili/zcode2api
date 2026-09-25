@@ -106,3 +106,59 @@ class TestPassthroughFilter:
         ):
             assert name not in headers, name
         assert headers["HTTP-Referer"] == constants.HTTP_REFERER
+
+
+# ── metadata.user_id 会话契约（3.14.3 对齐）──────────────────────────────────
+class TestMetadataUserIdContract:
+    def test_format_metadata_user_id_matches_official_json_contract(self):
+        from app.body_transform import format_metadata_user_id
+
+        raw = format_metadata_user_id("dev-mid-123", "user-sub-1", None)
+        assert raw is not None
+        parsed = json.loads(raw)
+        assert parsed["device_id"] == "dev-mid-123"
+        assert parsed["account_uuid"] == ""
+        assert len(parsed["session_id"]) > 0
+
+    def test_build_request_injects_json_user_id_and_does_not_mutate_input(self):
+        acc = Account.create("zai", "t", "h1.eyJzdWIiOiJ1LTEyMyJ9.sig")
+        caller_body = {
+            "model": "GLM-5.3-Flash",
+            "messages": [{"role": "user", "content": "hello"}],
+            "metadata": {"session_id": "client-sess-99"},
+        }
+        _url, headers, payload_bytes = build_request(acc, caller_body, "vp-1")
+        sent = json.loads(payload_bytes)
+        meta_uid = json.loads(sent["metadata"]["user_id"])
+        assert meta_uid == {
+            "device_id": headers["X-Device-Mid"],
+            "account_uuid": "",
+            "session_id": "client-sess-99",
+        }
+        assert "session_id" not in sent["metadata"]
+        assert caller_body["metadata"] == {"session_id": "client-sess-99"}
+        assert "system" not in caller_body
+
+    def test_conversation_scoped_session_id_prevents_collision(self):
+        from app.body_transform import transform_body
+
+        body_a1 = {"messages": [{"role": "user", "content": "Refactor the auth module"}]}
+        transform_body(body_a1, user_id="u-1", model="GLM-5.3", device_mid="dev-1")
+        sid_a1 = json.loads(body_a1["metadata"]["user_id"])["session_id"]
+
+        body_a2 = {
+            "messages": [
+                {"role": "user", "content": "Refactor the auth module"},
+                {"role": "assistant", "content": "Sure, here is the plan."},
+                {"role": "user", "content": "Now implement step 1"},
+            ]
+        }
+        transform_body(body_a2, user_id="u-1", model="GLM-5.3", device_mid="dev-1")
+        sid_a2 = json.loads(body_a2["metadata"]["user_id"])["session_id"]
+
+        body_b1 = {"messages": [{"role": "user", "content": "Write SQL migration script"}]}
+        transform_body(body_b1, user_id="u-1", model="GLM-5.3", device_mid="dev-1")
+        sid_b1 = json.loads(body_b1["metadata"]["user_id"])["session_id"]
+
+        assert sid_a1 == sid_a2
+        assert sid_a1 != sid_b1

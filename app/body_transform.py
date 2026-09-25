@@ -1,4 +1,4 @@
-"""请求体变换 —— 对齐 zapi body-transformer.ts 在 anthropic 通道上的变换集。
+"""请求体变换 —— 对齐官方 ZCode 客户端与 zapi body-transformer.ts 在 anthropic 通道上的变换集。
 
 coding-plan 通道（本服务 JWT 通道）应用三项：
   1. system 身份块：前置 ZCode 官方 system 块（CLI Prefix / Agent Identity /
@@ -8,9 +8,11 @@ coding-plan 通道（本服务 JWT 通道）应用三项：
      `cache_control: {"type": "ephemeral"}`（镜像 ZCode bundle 的 HLr，
      "finalizeLatestNonSystemCacheControl"）。Anthropic API 对低于缓存门槛的
      请求静默忽略 cache_control，因此无条件追加是安全的。
-  3. metadata.user_id：JWT 账号存在 user_id 时注入（镜像 bundle 的
-     `user_id: B.metadata.userId`）。user_id 每次从 JWT payload（sub / user_id
-     字段）实时解出，token 刷新后自动跟随。
+  3. metadata.user_id：对齐官方 ZCode 客户端 anthropic-request-metadata.ts 的
+     JSON 字符串契约 `{"device_id":...,"account_uuid":"","session_id":...}`。
+     当提供 device_mid 时生成该 JSON 字符串（保留客户端传入的 session_id 或基于
+     device_mid + user_id 派生确定性 UUID，避免空串导致跨会话缓存碰撞）；
+     未提供 device_mid 时兼容旧接口直接写入 user_id。
 
 所有变换对畸形输入保持 no-op：解析失败返回原样，坏 body 永远不会被这里放大。
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import uuid
 from pathlib import Path
 
 # ── ZCode 官方 system 身份块（对齐 zapi zcode_system.json，从官方客户端 bundle 提取）──
@@ -112,12 +115,85 @@ def apply_cache_control(body: dict) -> bool:
     return False
 
 
+def _extract_conversation_seed(body: dict | None) -> str:
+    """取首条非 system 消息前 512 字符作会话种子（同对话多轮恒定，跨对话隔离）。"""
+    if not _is_plain_dict(body):
+        return ""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") == "system":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()[:512]
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
+                    parts.append(block["text"].strip())
+                elif isinstance(block, str) and block.strip():
+                    parts.append(block.strip())
+            if parts:
+                return " ".join(parts)[:512]
+    return ""
+
+
+def format_metadata_user_id(
+    device_mid: str | None,
+    user_id: str | None = None,
+    existing_metadata: dict | None = None,
+    conversation_seed: str | None = None,
+) -> str | None:
+    """生成官方 ZCode 客户端契约的 metadata.user_id JSON 字符串。
+
+    对齐 ZCode src/main/agent/runtime/anthropic-request-metadata.ts：
+    `{"device_id": "<X-Device-Mid>", "account_uuid": "", "session_id": "<sessionId>"}`
+    """
+    eff_device = (device_mid or "").strip()
+    if not eff_device:
+        return user_id
+
+    eff_session = ""
+    if _is_plain_dict(existing_metadata):
+        raw_sid = existing_metadata.get("session_id")
+        if isinstance(raw_sid, str) and raw_sid.strip():
+            eff_session = raw_sid.strip()
+        else:
+            raw_uid = existing_metadata.get("user_id")
+            if isinstance(raw_uid, str) and raw_uid.strip():
+                if raw_uid.strip().startswith("{"):
+                    try:
+                        parsed = json.loads(raw_uid)
+                        if isinstance(parsed, dict) and isinstance(parsed.get("session_id"), str):
+                            eff_session = parsed["session_id"].strip()
+                    except (ValueError, TypeError):
+                        pass
+                else:
+                    eff_session = raw_uid.strip()
+
+    if not eff_session:
+        seed_suffix = f":{conversation_seed.strip()}" if isinstance(conversation_seed, str) and conversation_seed.strip() else ""
+        eff_session = str(uuid.uuid5(uuid.NAMESPACE_OID, f"{eff_device}:{user_id or 'anon'}{seed_suffix}"))
+
+    return json.dumps(
+        {
+            "device_id": eff_device,
+            "account_uuid": "",
+            "session_id": eff_session,
+        },
+        separators=(",", ":"),
+    )
+
+
 def apply_user_id(body: dict, user_id: str) -> bool:
-    """注入 metadata.user_id（保留已有 metadata 其它字段）。幂等。"""
+    """注入 metadata.user_id（保留已有 metadata 其它合法字段）。幂等。"""
     existing = body.get("metadata")
-    if _is_plain_dict(existing) and existing.get("user_id") == user_id:
+    if _is_plain_dict(existing) and existing.get("user_id") == user_id and "session_id" not in existing:
         return False
     merged = dict(existing) if _is_plain_dict(existing) else {}
+    merged.pop("session_id", None)  # 清理内部过渡字段，避免发往 Anthropic 触发 schema 报错
     merged["user_id"] = user_id
     body["metadata"] = merged
     return True
@@ -142,13 +218,21 @@ def jwt_user_id(jwt_token: str | None) -> str | None:
     return str(user_id) if user_id else None
 
 
-def transform_body(body: dict, user_id: str | None = None, model: str | None = None) -> dict:
+def transform_body(
+    body: dict,
+    user_id: str | None = None,
+    model: str | None = None,
+    device_mid: str | None = None,
+) -> dict:
     """按 anthropic 通道变换 body（原地修改并返回）。变换失败静默保持原样。"""
     try:
         apply_start_plan_system(body, model)
         apply_cache_control(body)
-        if user_id:
-            apply_user_id(body, user_id)
+        existing_meta = body.get("metadata") if _is_plain_dict(body.get("metadata")) else None
+        conv_seed = _extract_conversation_seed(body)
+        target_uid = format_metadata_user_id(device_mid, user_id, existing_meta, conv_seed) if device_mid else user_id
+        if target_uid:
+            apply_user_id(body, target_uid)
     except Exception:  # noqa: BLE001 - 变换永不放大请求失败
         pass
     return body
