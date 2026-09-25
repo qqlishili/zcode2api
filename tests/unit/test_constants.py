@@ -24,22 +24,21 @@ def test_billing_base():
 def test_client_configs():
     assert constants.CLIENT_CONFIGS_URL == "https://zcode.z.ai/api/v1/client/configs"
     # 实测带 platform 参数上游 3001，只允许 app_version
-    assert constants.CLIENT_CONFIGS_QUERY == "app_version=3.11.2"
+    assert constants.CLIENT_CONFIGS_QUERY == "app_version=3.14.3"
 
 
 def test_client_version_single_source():
-    # asar 客户端 3.11.2
+    # 对齐官方客户端 3.14.3
     # 全部版本出口必须引用同一常量，禁止再出现字面量版本号
-    assert constants.CLIENT_APP_VERSION == "3.11.2"
+    assert constants.CLIENT_APP_VERSION == "3.14.3"
     assert constants.X_ZCODE_APP_VERSION == constants.CLIENT_APP_VERSION
     assert constants.USER_AGENT == f"ZCode/{constants.CLIENT_APP_VERSION}"
     assert constants.CLIENT_PLATFORM == "darwin-arm64"  # asar TH() = platform-arch
 
 
 def test_billing_version_and_activation():
-    # zcode-switch v1.5.4 实证（2026-09-06 移植）：billing 族用官方现行版 3.11.2，
-    # 与 messages 指纹 CLIENT_APP_VERSION（已真机验证）刻意分离
-    assert constants.BILLING_APP_VERSION == "3.11.2"
+    # billing 族对齐官方现行版 3.14.3
+    assert constants.BILLING_APP_VERSION == "3.14.3"
     assert constants.BILLING_TITLE == "Z Code@electron"
     assert constants.BILLING_RELEASE_CHANNEL == "stable"
     assert constants.EVENT_REPORT_URL == "https://zcode.z.ai/api/v1/event/report"
@@ -65,6 +64,11 @@ def test_rejection_signals():
     assert constants.EXHAUST_HTTP_STATUSES == (402,)
     assert "余额不足" in constants.EXHAUST_KEYWORDS
     assert "insufficient" in constants.EXHAUST_KEYWORDS
+    assert "1005" in constants.EXHAUST_BUSINESS_CODES
+    assert "1304" in constants.EXHAUST_BUSINESS_CODES
+    assert "1006" in constants.AUTH_INVALID_BUSINESS_CODES
+    assert "3008" in constants.CONCURRENCY_LIMIT_BUSINESS_CODES
+    assert "2007" in constants.SERVER_ERROR_BUSINESS_CODES
     # 403 不再无条件判 invalid：需先排除验证码挑战（对齐 zapi classifyAccountFailure）
     assert '"code":3007' in constants.CAPTCHA_BODY_MARKERS
 

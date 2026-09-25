@@ -30,7 +30,7 @@ MESSAGES_URLS = {
     "bigmodel": BIGMODEL_ORIGIN + MESSAGES_PATHS["bigmodel"],
 }
 
-# ── 计费 / 额度端点（quota.py / 未来 claim.py）────────────────────────────────
+# ── 计费 / 额度端点（quota.py / claim.py）────────────────────────────────────
 BILLING_BASE = f"{ZCODE_ORIGIN}/api/v1/zcode-plan"
 BILLING_CURRENT_PATH = "/billing/current"
 BILLING_BALANCE_PATH = "/billing/balance"
@@ -41,17 +41,15 @@ USAGE_PATH = "/usage"
 OAUTH_CLI_INIT_PATH = "/api/v1/oauth/cli/init"
 OAUTH_CLI_POLL_PATH = "/api/v1/oauth/cli/poll"   # + /{flow_id}
 
-# ── 客户端版本（单一真相源：asar 客户端 3.11.2，旧版 3.10.2 已随官方升级）────
+# ── 客户端版本（单一真相源：对齐官方 ZCode 客户端 3.14.3）──────────────────────
 # 客户端 claim 头实测缺版本/平台头 → 上游 3007；client/configs 带 platform 参数 → 3001
-CLIENT_APP_VERSION = "3.11.2"
+CLIENT_APP_VERSION = "3.14.3"
 CLIENT_PLATFORM = "darwin-arm64"  # asar TH() = process.platform-arch，服务端固定伪装
 CLIENT_CONFIGS_URL = f"{ZCODE_ORIGIN}/api/v1/client/configs"
 CLIENT_CONFIGS_QUERY = f"app_version={CLIENT_APP_VERSION}"
 
-# ── billing 族版本 / 激活上报（zcode-switch v1.5.4 实证，2026-09-06 移植）─────
-# billing 族（preview/claim/balance/current/usage/configs/event）用官方桌面端
-# 现行版 3.11.2（对齐官方客户端现行版本）
-BILLING_APP_VERSION = "3.11.2"
+# ── billing 族版本 / 激活上报（对齐官方客户端 3.14.3）─────────────────────────
+BILLING_APP_VERSION = "3.14.3"
 BILLING_TITLE = "Z Code@electron"        # zcode-switch billing 头实证形态
 BILLING_RELEASE_CHANNEL = "stable"
 # 官方客户端每日活跃事件：POST /api/v1/event/report（不在 zcode-plan 下、无
@@ -107,21 +105,39 @@ IDENTITY_OS_CATEGORY = "macos"
 # X-Os-Version：os.release() 语义；darwin 25.x 对应 macOS 15。固定伪装值。
 IDENTITY_OS_VERSION = "25.5.0"
 
-# ── 上游被拒信号 → 账号动作（gateway / quota 判定共用）────────────────────────
+# ── 上游被拒信号 → 账号动作（对齐 ZCode failure-provider-business-codes.ts）───
 EXHAUST_HTTP_STATUSES = (402,)
 EXHAUST_KEYWORDS = ("quota", "insufficient", "balance", "exhaust", "额度", "余额不足")
-# 验证码挑战：HTTP 403 + 文案，或 HTTP 400 + body {"code":3007}（docs 05 §被拒信号表）
+EXHAUST_BUSINESS_CODES = (
+    "1005", "1304", "1308", "1310", "1313", "2056", "20097",
+    "1316", "1317", "1318", "1319", "1320", "1321",
+    "insufficient_quota", "credit_balance_exhausted",
+)
+AUTH_INVALID_BUSINESS_CODES = ("1006",)
+CAPTCHA_BUSINESS_CODES = ("3007",)
+RATE_LIMIT_BUSINESS_CODES = (
+    "3002", "3008", "3009", "3010", "1302", "1303", "1305",
+    "rate_limit_reached_error", "rate_limit_error",
+)
+# 并发上限类错误码（立即切换账号或走 Key 回退，不在同一账号上 sleep 等待）
+CONCURRENCY_LIMIT_BUSINESS_CODES = ("3008", "3009", "3010")
+SERVER_ERROR_BUSINESS_CODES = (
+    "500", "1120", "1230", "1234", "1312", "2007",
+    "engine_overloaded_error", "overloaded_error",
+)
+
+# 验证码挑战：HTTP 403 + 文案，或 HTTP 200/400/403 + body {"code":3007}（docs 05 §被拒信号表）
 # 注意：403 不再无条件判 invalid —— 需先排除验证码挑战（captcha/verify 文案或
 # challenge 头），否则一次人机校验续期就把账号错杀成 INVALID（对齐 zapi
 # classifyAccountFailure：403 + captcha 文案 → 非账号失败）。
-CAPTCHA_BODY_MARKERS = ('"code":3007', '"code": 3007')
+CAPTCHA_BODY_MARKERS = ('"code":3007', '"code": 3007', '"code":"3007"', '"code": "3007"')
 
 # ── 风控信号（2026-09-05 3012 事件实证）────────────────────────────────────────
-# 3012「unusual activity」= 上游风控（HTTP 405 承载），不在官方公开错误码表；
+# 3012「unusual activity」= 上游风控（HTTP 405 或包在 200/400 JSON 承载），不在官方公开错误码表；
 # 高频请求触发，官方政策定性为临时限制（限流/冻结，3 次以上违规才封号）。
-# 处置：账号指数退避冷却 + 暂停验证码池预热（池预热本身即上游流量，会加剧风控）。
+# 处置：禁用 Plan 通道（或切 API Key 回退），人工确认恢复后手动启用。
 RISK_CONTROL_HTTP_STATUSES = (405,)
 RISK_CONTROL_MARKERS = (
-    '"code":3012', '"code": 3012',
+    '"code":3012', '"code": 3012', '"code":"3012"', '"code": "3012"',
     "unusual activity",
 )

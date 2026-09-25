@@ -91,7 +91,7 @@ class TestClaim:
         from app.fingerprint import profile_for
 
         profile = profile_for(acc)
-        assert headers.get("x-zcode-app-version") == "3.11.2"  # BILLING_APP_VERSION
+        assert headers.get("x-zcode-app-version") == "3.14.3"  # BILLING_APP_VERSION
         assert headers.get("x-platform") == profile.platform_full
         assert headers.get("x-device-mid") == profile.device_mid
         assert b"mock-claim-plan" in body
@@ -142,7 +142,7 @@ class TestClaim:
         body = _json.loads(body)
         # user_id 来自 JWT payload（GOOD_JWT sub="a" 兜底）；无 Authorization 头
         assert body["user_id"] == "a"
-        assert body["app_version"] == "3.11.2"
+        assert body["app_version"] == "3.14.3"
         assert body["device_mid"]
         # 指纹档案（2026-09-07）：事件字段按账号指纹出值，与 billing 头同源
         from app.fingerprint import profile_for
@@ -168,8 +168,8 @@ class TestClaim:
                          if c[1].endswith("/billing/preview")]
         assert preview_calls
         h = preview_calls[-1][2]
-        assert h.get("user-agent") == "ZCode/3.11.2"
-        assert h.get("x-zcode-app-version") == "3.11.2"
+        assert h.get("user-agent") == "ZCode/3.14.3"
+        assert h.get("x-zcode-app-version") == "3.14.3"
         assert h.get("x-title") == "Z Code@electron"
         assert h.get("x-release-channel") == "stable"
         # 平台/语言/设备按账号指纹档案出值（2026-09-07 随机指纹池）
@@ -346,7 +346,7 @@ class TestManualClaim:
 
         profile = profile_for(acc)
         assert headers.get("x-device-mid") == profile.device_mid
-        assert headers.get("x-zcode-app-version") == "3.11.2"  # 客户端 claim 头形态
+        assert headers.get("x-zcode-app-version") == "3.14.3"  # 客户端 claim 头形态
         assert headers.get("x-platform") == profile.platform_full
         assert b"mock-claim-plan" in body
         assert stub.solve_count == 0
