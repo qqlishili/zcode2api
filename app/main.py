@@ -124,6 +124,7 @@ async def lifespan(app: FastAPI):
     finally:
         await monitor.stop()
         await captcha_manager.close()
+        await gateway.close_shared_client()
 
 
 def create_app() -> FastAPI:

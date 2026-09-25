@@ -331,3 +331,358 @@ def fresh_account(secret: str) -> Account:
     """向当前 store 注入账号（gateway_client 用 fresh_app 的 store 单例）。"""
     from app.store import store
     return store.add_account("zai", "t", secret)
+
+
+# ── 思考档位与业务错误码归一（3.14.3 对齐）──────────────────────────────────
+class TestThinkingNormalization:
+    def test_glm53_coerces_medium_and_minimal_effort(self):
+        b1 = _normalize_body({
+            "model": "glm-5.3-flash",
+            "output_config": {"effort": "medium"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b1["model"] == "GLM-5.3-Flash"
+        assert b1["output_config"] == {"effort": "high"}
+        assert b1["thinking"] == {"type": "enabled"}
+
+        b2 = _normalize_body({
+            "model": "GLM-5.3",
+            "output_config": {"effort": "minimal"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b2["output_config"] == {"effort": "low"}
+        assert b2["thinking"] == {"type": "enabled"}
+
+        b3 = _normalize_body({
+            "model": "GLM-5.3",
+            "output_config": {"effort": "xhigh"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b3["output_config"] == {"effort": "max"}
+
+    def test_glm53_disabled_effort_removes_output_config(self):
+        b = _normalize_body({
+            "model": "GLM-5.3-Flash",
+            "output_config": {"effort": "disabled"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b["thinking"] == {"type": "disabled"}
+        assert "output_config" not in b
+
+    def test_glm52_coerces_low_to_high_and_keeps_disabled(self):
+        b1 = _normalize_body({
+            "model": "glm-5.2",
+            "output_config": {"effort": "low"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b1["output_config"] == {"effort": "high"}
+        assert b1["thinking"] == {"type": "enabled"}
+
+        b2 = _normalize_body({
+            "model": "glm-5.2",
+            "output_config": {"effort": "disabled"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b2["output_config"] == {"effort": "disabled"}
+        assert b2["thinking"] == {"type": "disabled"}
+
+    def test_glm5_turbo_strips_effort_and_uses_enable_mode(self):
+        b = _normalize_body({
+            "model": "glm-5-turbo",
+            "output_config": {"effort": "high"},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b["model"] == "GLM-5-Turbo"
+        assert "output_config" not in b
+        assert b["thinking"] == {"type": "enabled"}
+
+    def test_budget_tokens_converted_to_effort(self):
+        b_low = _normalize_body({
+            "model": "GLM-5.3-Flash",
+            "thinking": {"type": "enabled", "budget_tokens": 4096},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert "budget_tokens" not in b_low["thinking"]
+        assert b_low["output_config"] == {"effort": "low"}
+
+        b_high = _normalize_body({
+            "model": "GLM-5.3",
+            "thinking": {"type": "enabled", "budget_tokens": 16384},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b_high["output_config"] == {"effort": "high"}
+
+        b_max = _normalize_body({
+            "model": "GLM-5.3",
+            "thinking": {"type": "enabled", "budget_tokens": 32768},
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert b_max["output_config"] == {"effort": "max"}
+
+
+class TestBusinessErrorClassification:
+    def _dummy_resp(self, status_code: int = 200):
+        import httpx
+        return httpx.Response(status_code)
+
+    def test_http_200_exhaust_business_codes_mapped_to_402(self):
+        from app.routes.gateway import _classify_business_error
+        for code in ("1005", "1304", "1308", "2056", "20097", "insufficient_quota"):
+            text = json.dumps({"code": code, "msg": "package quota limit"})
+            eff_status, eff_code, is_conc = _classify_business_error(200, self._dummy_resp(200), text)
+            assert eff_status == 402
+            assert eff_code == code
+            assert is_conc is False
+
+    def test_http_200_auth_invalid_1006_mapped_to_401(self):
+        from app.routes.gateway import _classify_business_error
+        text = json.dumps({"code": 1006, "msg": "invalid token"})
+        eff_status, eff_code, _ = _classify_business_error(200, self._dummy_resp(200), text)
+        assert eff_status == 401 and eff_code == "1006"
+
+    def test_http_200_captcha_3007_mapped_to_403(self):
+        from app.routes.gateway import _classify_business_error
+        text = json.dumps({"code": 3007, "msg": "verify required"})
+        eff_status, eff_code, _ = _classify_business_error(200, self._dummy_resp(200), text)
+        assert eff_status == 403 and eff_code == "3007"
+
+    def test_concurrency_limit_codes_flagged_for_immediate_failover(self):
+        from app.routes.gateway import _classify_business_error
+        for code in ("3008", "3009", "3010"):
+            text = json.dumps({"code": int(code), "msg": "concurrency limit exceeded"})
+            eff_status, eff_code, is_conc = _classify_business_error(200, self._dummy_resp(200), text)
+            assert eff_status == 429
+            assert eff_code == code
+            assert is_conc is True
+
+    def test_normal_message_and_non_json_preserved(self):
+        from app.routes.gateway import _classify_business_error
+        msg_json = json.dumps({"type": "message", "content": [{"type": "text", "text": "ok"}]})
+        assert _classify_business_error(200, self._dummy_resp(200), msg_json) == (200, None, False)
+        assert _classify_business_error(200, self._dummy_resp(200), "<html>not json</html>") == (200, None, False)
+
+
+class TestThinkingHistoryStripAndAffinity:
+    def test_detects_signature_rejection_and_strips_without_mutating_caller(self):
+        from app.routes.gateway import _is_thinking_signature_rejection, _strip_thinking_from_body
+
+        err_text = '{"error":{"type":"invalid_request_error","message":"messages.1.content.0.thinking.signature: Invalid signature in thinking block"}}'
+        assert _is_thinking_signature_rejection(400, err_text) is True
+
+        original = {
+            "model": "GLM-5.3",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "q1"}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "step 1", "signature": "bad-sig"},
+                        {"type": "redacted_thinking", "data": "enc"},
+                        {"type": "text", "text": "a1"},
+                    ],
+                },
+            ],
+        }
+        repaired = _strip_thinking_from_body(original)
+        assert repaired is not None
+        assert repaired["messages"][1]["content"] == [{"type": "text", "text": "a1"}]
+        assert len(original["messages"][1]["content"]) == 3
+
+    def test_session_affinity_key_and_sticky_failover(self):
+        from app.routes.gateway import (
+            _bind_sticky_account,
+            _extract_session_affinity_key,
+            _get_sticky_account,
+            _session_affinity,
+        )
+        from app.store import store
+
+        _session_affinity.clear()
+
+        b_turn1 = {
+            "model": "GLM-5.3",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hello session cache"}]}],
+        }
+        key1, sticky1 = _extract_session_affinity_key("zai", b_turn1, {})
+        assert key1 is not None and key1.startswith("zai:pfx:")
+        assert sticky1 is False
+
+        b_turn2 = {
+            "model": "GLM-5.3",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Hello session cache"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "Hi!"}]},
+                {"role": "user", "content": [{"type": "text", "text": "Follow up question"}]},
+            ],
+        }
+        key2, sticky2 = _extract_session_affinity_key("zai", b_turn2, {})
+        assert key2 == key1
+        assert sticky2 is True
+
+        key_hdr, sticky_hdr = _extract_session_affinity_key("zai", b_turn1, {"X-Session-ID": "sess-xyz"})
+        assert key_hdr == "zai:sid:sess-xyz"
+        assert sticky_hdr is True
+
+        acc1 = store.add_account("zai", "sticky-acc-1", "sk-sticky-test-1")
+        acc2 = store.add_account("zai", "sticky-acc-2", "sk-sticky-test-2")
+        try:
+            _bind_sticky_account(key1, acc1.id)
+            chosen = _get_sticky_account("zai", key1, set(), limit=0)
+            assert chosen is not None and chosen.id == acc1.id
+
+            assert _get_sticky_account("zai", key1, {acc1.id}, limit=0) is None
+            acc1.status = Status.DISABLED
+            assert _get_sticky_account("zai", key1, set(), limit=0) is None
+        finally:
+            store.remove_account("zai", acc1.id)
+            store.remove_account("zai", acc2.id)
+            _session_affinity.clear()
+
+
+@pytest.mark.integration
+class TestGatewayCrossChunkAnd200BusinessErrors:
+    async def test_messages_nonstream_records_tokens(self, gateway_client, fresh_app):
+        client, _mock = gateway_client
+        from app import reqlog
+        from tests.conftest import seed_account
+
+        reqlog.clear()
+        seed_account(fresh_app, "hTok.eyJzdWIiOiJ0b2sifQ.sig", name="tok-nonstream")
+        res = await client.post("/v1/messages", json={
+            "model": "GLM-5.3-Flash",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}],
+        })
+        assert res.status_code == 200
+        snap = reqlog.snapshot()
+        assert snap[0]["input_tokens"] == 10
+        assert snap[0]["output_tokens"] == 5
+
+    async def test_upstream_to_streaming_extracts_tokens_across_tiny_chunks(self):
+        from app import reqlog
+        from app.routes.gateway import _Upstream
+
+        reqlog.clear()
+        req_id = "chunktest1"
+        reqlog.begin(req_id, "messages", "GLM-5.3-Flash", True, "hi")
+
+        sse_bytes = (
+            b'event: message_start\n'
+            b'data: {"type":"message_start","message":{"id":"m1","usage":{"input_tokens":42}}}\n\n'
+            b'event: content_block_delta\n'
+            b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n'
+            b'event: message_delta\n'
+            b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":19}}\n\n'
+        )
+
+        class _ChunkedResp:
+            status_code = 200
+            headers = {"content-type": "text/event-stream"}
+
+            async def aiter_bytes(self):
+                for i in range(0, len(sse_bytes), 7):
+                    yield sse_bytes[i:i + 7]
+
+        class _DummyCM:
+            async def __aexit__(self, *args):
+                return False
+
+        up = _Upstream(_ChunkedResp(), _DummyCM(), None, t_first=0.01)
+        streaming_resp = up.to_streaming(req_id)
+        collected = b"".join([chunk async for chunk in streaming_resp.body_iterator])
+        assert collected == sse_bytes
+
+        snap = reqlog.snapshot()
+        assert snap[0]["ok"] is True
+        assert snap[0]["input_tokens"] == 42
+        assert snap[0]["output_tokens"] == 19
+
+    async def test_try_account_intercepts_http_200_exhaust_and_concurrency_and_thinking_retry(
+        self, fresh_app, monkeypatch
+    ):
+        from app.routes import gateway as gateway_module
+        from app.routes.gateway import _NEXT_ACCOUNT, _Upstream, _try_account
+
+        acc1 = fresh_app.add_account("zai", "acc-200-exhaust", "h1.eyJzdWIiOiIxIn0.sig")
+        acc2 = fresh_app.add_account("zai", "acc-3008-conc", "h2.eyJzdWIiOiIyIn0.sig")
+        acc3 = fresh_app.add_account("zai", "acc-think-retry", "h3.eyJzdWIiOiIzIn0.sig")
+
+        sleep_calls: list[float] = []
+
+        async def _no_sleep(secs: float):
+            sleep_calls.append(secs)
+
+        monkeypatch.setattr(gateway_module, "_sleep", _no_sleep)
+        monkeypatch.setattr(gateway_module, "_safe_refresh", lambda acc: _no_sleep(0))
+
+        sent_payloads: list[dict] = []
+        responses: list[tuple[int, dict]] = []
+
+        class _FakeResp:
+            def __init__(self, status_code: int, payload_dict: dict):
+                self.status_code = status_code
+                self.headers = {"content-type": "application/json"}
+                self._raw = json.dumps(payload_dict).encode("utf-8")
+
+            async def aread(self) -> bytes:
+                return self._raw
+
+        class _FakeCM:
+            def __init__(self, resp: _FakeResp):
+                self.resp = resp
+                self.exits = 0
+
+            async def __aenter__(self):
+                return self.resp
+
+            async def __aexit__(self, *args):
+                self.exits += 1
+                return False
+
+        class _FakeClient:
+            def stream(self, method: str, url: str, headers: dict, content: bytes):
+                sent_payloads.append(json.loads(content))
+                st, body_dict = responses.pop(0)
+                return _FakeCM(_FakeResp(st, body_dict))
+
+        fake_client = _FakeClient()
+        monkeypatch.setattr(gateway_module, "_get_shared_client", lambda: fake_client)
+
+        responses.append((200, {"code": 1005, "msg": "package expired"}))
+        r1 = await _try_account("r1", acc1, {"model": "GLM-5.3", "messages": []}, {}, 3000, False)
+        assert r1 is _NEXT_ACCOUNT
+        assert acc1.status == Status.EXHAUSTED
+
+        sleep_calls.clear()
+        responses.append((200, {"code": 3008, "msg": "concurrency limit"}))
+        r2 = await _try_account("r2", acc2, {"model": "GLM-5.3", "messages": []}, {}, 3000, False)
+        assert r2 is _NEXT_ACCOUNT
+        assert sleep_calls == []
+        assert acc2.status == Status.ACTIVE
+
+        responses.append((400, {"error": {"message": "Invalid signature in thinking block"}}))
+        responses.append((200, {
+            "type": "message",
+            "content": [{"type": "text", "text": "repaired ok"}],
+            "usage": {"input_tokens": 8, "output_tokens": 4},
+        }))
+        body_with_thinking = {
+            "model": "GLM-5.3",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "old", "signature": "sig-bad"},
+                        {"type": "text", "text": "prev"},
+                    ],
+                },
+            ],
+        }
+        sent_payloads.clear()
+        r3 = await _try_account("r3", acc3, body_with_thinking, {}, 3000, False)
+        assert isinstance(r3, _Upstream)
+        assert len(sent_payloads) == 2
+        assert sent_payloads[0]["messages"][1]["content"][0]["type"] == "thinking"
+        assert sent_payloads[1]["messages"][1]["content"] == [{"type": "text", "text": "prev", "cache_control": {"type": "ephemeral"}}]
+        await r3.close()

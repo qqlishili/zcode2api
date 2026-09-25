@@ -7,9 +7,12 @@ openai_compat 做双向格式转换，调度与错误处理策略完全一致。
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import json
 import secrets
 import time
+import weakref
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -27,6 +30,29 @@ from ..store import store
 _sleep = asyncio.sleep  # 模块级引用：测试可 patch 此名而免污染全局 asyncio
 
 router = APIRouter()
+_SHARED_CLIENTS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    loop = asyncio.get_running_loop()
+    client = _SHARED_CLIENTS.get(loop)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=30.0, read=None, write=120.0, pool=30.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=120.0),
+        )
+        _SHARED_CLIENTS[loop] = client
+    return client
+
+
+async def close_shared_client() -> None:
+    loop = asyncio.get_running_loop()
+    client = _SHARED_CLIENTS.pop(loop, None)
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
 
 MAX_CAPTCHA_RETRIES = 3
 MAX_ACCOUNT_ATTEMPTS = 5
@@ -36,12 +62,114 @@ MODEL_NAME_MAP = constants.MODEL_NAME_MAP
 AVAILABLE_MODELS = constants.AVAILABLE_MODELS
 _EXHAUST_KEYWORDS = constants.EXHAUST_KEYWORDS
 
+# 对齐官方 ZCode zcode-builtin.json (rev 30) 与 model-execution.ts 的模型思考等级矩阵
+_EFFORT_MODELS_53 = {"GLM-5.3", "GLM-5.3-FLASH"}
+_EFFORT_MODELS_52 = {"GLM-5.2"}
+
 
 def _detect_provider(body: dict, headers) -> str:
     model = body.get("model") or ""
     if model.startswith("bigmodel/") or headers.get("x-provider") == "bigmodel":
         return "bigmodel"
     return "zai"
+
+
+def _normalize_thinking_for_model(body: dict, model: str | None) -> None:
+    """按官方 ZCode zcode-builtin.json 思考契约归一化 thinking 与 output_config.effort。
+
+    - GLM-5.3 / GLM-5.3-Flash：thinking_mode="effort"，仅支持 ["low", "high", "max"]
+      （客户端若发 "medium"/"minimal"/"xhigh" 或 budget_tokens，自动折叠到合法档位）
+    - GLM-5.2：thinking_mode="effort"，仅支持 ["disabled", "high", "max"]
+    - 其它 GLM 模型（GLM-5-Turbo / GLM-5.1 / GLM-4.7）：thinking_mode="enable"，
+      不支持 output_config.effort，剥离 effort 并转为 thinking.type = enabled/disabled。
+    """
+    if not isinstance(model, str):
+        return
+    model_up = model.strip().upper()
+    if not model_up.startswith("GLM-"):
+        return
+
+    thinking = body.get("thinking")
+    out_cfg = body.get("output_config")
+    effort: str | None = None
+    if isinstance(out_cfg, dict) and isinstance(out_cfg.get("effort"), str):
+        effort = out_cfg["effort"].strip().lower()
+
+    # Anthropic 标准 budget_tokens → 转换为 effort 档位并移除 budget_tokens（GLM 上游不支持 budget_tokens）
+    if isinstance(thinking, dict) and "budget_tokens" in thinking:
+        raw_bt = thinking.pop("budget_tokens", None)
+        try:
+            bt = int(float(raw_bt)) if raw_bt is not None and not isinstance(raw_bt, bool) else 0
+        except (TypeError, ValueError):
+            bt = 0
+        if effort is None and bt > 0:
+            if bt < 8192:
+                effort = "low"
+            elif bt <= 24576:
+                effort = "high"
+            else:
+                effort = "max"
+        if thinking.get("type") not in ("enabled", "disabled"):
+            thinking["type"] = "enabled"
+
+    if model_up in _EFFORT_MODELS_53:
+        if effort is not None:
+            if effort in ("disabled", "off"):
+                body["thinking"] = {"type": "disabled"}
+                if isinstance(out_cfg, dict):
+                    out_cfg.pop("effort", None)
+                    if not out_cfg:
+                        body.pop("output_config", None)
+                return
+            if effort in ("minimal", "none", "low"):
+                mapped = "low"
+            elif effort in ("xhigh", "max"):
+                mapped = "max"
+            else:
+                # medium / high / enabled / adaptive 统一归并到官方支持的 high
+                mapped = "high"
+            new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+            new_cfg["effort"] = mapped
+            body["output_config"] = new_cfg
+            body["thinking"] = {"type": "enabled"}
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            if t_type == "disabled":
+                body["thinking"] = {"type": "disabled"}
+            elif t_type in ("enabled", "adaptive"):
+                body["thinking"] = {"type": "enabled"}
+    elif model_up in _EFFORT_MODELS_52:
+        if effort is not None:
+            if effort in ("disabled", "none", "off"):
+                body["thinking"] = {"type": "disabled"}
+                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+                new_cfg["effort"] = "disabled"
+                body["output_config"] = new_cfg
+            else:
+                mapped = "max" if effort in ("xhigh", "max") else "high"
+                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+                new_cfg["effort"] = mapped
+                body["output_config"] = new_cfg
+                body["thinking"] = {"type": "enabled"}
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
+    else:
+        # GLM-5-Turbo / GLM-5.1 / GLM-4.7：仅支持 thinking: {type: enabled|disabled}，剥离 output_config.effort
+        if isinstance(out_cfg, dict) and "effort" in out_cfg:
+            out_cfg = dict(out_cfg)
+            out_cfg.pop("effort", None)
+            if out_cfg:
+                body["output_config"] = out_cfg
+            else:
+                body.pop("output_config", None)
+        if effort is not None and not isinstance(thinking, dict):
+            body["thinking"] = {
+                "type": "disabled" if effort in ("disabled", "none", "off") else "enabled"
+            }
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
 
 
 def _normalize_body(body: dict) -> dict:
@@ -65,6 +193,8 @@ def _normalize_body(body: dict) -> dict:
                 logs.warn("gateway", f"max_tokens {mt} 超出上游范围 [1,{constants.MAX_TOKENS_LIMIT}]，钳制为 {clamped}")
             body["max_tokens"] = clamped
 
+    _normalize_thinking_for_model(body, model if isinstance(model, str) else None)
+
     messages = body.get("messages")
     if isinstance(messages, list):
         bridged = []
@@ -77,17 +207,45 @@ def _normalize_body(body: dict) -> dict:
     return body
 
 
+def _extract_business_code(text: str, data: dict | None = None) -> tuple[str | None, str]:
+    """提取上游 JSON 响应中的业务错误码（如 1005/1006/1302/3002/3007/3008/3012）。"""
+    parsed = data if isinstance(data, dict) else _safe_json(text)
+    if not isinstance(parsed, dict):
+        return None, ""
+    # 正常 Anthropic message 响应不是业务错误
+    if parsed.get("type") == "message":
+        return None, ""
+
+    raw_code = parsed.get("code")
+    err_obj = parsed.get("error")
+    if raw_code is None and isinstance(err_obj, dict):
+        raw_code = err_obj.get("code") or err_obj.get("type")
+
+    code_str = str(raw_code).strip() if raw_code is not None else None
+    msg_parts: list[str] = []
+    for k in ("msg", "message"):
+        v = parsed.get(k)
+        if isinstance(v, str) and v.strip():
+            msg_parts.append(v.strip())
+    if isinstance(err_obj, dict):
+        for k in ("message", "msg", "type"):
+            v = err_obj.get(k)
+            if isinstance(v, str) and v.strip():
+                msg_parts.append(v.strip())
+    return code_str, " ".join(msg_parts)
+
+
 def _is_captcha_error(text: str) -> bool:
     low = text.lower()
     return "captcha" in low or "verify token" in low or "verify failed" in low
 
 
 def _detect_captcha_challenge(resp: httpx.Response, text: str | None = None) -> str | None:
-    """验证码挑战双检测（对齐 zapi handler.ts）。
+    """验证码挑战检测（对齐 zapi handler.ts 与 ZCode failure-provider-business-codes.ts）。
 
     三种形态：
       1. 响应头 x-aliyun-captcha-verify-param 存在（官方挑战信号）
-      2. HTTP 400/403 + body {"code":3007}（2026-08 观测的 body 内挑战）
+      2. body 含业务码 3007（无论 HTTP 200/400/403）
       3. HTTP 403 + 文案 captcha/verify（老检测，保留兼容）
     返回挑战标记（非 None 即挑战），否则 None。
     """
@@ -100,8 +258,11 @@ def _detect_captcha_challenge(resp: httpx.Response, text: str | None = None) -> 
         return None
     low = text.lower()
 
-    # 2) body code 3007（400/403 任意状态）
-    if resp.status_code in (400, 403) and any(m in text for m in constants.CAPTCHA_BODY_MARKERS):
+    # 2) body code 3007（支持 HTTP 200/400/403 任意状态）
+    code, _ = _extract_business_code(text)
+    if code in constants.CAPTCHA_BUSINESS_CODES:
+        return "in-body-3007"
+    if resp.status_code in (200, 400, 403) and any(m in text for m in constants.CAPTCHA_BODY_MARKERS):
         return "in-body-3007"
 
     # 3) 403 + 挑战文案
@@ -118,6 +279,9 @@ def _is_exhausted(status_code: int, text: str) -> bool:
         return False
     if status_code in constants.EXHAUST_HTTP_STATUSES:
         return True
+    code, _ = _extract_business_code(text)
+    if code in constants.EXHAUST_BUSINESS_CODES:
+        return True
     low = text.lower()
     return any(k in low for k in _EXHAUST_KEYWORDS)
 
@@ -126,12 +290,103 @@ def _is_risk_control(status_code: int, text: str) -> bool:
     """风控信号判定（3012「unusual activity」/ messages 端点 405）。
 
     与验证码挑战互斥：调用点已先排除 challenge 形态。命中即账号级风控，
-    需指数退避冷却，而非直接回传客户端错误（会导致下次立刻重打、加剧风控）。
+    直接禁用 Plan 通道（或切 API Key 回退），不做自动退避。
     """
     if status_code in constants.RISK_CONTROL_HTTP_STATUSES:
         return True
+    code, _ = _extract_business_code(text)
+    if code == "3012":
+        return True
     low = text.lower()
     return any(m.lower() in low for m in constants.RISK_CONTROL_MARKERS)
+
+
+def _classify_business_error(status_code: int, resp: httpx.Response, text: str) -> tuple[int, str | None, bool]:
+    """把上游业务错误（含 HTTP 200 包装的业务错误 JSON）归一为标准 HTTP 状态码。
+
+    返回 (effective_status_code, business_code, is_concurrency_limit)。
+    仅当 JSON 明确为非 message 错误结构时才改写 200 状态码，原样保留非 JSON 响应以兼容既有调用方。
+    """
+    data = _safe_json(text)
+    if not isinstance(data, dict) or data.get("type") == "message":
+        return status_code, None, False
+
+    code, _msg = _extract_business_code(text, data)
+    is_err_payload = (
+        (code is not None and code not in ("0", "200"))
+        or data.get("success") is False
+        or data.get("type") == "error"
+        or isinstance(data.get("error"), dict)
+    )
+    if not is_err_payload:
+        return status_code, None, False
+
+    if code == "3012" or _is_risk_control(status_code, text):
+        return 405, code or "3012", False
+    if code in constants.CAPTCHA_BUSINESS_CODES or _detect_captcha_challenge(resp, text):
+        return (status_code if status_code in (400, 403) else 403), code or "3007", False
+    if code in constants.EXHAUST_BUSINESS_CODES:
+        return 402, code, False
+    if code in constants.AUTH_INVALID_BUSINESS_CODES:
+        return 401, code, False
+    if code in constants.CONCURRENCY_LIMIT_BUSINESS_CODES:
+        return 429, code, True
+    if code in constants.RATE_LIMIT_BUSINESS_CODES:
+        return 429, code, False
+    if code in constants.SERVER_ERROR_BUSINESS_CODES:
+        return (status_code if status_code >= 500 else 500), code, False
+    if status_code < 400:
+        return 400, code, False
+    return status_code, code, False
+
+
+def _is_thinking_signature_rejection(status_code: int, text: str) -> bool:
+    """判定是否为 Anthropic/GLM 历史消息 thinking 块签名/格式不兼容导致的 400 拒绝。
+
+    对齐官方 ZCode src/main/agent/runtime/reasoning-history-normalization.ts。
+    """
+    if status_code != 400 or not text:
+        return False
+    low = text.lower()
+    if "thinking" not in low and "redacted_thinking" not in low:
+        return False
+    markers = (
+        "signature",
+        "invalid",
+        "unsupported",
+        "not supported",
+        "malformed",
+        "corrupted",
+        "cannot be modified",
+        "must match",
+    )
+    return any(m in low for m in markers)
+
+
+def _strip_thinking_from_body(body: dict) -> dict | None:
+    """深拷贝 body 并剥离历史 assistant 消息中的 thinking / redacted_thinking 块。
+
+    若未发现任何可剥离的 thinking 块则返回 None（避免无意义的重复请求）。
+    """
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    cloned = copy.deepcopy(body)
+    stripped = False
+    for msg in cloned.get("messages") or []:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        kept = [
+            b for b in content
+            if not (isinstance(b, dict) and b.get("type") in ("thinking", "redacted_thinking"))
+        ]
+        if len(kept) != len(content):
+            stripped = True
+            msg["content"] = kept or [{"type": "text", "text": ""}]
+    return cloned if stripped else None
 
 
 def _parse_retry_after(value: str | None) -> int | None:
@@ -274,7 +529,7 @@ async def chat_completions(request: Request):
             raise
 
     try:
-        raw = await result.resp.aread()
+        raw = await result.aread()
         logs.req_ok(req_id)
     except asyncio.CancelledError:
         reqlog.finish_error(req_id, "客户端断开", status=499, t_first=result.t_first)
@@ -330,8 +585,121 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
                              headers={"Cache-Control": "no-cache"})
 
 
+# ── 会话亲和路由（保上游 ephemeral 缓存命中；冷却/满并发自动降级轮询）──────────
+_SESSION_AFFINITY_TTL = 900.0
+_SESSION_AFFINITY_MAX_SIZE = 2048
+_session_affinity: dict[str, tuple[str, float]] = {}
+
+
+def _extract_session_affinity_key(
+    provider: str,
+    body: dict,
+    incoming_headers: dict | None = None,
+) -> tuple[str | None, bool]:
+    """提取会话亲和键 (affinity_key, prefer_sticky)。
+
+    显式 session header / metadata 首轮即粘性；未显式指定时按首条非 system 消息
+    哈希派生，首轮走 round-robin 分散落号并记绑定，次轮起固定同号以命中上游缓存。
+    """
+    if isinstance(incoming_headers, dict):
+        lower_headers = {str(k).lower(): v for k, v in incoming_headers.items() if isinstance(k, str)}
+        for hk in ("x-session-id", "x-conversation-id", "x-claude-code-session-id"):
+            val = lower_headers.get(hk)
+            if isinstance(val, str) and val.strip():
+                return f"{provider}:sid:{val.strip()[:128]}", True
+
+    meta = body.get("metadata") if isinstance(body, dict) else None
+    if isinstance(meta, dict):
+        raw_sid = meta.get("session_id")
+        if isinstance(raw_sid, str) and raw_sid.strip():
+            return f"{provider}:sid:{raw_sid.strip()[:128]}", True
+        raw_uid = meta.get("user_id")
+        if isinstance(raw_uid, str) and raw_uid.strip():
+            uid_str = raw_uid.strip()
+            if uid_str.startswith("{"):
+                try:
+                    parsed = json.loads(uid_str)
+                    if isinstance(parsed, dict) and isinstance(parsed.get("session_id"), str) and parsed["session_id"].strip():
+                        return f"{provider}:sid:{parsed['session_id'].strip()[:128]}", True
+                except (ValueError, TypeError):
+                    pass
+            return f"{provider}:sid:{uid_str[:128]}", True
+
+    messages = body.get("messages") if isinstance(body, dict) else None
+    if not isinstance(messages, list):
+        return None, False
+    non_sys = [m for m in messages if isinstance(m, dict) and m.get("role") != "system"]
+    if not non_sys:
+        return None, False
+
+    first_content = non_sys[0].get("content")
+    first_text = ""
+    if isinstance(first_content, str):
+        first_text = first_content.strip()
+    elif isinstance(first_content, list):
+        parts: list[str] = []
+        for b in first_content:
+            if isinstance(b, dict) and isinstance(b.get("text"), str) and b["text"].strip():
+                parts.append(b["text"].strip())
+            elif isinstance(b, str) and b.strip():
+                parts.append(b.strip())
+        first_text = " ".join(parts)
+
+    if not first_text:
+        return None, False
+
+    model_str = str(body.get("model") or "")
+    digest = hashlib.sha256(
+        f"{provider}:{model_str}:{first_text[:512]}".encode("utf-8", "ignore")
+    ).hexdigest()[:24]
+    return f"{provider}:pfx:{digest}", len(non_sys) >= 2
+
+
+def _get_sticky_account(
+    provider: str,
+    affinity_key: str | None,
+    skip_ids: set[str],
+    limit: int,
+) -> Account | None:
+    """查询粘性绑定的账号；若账号已不可用、冷却中或并发已满则返回 None 以触发平滑漂移。"""
+    if not affinity_key:
+        return None
+    entry = _session_affinity.get(affinity_key)
+    if entry is None:
+        return None
+    acc_id, ts = entry
+    now = time.time()
+    if now - ts > _SESSION_AFFINITY_TTL:
+        _session_affinity.pop(affinity_key, None)
+        return None
+    if acc_id in skip_ids:
+        return None
+    acc = store.find(provider, acc_id)
+    if acc is None or not acc.is_selectable(now):
+        return None
+    if limit > 0 and _inflight.get(acc.id, 0) >= limit:
+        return None
+    _session_affinity[affinity_key] = (acc.id, now)
+    return acc
+
+
+def _bind_sticky_account(affinity_key: str | None, account_id: str) -> None:
+    """记录或更新会话粘性绑定的账号 ID（含 TTL 清理与容量淘汰）。"""
+    if not affinity_key or not account_id:
+        return
+    now = time.time()
+    _session_affinity[affinity_key] = (account_id, now)
+    if len(_session_affinity) > _SESSION_AFFINITY_MAX_SIZE:
+        expired = [k for k, (_, ts) in _session_affinity.items() if now - ts > _SESSION_AFFINITY_TTL]
+        for k in expired:
+            _session_affinity.pop(k, None)
+        if len(_session_affinity) > _SESSION_AFFINITY_MAX_SIZE:
+            oldest_key = min(_session_affinity, key=lambda k: _session_affinity[k][1])
+            _session_affinity.pop(oldest_key, None)
+
+
 async def _dispatch(req_id, body, incoming_headers, port, provider):
-    """多账号轮询调度：_Upstream（成功）或 JSONResponse（错误）。
+    """多账号会话粘性亲和 + 轮询故障转移调度：_Upstream（成功）或 JSONResponse（错误）。
 
     单账号并发限制：选号后若该账号在飞请求已达上限（store.account_concurrency，
     0 = 不限），跳过换下一个账号——不排队（流式请求可占槽位数分钟，排队会
@@ -341,9 +709,14 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
     tried: set[str] = set()
     limit = _limit()
     attempts = 0
+    affinity_key, prefer_sticky = _extract_session_affinity_key(provider, body, incoming_headers)
 
     while attempts < MAX_ACCOUNT_ATTEMPTS:
-        account = store.select(provider, skip_ids=tried)
+        account = None
+        if attempts == 0 and prefer_sticky:
+            account = _get_sticky_account(provider, affinity_key, tried, limit)
+        if account is None:
+            account = store.select(provider, skip_ids=tried)
         if account is None:
             break
         tried.add(account.id)
@@ -372,6 +745,7 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
                 slot_box[0] = None
             continue
         if isinstance(result, _Upstream):
+            _bind_sticky_account(affinity_key, account.id)
             held = slot_box[0]
             slot_box[0] = None
             if held is not None:
@@ -380,6 +754,8 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
         if slot_box[0] is not None:
             _release_slot(slot_box[0])
             slot_box[0] = None
+        if isinstance(result, JSONResponse) and result.status_code < 400:
+            _bind_sticky_account(affinity_key, account.id)
         return result
 
     logs.req_err(req_id, "无可用账号 / 额度均已耗尽 / 并发已满")
@@ -449,14 +825,57 @@ def _limit() -> int:
     return store.account_concurrency()
 
 
+def _extract_usage_from_json_bytes(raw_bytes: bytes) -> tuple[int | None, int | None]:
+    data = _safe_json(raw_bytes.decode("utf-8", "ignore"))
+    if not isinstance(data, dict):
+        return None, None
+    usage = data.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    in_tok = usage.get("input_tokens")
+    out_tok = usage.get("output_tokens")
+    return (
+        int(in_tok) if isinstance(in_tok, int) and not isinstance(in_tok, bool) else None,
+        int(out_tok) if isinstance(out_tok, int) and not isinstance(out_tok, bool) else None,
+    )
+
+
+def _extract_sse_line_usage(line_bytes: bytes, in_tok: int | None, out_tok: int | None) -> tuple[int | None, int | None]:
+    line = line_bytes.decode("utf-8", "ignore").strip()
+    if not line.startswith("data:"):
+        return in_tok, out_tok
+    payload_str = line[5:].strip()
+    if not payload_str or payload_str == "[DONE]":
+        return in_tok, out_tok
+    if '"usage"' not in payload_str:
+        return in_tok, out_tok
+    evt = _safe_json(payload_str)
+    if not isinstance(evt, dict):
+        return in_tok, out_tok
+    etype = evt.get("type")
+    if etype == "message_start":
+        u = (evt.get("message") or {}).get("usage")
+        if isinstance(u, dict) and isinstance(u.get("input_tokens"), int):
+            in_tok = int(u["input_tokens"])
+    elif etype == "message_delta":
+        u = evt.get("usage")
+        if isinstance(u, dict) and isinstance(u.get("output_tokens"), int):
+            out_tok = int(u["output_tokens"])
+    return in_tok, out_tok
+
+
 class _Upstream:
     """已建立的上游成功流：由调用方消费并负责关闭。"""
 
-    __slots__ = ("resp", "cm", "client", "t_first", "account_name", "mode", "on_close", "_closed")
+    __slots__ = (
+        "resp", "cm", "client", "t_first", "account_name", "mode",
+        "on_close", "preloaded_bytes", "_cm_closed", "_closed",
+    )
 
     def __init__(self, resp: httpx.Response, cm, client: httpx.AsyncClient,
                  t_first: float | None = None, account_name: str = "", mode: str = "",
-                 on_close=None) -> None:
+                 on_close=None, preloaded_bytes: bytes | None = None,
+                 cm_closed: bool = False) -> None:
         self.resp = resp
         self.cm = cm
         self.client = client
@@ -464,15 +883,23 @@ class _Upstream:
         self.account_name = account_name
         self.mode = mode
         self.on_close = on_close
+        self.preloaded_bytes = preloaded_bytes
+        self._cm_closed = cm_closed
         self._closed = False
+
+    async def aread(self) -> bytes:
+        if self.preloaded_bytes is not None:
+            return self.preloaded_bytes
+        return await self.resp.aread()
 
     async def close(self) -> None:
         """幂等关闭：释放上游流与并发槽位（on_close），重复调用安全。"""
         if self._closed:
             return
         self._closed = True
-        await self.cm.__aexit__(None, None, None)
-        await self.client.aclose()
+        if not self._cm_closed:
+            self._cm_closed = True
+            await self.cm.__aexit__(None, None, None)
         if self.on_close is not None:
             try:
                 self.on_close()
@@ -480,15 +907,33 @@ class _Upstream:
                 pass
 
     def to_streaming(self, req_id: str) -> StreamingResponse:
-        """原样透传（/v1/messages 直通路径）。"""
+        """原样透传（/v1/messages 直通路径），同时旁路提取 input/output tokens 供监控台统计。"""
         up = self
 
         async def _body_iter():
+            in_tok: int | None = None
+            out_tok: int | None = None
             try:
-                async for chunk in up.resp.aiter_bytes():
-                    yield chunk
+                if up.preloaded_bytes is not None:
+                    in_tok, out_tok = _extract_usage_from_json_bytes(up.preloaded_bytes)
+                    yield up.preloaded_bytes
+                else:
+                    line_buf = bytearray()
+                    async for chunk in up.resp.aiter_bytes():
+                        yield chunk
+                        line_buf.extend(chunk)
+                        while b"\n" in line_buf:
+                            idx = line_buf.index(b"\n")
+                            raw_line = bytes(line_buf[:idx])
+                            del line_buf[:idx + 1]
+                            in_tok, out_tok = _extract_sse_line_usage(raw_line, in_tok, out_tok)
+                        if len(line_buf) > 65536:
+                            line_buf.clear()
+                    if line_buf:
+                        in_tok, out_tok = _extract_sse_line_usage(bytes(line_buf), in_tok, out_tok)
                 logs.req_ok(req_id)
-                reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code)
+                reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
+                                 input_tokens=in_tok, output_tokens=out_tok)
             except asyncio.CancelledError:
                 reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
                 raise
@@ -505,24 +950,13 @@ class _Upstream:
 
 async def _try_account(req_id, account, body, incoming_headers, port, needs_captcha,
                        slot_box: list | None = None):
-    """尝试用单个账号转发，含验证码续期与可配置重试。
-
-    错误处理策略（参数见 settings，均可用环境变量调整）：
-      - 验证码挑战：清池换码重建请求，最多 MAX_CAPTCHA_RETRIES 次
-      - 429 频控：**不冷却账号**，按上游 Retry-After（封顶 RETRY_429_WAIT_MAX）
-        或 RETRY_429_WAIT 等待后原地重试，最多 RETRY_429_TIMES 次；
-        耗尽后换下一个账号，账号保持可用。Plan 通道耗尽且有 API Key 时切
-        回退通道重试（force_fallback 显式路由——429 不改账号状态，不能靠
-        status 推导通道；回退通道自己的 429 重试预算独立计满后再换号）
-      - 5xx 等一般错误：重试最多 RETRY_5XX_TIMES 次；耗尽后账号冷却
-        COOLING_SECONDS 并换下一个账号
-      - 风控（3012/405「unusual activity」真封禁）：直接禁用账号（UI 展示），
-        人工确认恢复后手动启用，不做自动退避
-    """
+    """尝试用单个账号转发，含验证码续期、业务错误码分流、历史思考块剥离重试与可配置重试。"""
     captcha_retries = 0
     retries_429 = 0
     retries_5xx = 0
     force_fallback = False  # 本请求瞬态走 Key 回退（不改账号持久化状态）
+    retried_thinking_strip = False
+    attempt_body = body
     model_name = str(body.get("model") or "-")
     while True:
         attempt_t0 = time.time()
@@ -544,7 +978,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 return _NEXT_ACCOUNT
 
         try:
-            url, headers, payload = build_request(account, body, verify_param,
+            url, headers, payload = build_request(account, attempt_body, verify_param,
                                                   incoming_headers, verify_region,
                                                   force_fallback=force_fallback)
         except RuntimeError as err:
@@ -553,12 +987,11 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
             return _NEXT_ACCOUNT
 
-        client = httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=None, write=120.0, pool=30.0))
+        client = _get_shared_client()
         cm = client.stream("POST", url, headers=headers, content=payload)
         try:
             resp = await cm.__aenter__()
         except httpx.HTTPError as err:
-            await client.aclose()
             account.record_result(False, f"连接失败: {err}")
             # 废 JWT / 风控禁用走 Key 回退失败时不得洗成 cooling，否则冷却结束会重开 Plan
             if account.status in (Status.INVALID, Status.DISABLED):
@@ -569,12 +1002,32 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             return _NEXT_ACCOUNT
 
         status_code = resp.status_code
+        content_type = (resp.headers.get("content-type") or "").lower()
+        preloaded_bytes: bytes | None = None
+        cm_closed = False
+        text = ""
+        is_concurrency_limit = False
+
+        if status_code >= 400 or "event-stream" not in content_type:
+            try:
+                preloaded_bytes = await resp.aread()
+            except httpx.HTTPError as err:
+                await cm.__aexit__(None, None, None)
+                account.record_result(False, f"读取响应失败: {err}")
+                if account.status in (Status.INVALID, Status.DISABLED):
+                    store.update_account(account)
+                else:
+                    _mark(account, Status.COOLING, f"读取响应失败: {err}")
+                logs.warn(req_id, f"账号 {account.name} 读取响应失败，切换下一个")
+                return _NEXT_ACCOUNT
+            await cm.__aexit__(None, None, None)
+            cm_closed = True
+            text = preloaded_bytes.decode("utf-8", "ignore")
+            status_code, _biz_code, is_concurrency_limit = _classify_business_error(
+                status_code, resp, text,
+            )
 
         if status_code >= 400:
-            text = (await resp.aread()).decode("utf-8", "ignore")
-            await cm.__aexit__(None, None, None)
-            await client.aclose()
-
             # 验证码挑战：三形态任一命中即清池重试（不改账号状态）
             challenge = _detect_captcha_challenge(resp, text) if needs_captcha else None
             if challenge:
@@ -647,10 +1100,8 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 return _NEXT_ACCOUNT
 
             if status_code == 429:
-                # 频控不是账号故障：不冷却，原地等一等再试，耗尽后换号且账号保持可用。
-                # Plan 通道耗尽 ≠ Key 回退也耗尽：同账号切回退并归还该通道的重试预算
-                #（与上方 3012/401/403 切回退同一语义）
-                if retries_429 < settings.RETRY_429_TIMES:
+                # 并发上限类错误码（3008/3009/3010）：立即走 API Key 回退或换下一个账号，不在原地干等
+                if not is_concurrency_limit and retries_429 < settings.RETRY_429_TIMES:
                     retries_429 += 1
                     wait = _parse_retry_after(resp.headers.get("retry-after")) or settings.RETRY_429_WAIT
                     logs.warn(
@@ -671,12 +1122,14 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     force_fallback = True
                     retries_429 = 0
                     continue
-                account.record_result(False, f"429 重试 {settings.RETRY_429_TIMES} 次耗尽")
+                reason_msg = "并发上限 429，立即切换下一个" if is_concurrency_limit else (
+                    f"429 重试 {settings.RETRY_429_TIMES} 次耗尽"
+                )
+                account.record_result(False, reason_msg)
                 store.update_account(account)
                 logs.warn(
                     req_id,
-                    f"账号 {account.name} 429 重试 {settings.RETRY_429_TIMES} 次耗尽，"
-                    f"切换下一个（账号保持可用）",
+                    f"账号 {account.name} {reason_msg}，切换下一个（账号保持可用）",
                 )
                 return _NEXT_ACCOUNT
 
@@ -709,6 +1162,15 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     logs.warn(req_id, f"账号 {account.name} 上游 {status_code} 重试耗尽，冷却 {cool}s，切换下一个")
                 return _NEXT_ACCOUNT
 
+            # 历史 assistant 消息 thinking 签名/格式不兼容（400）：自动剥离历史 thinking 块重试一次
+            if not retried_thinking_strip and _is_thinking_signature_rejection(status_code, text):
+                repaired = _strip_thinking_from_body(attempt_body)
+                if repaired is not None:
+                    retried_thinking_strip = True
+                    attempt_body = repaired
+                    logs.warn(req_id, f"账号 {account.name} 上游拒绝历史 thinking 签名，剥离历史 thinking 块后原地重试")
+                    continue
+
             # 其它 4xx：直接回传客户端；响应体全量落日志供排查
             # （错误 JSON 通常很小；防御性上限 4KB，超长按 HTML 类 WAF 页处理只留头部）
             account.fail_count += 1
@@ -739,7 +1201,8 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
         _spawn_bg(_safe_refresh(account))
 
         return _Upstream(resp, cm, client, t_first=time.time() - attempt_t0,
-                         account_name=account.name, mode=account.mode)
+                         account_name=account.name, mode=account.mode,
+                         preloaded_bytes=preloaded_bytes, cm_closed=cm_closed)
 
 
 def _safe_json(text: str):
