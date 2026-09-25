@@ -1,6 +1,6 @@
 # 01 — 总体架构
 
-状态：与 2.5.11 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
+状态：与 2.5.12 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
 
 ## 1. 系统定位
 
@@ -86,7 +86,7 @@ zcode-hub/
 
 ```
 client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
-   1. store.select 取号（round-robin；跳过 exhausted / 冷却中 / 手动停用；
+   1. 选号：优先命中同会话粘性绑定账号（保上游 ephemeral 缓存），不可用/首轮则走 store.select（round-robin；跳过 exhausted / 冷却中 / 手动停用；
       JWT invalid/风控 disabled 仅当同账号有 API Key 回退时可选）
    2. 并发槽：该号在飞 ≥ account_concurrency 则跳号（不排队；跳过不计 attempt）
    3. 构建上游请求（每账号指纹 + 透传头过滤 + Plan/Key 通道）
