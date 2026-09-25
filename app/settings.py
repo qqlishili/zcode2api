@@ -56,7 +56,7 @@ DEFAULT_ADMIN_KEY = os.getenv("ZCODE_ADMIN_KEY", "zcode")
 # 预解 token 池（对齐 zapi captcha.ts：热路径从池直取，后台循环补库存）
 CAPTCHA_POOL_MIN = _int("CAPTCHA_POOL_MIN", 3)        # 目标库存（低于则补）
 CAPTCHA_POOL_MAX = _int("CAPTCHA_POOL_MAX", 10)       # 池上限
-CAPTCHA_TOKEN_TTL = _int("CAPTCHA_TOKEN_TTL", 95_000) # 单枚 token 最大可用时长（ms；上游实际 ~2min）
+CAPTCHA_TOKEN_TTL = _int("CAPTCHA_TOKEN_TTL", 75_000) # 单枚 token 最大可用时长（ms；上游实际 ~2min）
 CAPTCHA_CONFIG_CACHE_TTL = _int("CAPTCHA_CONFIG_CACHE_TTL", 600_000)  # ms
 
 # 验证码求解（无浏览器：Node + jsdom 模拟浏览器环境，运行阿里云无痕 SDK）
@@ -103,7 +103,7 @@ OAUTH_API_BASE = os.getenv("ZCODE_OAUTH_API_BASE", constants.ZCODE_ORIGIN + "/ap
 ZAI_EXCHANGE_ORIGIN = os.getenv("ZCODE_EXCHANGE_ORIGIN", constants.ZAI_API_ORIGIN)
 
 USER_AGENT = os.getenv("UPSTREAM_USER_AGENT", constants.USER_AGENT)
-APP_VERSION = "2.5.11"
+APP_VERSION = "2.5.12"
 
 _FRONTEND_VERSION_FILE = FRONTEND_DIR / "version"
 

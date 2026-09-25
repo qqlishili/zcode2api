@@ -261,7 +261,7 @@ function renderStats(s){
     });
   });
   set('s-quota',fmtNum(totalRem));
-  document.getElementById('s-quota').title='日窗口余额 + 已生效一次性活动赠送（赠送池按授权量计入，上游不提供实际剩余）';
+  document.getElementById('s-quota').title=`精确剩余：${Math.round(totalRem).toLocaleString('zh-CN')} tokens · 日窗口余额 + 已生效一次性活动赠送（赠送池按授权量计入，上游不提供实际剩余）`;
 }
 
 function renderFilters(){
@@ -381,13 +381,19 @@ function quotaCell(a){
   const keys=Object.keys(q);
   let rows=keys.map(k=>{
     const w=q[k]||{};const rem=Number(w.remaining)||0,tot=Number(w.total)||0;
-    const pct=tot>0?Math.max(0,Math.min(100,Math.round(rem/tot*100))):0;
-    const color=rem<=0?'var(--ink-mute)':(pct<15?'var(--amber)':'var(--mint)');
+    const rawPct=tot>0?Math.max(0,Math.min(100,(rem/tot)*100)):0;
+    const pctRound=Math.round(rawPct*10)/10;
+    const pctStr=rawPct>0&&rawPct<100?(Number.isInteger(pctRound)?pctRound+'%':rawPct.toFixed(1)+'%'):Math.round(rawPct)+'%';
+    const color=(rem<=0||rawPct<15)?'var(--red)':(rawPct<50?'var(--amber)':'var(--mint)');
     const exp=Number(w.expires_at)||0;
+    const rawTip=`剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${rawPct.toFixed(2)}%)`;
     return `<div class="quota-row">
       <span class="quota-row-name" title="${esc(k)}">${esc(shortModel(k))}</span>
-      <span class="quota-row-track"><span class="quota-row-fill" style="width:${pct}%;background:${color}"></span></span>
-      <span class="quota-row-val"><span>${fmtNum(rem)} / ${fmtNum(tot)}</span>${exp?`<span class="quota-row-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>`:''}</span>
+      <span class="quota-row-bar-wrap" title="${rawTip}">
+        <span class="quota-row-pct" style="color:${color}"><span>${pctStr}</span><span>剩余 ${fmtNum(rem)}</span></span>
+        <span class="quota-row-track"><span class="quota-row-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></span></span>
+      </span>
+      <span class="quota-row-val" title="${rawTip}"><span>${fmtNum(rem)} / ${fmtNum(tot)}</span>${exp?`<span class="quota-row-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>`:''}</span>
     </div>`;
   });
   // 活动额度（plan.entitlements）：
@@ -407,7 +413,10 @@ function quotaCell(a){
     const tip=`活动赠送 ${fmtNum(e.grant_units)} · ${fmtDate(eff)} 生效${ends?'，'+fmtDate(ends)+' 结束（按套餐有效期）':''} · 实际剩余以上游账单为准`;
     rows.push(`<div class="quota-row is-bonus">
       <span class="quota-row-name" title="${tip}">${esc(shortModel(e.show_name||'活动额度'))}</span>
-      <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
+      <span class="quota-row-bar-wrap" title="${tip}">
+        <span class="quota-row-pct" style="color:var(--mint)"><span>100%</span><span>剩余 ${fmtNum(e.grant_units)}</span></span>
+        <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
+      </span>
       <span class="quota-row-val"><span>+${fmtNum(e.grant_units)}</span><span class="quota-row-exp" title="${tip}">${endTxt}</span></span>
     </div>`);
   });
@@ -416,13 +425,15 @@ function quotaCell(a){
     const tip=`${esc(e._planName||'')} · ${fmtDate(eff)} 起生效${e._planEnds?'，套餐 '+fmtDate(e._planEnds)+' 结束':''}`;
     rows.push(`<div class="quota-row is-pending">
       <span class="quota-row-name" title="${tip}">${esc(shortModel(e.show_name||'待生效'))}</span>
-      <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
+      <span class="quota-row-bar-wrap" title="${tip}">
+        <span class="quota-row-pct" style="color:var(--amber)"><span>待生效</span><span>+${fmtNum(e.grant_units)}</span></span>
+        <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
+      </span>
       <span class="quota-row-val"><span>+${fmtNum(e.grant_units)}</span><span class="quota-row-exp" title="${tip}">${e.period==='one_time'?'一次性':'每'+(e.period||'')} · ${fmtDate(eff)} 生效</span></span>
     </div>`);
   });
   if(!rows.length){
     if(a.mode!=='jwt')return '<span class="quota-empty">—</span>';
-    // 区分「没取到数据」与「上游确实没有套餐」：后者刷新永远无效，给出正确指引
     return planList(a).length===0
       ?'<span class="quota-empty" title="上游 billing/current 返回空套餐列表：可能套餐未开通，或新账号试用额度未列入 billing（不影响路由使用，以实际请求结果为准）">无套餐数据 · billing 为空</span>'
       :'<span class="quota-empty">额度未获取，点右上角刷新</span>';
@@ -430,12 +441,12 @@ function quotaCell(a){
   return '<div class="quota-rows">'+rows.join('')+'</div>';
 }
 function shortModel(n){return String(n).replace(/^GLM[- ]?/i,'GLM-')||n;}
-/* 万/亿 缩写（zcode-switch 同款） */
+/* M 缩写（百万 token，保留两位小数） */
 function fmtNum(v){
   const n=Number(v);if(!isFinite(n))return '—';
-  if(Math.abs(n)>=1e8)return (n/1e8).toFixed(2)+' 亿';
-  if(Math.abs(n)>=1e4)return (n/1e4).toFixed(2)+' 万';
-  return n.toLocaleString('zh-CN',{maximumFractionDigits:2});
+  if(n===0)return '0.00 M';
+  if(Math.abs(n)>=1e4)return (n/1e6).toFixed(2)+' M';
+  return (n/1e6).toFixed(4)+' M';
 }
 
 /* ── Actions ── */
