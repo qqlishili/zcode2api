@@ -1,6 +1,6 @@
 # 04 — API 规范
 
-状态：与 2.5.12 实现对齐。对外网关只有 Anthropic Messages、OpenAI Chat Completions、`/v1/models`；**没有** `/v1/responses`。
+状态：与当前实现对齐。对外网关提供 Anthropic Messages（`/v1/messages`）、OpenAI Chat Completions（`/v1/chat/completions`）、OpenAI Responses（`/v1/responses`）与 `/v1/models`。
 
 所有管理端点挂 `/admin/api/*`，需 `Authorization: Bearer <后台密码>`（连续失败达上限后 429 锁 5 分钟）；网关端点按「网关 Key」配置可选鉴权（`Authorization: Bearer` 或 `x-api-key`，未配置即放行——生产必须配置）。
 
@@ -25,6 +25,11 @@
 
 - 入站 OpenAI Chat 格式 → 翻译为 Anthropic 上游 → 翻译回 OpenAI 响应；`stream:true` 逐块翻译。
 - usage/tool_calls 映射规则以移植对照表为准（`openai_compat.py`）。
+
+### 1.4 `POST /v1/responses`（OpenAI Responses / Codex 兼容）
+
+- 入站 OpenAI Responses 格式（`input` 字符串或多态 Item 数组、`instructions`、`tools`、`reasoning.effort`、`prompt_cache_key`）→ 直转为 Anthropic `messages` 上游 → 翻译回 `object: "response"` 或 `event: response.*` SSE 事件流（`responses_compat.py`）。
+- 网关保持无状态：多轮历史 `reasoning.encrypted_content` 与 Anthropic `thinking.signature` 双向透明回显；流式异常中断补发 `event: response.failed` 终态帧。
 
 ### 1.6 错误格式
 
