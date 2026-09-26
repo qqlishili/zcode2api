@@ -29,6 +29,8 @@
 ### 1.4 `POST /v1/responses`（OpenAI Responses / Codex 兼容）
 
 - 入站 OpenAI Responses 格式（`input` 字符串或多态 Item 数组、`instructions`、`tools`、`reasoning.effort`、`prompt_cache_key`）→ 直转为 Anthropic `messages` 上游 → 翻译回 `object: "response"` 或 `event: response.*` SSE 事件流（`responses_compat.py`）。
+- 模型别名自动归一化：支持 Codex 客户端后台自检专用模型名 `codex-auto-review` 自动映射至 `GLM-5.3-Flash`，避免上游 3006（model not allowed）拒收。
+- 流式首字节立发（TTFT 破除真空）：进入上游循环前立即向客户端 `yield conv.start()` 发送 `response.created` 与 `response.in_progress` 并提交 HTTP 200 Headers，彻底消除长推理或验证码求解期间（5~20s）的零字节静默，避免客户端超时 abort（499 客户端断开与惊群重试雪崩）。
 - 网关保持无状态：多轮历史 `reasoning.encrypted_content` 与 Anthropic `thinking.signature` 双向透明回显；流式异常中断补发 `event: response.failed` 终态帧。
 
 ### 1.6 错误格式

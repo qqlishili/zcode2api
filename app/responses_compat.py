@@ -183,7 +183,16 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
                 continue
             if itype == "custom_tool_call":
                 raw_in = item.get("input")
-                args_obj = {"input": raw_in} if isinstance(raw_in, str) else (raw_in if isinstance(raw_in, dict) else {})
+                if isinstance(raw_in, str):
+                    try:
+                        parsed_in = json.loads(raw_in) if raw_in.strip() else {}
+                        args_obj = parsed_in if isinstance(parsed_in, dict) else {"input": raw_in}
+                    except ValueError:
+                        args_obj = {"input": raw_in}
+                elif isinstance(raw_in, dict):
+                    args_obj = raw_in
+                else:
+                    args_obj = {}
             else:
                 raw_args = item.get("arguments")
                 if isinstance(raw_args, str):
@@ -292,6 +301,8 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     choice = payload.get("tool_choice")
     if choice == "none":
         body.pop("tools", None)
+    elif choice == "auto":
+        body["tool_choice"] = {"type": "auto"}
     elif choice == "required":
         body["tool_choice"] = {"type": "any"}
     elif isinstance(choice, dict) and choice.get("type") == "function":
@@ -421,6 +432,12 @@ class ResponsesStreamConverter:
         self._seq += 1
         data = {"type": event_type, "sequence_number": self._seq, **payload}
         return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    def start(self) -> list[str]:
+        """流式启动握手（幂等）：立即发送 response.created 与 response.in_progress，
+        促使 FastAPI 立即向客户端提交 HTTP 200 Headers，消除首字节静默真空。
+        """
+        return self._ensure_started()
 
     def _ensure_started(self) -> list[str]:
         if self._started:

@@ -670,6 +670,8 @@ def _responses_stream_response(
 
     async def _iter():
         try:
+            for out in conv.start():
+                yield out
             async for line in up.resp.aiter_lines():
                 if not line.startswith("data:"):
                     continue

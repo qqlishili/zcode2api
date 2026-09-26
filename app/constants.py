@@ -66,6 +66,7 @@ CAPTCHA_DEFAULTS = {"enabled": True, "prefix": "no8xfe", "region": "cn", "sceneI
 # ── 模型名 ───────────────────────────────────────────────────────────────────
 # Z.AI 上游模型名大小写敏感；客户端传小写别名时映射到官方名（gateway.MODEL_NAME_MAP）
 MODEL_NAME_MAP = {
+    "codex-auto-review": "GLM-5.3-Flash",
     "glm-5.3-flash": "GLM-5.3-Flash",
     "glm-5.3": "GLM-5.3",
     "glm-5.2": "GLM-5.2",

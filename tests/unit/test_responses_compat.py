@@ -211,3 +211,45 @@ class TestResponsesStreamConverter:
         assert parsed[-1][0] == "response.failed"
         assert parsed[-1][1]["response"]["status"] == "failed"
         assert parsed[-1][1]["response"]["error"]["message"] == "上游连接重置"
+
+    def test_early_handshake_start_and_idempotence(self):
+        """测试握手提前：conv.start() 立即产出 sequence 1,2 握手帧，且后续 feed 不产生重复创建事件。"""
+        conv = ResponsesStreamConverter("GLM-5.3-Flash")
+        early_chunks = conv.start()
+        parsed_early = _parse_responses_sse("".join(early_chunks))
+        assert len(parsed_early) == 2
+        assert parsed_early[0][0] == "response.created"
+        assert parsed_early[0][1]["sequence_number"] == 1
+        assert parsed_early[1][0] == "response.in_progress"
+        assert parsed_early[1][1]["sequence_number"] == 2
+
+        # 随后到达上游事件，验证幂等守卫
+        feed_chunks = []
+        feed_chunks.extend(conv.feed({"type": "message_start", "message": {"id": "msg_idem", "usage": {"input_tokens": 5}}}))
+        feed_chunks.extend(conv.feed({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}))
+        feed_chunks.extend(conv.feed({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hello"}}))
+        feed_chunks.extend(conv.done())
+
+        parsed_all = _parse_responses_sse("".join(early_chunks + feed_chunks))
+        names = [n for n, _ in parsed_all]
+        assert names.count("response.created") == 1
+        assert names.count("response.in_progress") == 1
+        # sequence_number 仍然严格从 1 单调递增无空洞
+        assert [p["sequence_number"] for _, p in parsed_all] == list(range(1, len(parsed_all) + 1))
+
+    def test_tool_choice_auto_and_custom_tool_call_json_unpacking(self):
+        """测试 tool_choice=auto 显式对齐与 custom_tool_call JSON 字符串解包。"""
+        body, err = responses_to_anthropic({
+            "model": "GLM-5.3-Flash",
+            "input": [
+                {"type": "custom_tool_call", "call_id": "c_custom", "name": "review_diff", "input": '{"path":"main.py"}'},
+            ],
+            "tools": [
+                {"type": "function", "name": "review_diff", "parameters": {"type": "object"}},
+            ],
+            "tool_choice": "auto",
+        })
+        assert err is None and body is not None
+        assert body["tool_choice"] == {"type": "auto"}
+        assert body["messages"][0]["role"] == "assistant"
+        assert body["messages"][0]["content"][0]["input"] == {"path": "main.py"}
