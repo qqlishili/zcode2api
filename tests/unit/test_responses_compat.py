@@ -253,3 +253,178 @@ class TestResponsesStreamConverter:
         assert body["tool_choice"] == {"type": "auto"}
         assert body["messages"][0]["role"] == "assistant"
         assert body["messages"][0]["content"][0]["input"] == {"path": "main.py"}
+    def test_stream_converter_is_finished_lifecycle(self):
+        """测试生命周期状态机：is_finished 仅在生成终态帧（done/fail）后置 True。"""
+        conv = ResponsesStreamConverter("GLM-5.3-Flash")
+        assert conv.is_finished is False
+
+        conv.start()
+        assert conv.is_finished is False
+
+        conv.feed({"type": "message_start", "message": {"id": "msg_life", "usage": {"input_tokens": 10}}})
+        assert conv.is_finished is False
+
+        conv.feed({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+        assert conv.is_finished is False
+
+        conv.feed({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "pong"}})
+        assert conv.is_finished is False
+
+        # 收到 message_stop 后触发 done()，此时置 True
+        conv.feed({"type": "message_stop"})
+        assert conv.is_finished is True
+
+        # 异常路径也置 True
+        conv_fail = ResponsesStreamConverter("GLM-5.3-Flash")
+        assert conv_fail.is_finished is False
+        conv_fail.fail("boom")
+        assert conv_fail.is_finished is True
+
+    def test_stream_loop_early_break_on_finished(self):
+        """测试网关消费循环逻辑：feed 收到 message_stop 产生终态后触发 is_finished，支持主动 break。"""
+        conv = ResponsesStreamConverter("GLM-5.3-Flash")
+        events = [
+            {"type": "message_start", "message": {"id": "msg_loop", "usage": {"input_tokens": 10}}},
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hello"}},
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+            # 模拟上游由于 keep-alive 未关闭或迟到的 ping 事件
+            {"type": "ping"},
+        ]
+        consumed = []
+        for evt in events:
+            for out in conv.feed(evt):
+                consumed.append(out)
+            if conv.is_finished:
+                break
+
+        # ping 不应被消费
+        assert conv.is_finished is True
+        parsed = _parse_responses_sse("".join(consumed))
+        assert parsed[-1][0] == "response.completed"
+
+
+
+import pytest
+from unittest.mock import MagicMock, AsyncMock
+
+@pytest.mark.asyncio
+async def test_responses_stream_normal_flow_and_cancelled_after_finished():
+    """测试网关流式：终态交付后循环主动退出且资源释放，监控记录 200。"""
+    from app.routes.gateway import _responses_stream_response, _Upstream
+    from app import reqlog
+
+    class MockResp:
+        status_code = 200
+        async def aiter_lines(self):
+            lines = [
+                "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_t1\", \"usage\": {\"input_tokens\": 12}}}",
+                "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}",
+                "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"ok\"}}",
+                "data: {\"type\": \"content_block_stop\", \"index\": 0}",
+                "data: {\"type\": \"message_stop\"}",
+                "data: {\"type\": \"ping\"}",  # 证明主动 break，不会读取此行
+            ]
+            for l in lines:
+                yield l
+
+    mock_resp = MockResp()
+    mock_cm = AsyncMock()
+    mock_client = MagicMock()
+    up = _Upstream(mock_resp, mock_cm, mock_client, t_first=0.1, account_name="test-acc", mode="jwt")
+
+    req_id = "test_stream_req_1"
+    reqlog.begin(req_id, "responses", "GLM-5.3-Flash", True, "hi")
+
+    stream_resp = _responses_stream_response(up, "GLM-5.3-Flash", req_id)
+    chunks = []
+    async for chunk in stream_resp.body_iterator:
+        chunks.append(chunk)
+
+    snap = [e for e in reqlog.snapshot() if e["req_id"] == req_id]
+    assert len(snap) == 1
+    assert snap[0]["status"] == 200
+    assert snap[0]["ok"] is True
+    assert up._closed is True
+
+@pytest.mark.asyncio
+async def test_responses_stream_cancelled_after_finished_records_200():
+    """测试网关流式：在 conv.is_finished 为 True 时抛出 CancelledError，仍记录 200 成功。"""
+    from app.routes.gateway import _responses_stream_response, _Upstream
+    from app import reqlog
+    import asyncio
+
+    class MockResp:
+        status_code = 200
+        async def aiter_lines(self):
+            lines = [
+                "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_t2\", \"usage\": {\"input_tokens\": 12}}}",
+                "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}",
+                "data: {\"type\": \"content_block_delta\", \"index\": 0, \"delta\": {\"type\": \"text_delta\", \"text\": \"ok\"}}",
+                "data: {\"type\": \"content_block_stop\", \"index\": 0}",
+                "data: {\"type\": \"message_stop\"}",
+            ]
+            for l in lines:
+                yield l
+
+    mock_resp = MockResp()
+    mock_cm = AsyncMock()
+    mock_client = MagicMock()
+    up = _Upstream(mock_resp, mock_cm, mock_client, t_first=0.1, account_name="test-acc", mode="jwt")
+
+    req_id = "test_stream_req_cancel"
+    reqlog.begin(req_id, "responses", "GLM-5.3-Flash", True, "hi")
+
+    stream_resp = _responses_stream_response(up, "GLM-5.3-Flash", req_id)
+    gen = stream_resp.body_iterator
+    # 消费出事件直到 message_stop 产生终态
+    while True:
+        chunk = await gen.asend(None)
+        if "response.completed" in chunk:
+            break
+    # 模拟下游连接断开注入 CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await gen.athrow(asyncio.CancelledError)
+
+    snap = [e for e in reqlog.snapshot() if e["req_id"] == req_id]
+    assert len(snap) == 1
+    assert snap[0]["status"] == 200
+    assert snap[0]["ok"] is True
+
+@pytest.mark.asyncio
+async def test_responses_stream_cancelled_before_finished_records_499():
+    """测试网关流式：在 conv.is_finished 为 False 时断开，如实记录 499 客户端断开。"""
+    from app.routes.gateway import _responses_stream_response, _Upstream
+    from app import reqlog
+    import asyncio
+
+    class MockResp:
+        status_code = 200
+        async def aiter_lines(self):
+            lines = [
+                "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_t3\", \"usage\": {\"input_tokens\": 12}}}",
+                "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}",
+            ]
+            for l in lines:
+                yield l
+
+    mock_resp = MockResp()
+    mock_cm = AsyncMock()
+    mock_client = MagicMock()
+    up = _Upstream(mock_resp, mock_cm, mock_client, t_first=0.1, account_name="test-acc", mode="jwt")
+
+    req_id = "test_stream_req_mid_cancel"
+    reqlog.begin(req_id, "responses", "GLM-5.3-Flash", True, "hi")
+
+    stream_resp = _responses_stream_response(up, "GLM-5.3-Flash", req_id)
+    gen = stream_resp.body_iterator
+    await gen.asend(None)
+    with pytest.raises(asyncio.CancelledError):
+        await gen.athrow(asyncio.CancelledError)
+
+    snap = [e for e in reqlog.snapshot() if e["req_id"] == req_id]
+    assert len(snap) == 1
+    assert snap[0]["status"] == 499
+    assert snap[0]["ok"] is False
+    assert snap[0]["error"] == "客户端断开"

@@ -774,3 +774,8 @@ class ResponsesStreamConverter:
         }
         outs.append(self._emit("response.failed", {"response": failed_resp}))
         return outs
+
+    @property
+    def is_finished(self) -> bool:
+        """流是否已生成终态事件（completed / incomplete / failed）。"""
+        return self._finished

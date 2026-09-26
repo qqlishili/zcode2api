@@ -32,6 +32,7 @@
 - 模型别名自动归一化：支持 Codex 客户端后台自检专用模型名 `codex-auto-review` 自动映射至 `GLM-5.3-Flash`，避免上游 3006（model not allowed）拒收。
 - 流式首字节立发（TTFT 破除真空）：进入上游循环前立即向客户端 `yield conv.start()` 发送 `response.created` 与 `response.in_progress` 并提交 HTTP 200 Headers，彻底消除长推理或验证码求解期间（5~20s）的零字节静默，避免客户端超时 abort（499 客户端断开与惊群重试雪崩）。
 - 网关保持无状态：多轮历史 `reasoning.encrypted_content` 与 Anthropic `thinking.signature` 双向透明回显；流式异常中断补发 `event: response.failed` 终态帧。
+- 流生命周期解耦与终态防护（499 误判根除）：上游发送 `message_stop` 并生成 `response.completed` 后，转换器置 `is_finished=True` 并主动 `break` 退出上游读取循环，避免上游 HTTP Keep-Alive 未断连接时下游 Codex 客户端主动断开导致 Uvicorn 注入 `asyncio.CancelledError` 误记录为 499；即使在产出终态后客户端立即掐断连接，网关依据 `conv.is_finished` 仍准确判定为 200 成功。
 
 ### 1.6 错误格式
 

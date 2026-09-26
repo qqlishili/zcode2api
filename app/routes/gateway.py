@@ -682,6 +682,8 @@ def _responses_stream_response(
                 if isinstance(evt, dict):
                     for out in conv.feed(evt):
                         yield out
+                    if conv.is_finished:
+                        break
             for out in conv.done():
                 yield out
             logs.req_ok(req_id)
@@ -689,7 +691,13 @@ def _responses_stream_response(
                              input_tokens=conv.usage.get("input_tokens"),
                              output_tokens=conv.usage.get("output_tokens"))
         except asyncio.CancelledError:
-            reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
+            if conv.is_finished:
+                logs.req_ok(req_id)
+                reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
+                                 input_tokens=conv.usage.get("input_tokens"),
+                                 output_tokens=conv.usage.get("output_tokens"))
+            else:
+                reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
             raise
         except Exception as err:  # noqa: BLE001
             for out in conv.fail(f"流传输中断: {err}"):
