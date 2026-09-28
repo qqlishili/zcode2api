@@ -857,6 +857,11 @@ function claimToast(o){
     const msg = o.message || '';
     if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
       showToast(`「${o.account_name}」${msg}`, 'info');
+    } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
+      showToast(`「${o.account_name}」触发上游机房风控(3012)，正在呼起浏览器验证…`, 'info');
+      if(!claimAllRunning && o.account_id){
+        openClaimModal(o.account_id, o.plan_id);
+      }
     } else {
       showToast(`「${o.account_name}」领取失败：${msg || '未知错误'}`, 'error');
     }
@@ -885,6 +890,9 @@ async function claimOne(id){
     const msg = e.message || '';
     if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
       showToast(`「${acc ? acc.name : id}」${msg}`, 'info');
+    } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
+      showToast(`「${acc ? acc.name : id}」触发上游机房风控(3012)，正在呼起浏览器验证…`, 'info');
+      openClaimModal(id);
     } else {
       showToast('领取失败: ' + msg, 'error');
     }
@@ -1082,8 +1090,14 @@ async function initClaimCaptcha(){
       getInstance:(inst)=>{try{inst.startTracelessVerification&&inst.startTracelessVerification();}catch(e){}},
       success:(param)=>{
         claimVerifyParam=typeof param==='string'?param:(param&&param.captchaVerifyParam)||'';
-        claimStatus('✓ 人机验证已通过，点击「领取」提交');
+        claimStatus('✓ 人机验证已通过，正在自动提交领取…');
         claimStatusColor(true);
+        // 对齐 zcode-switch：验证通过后自动立即提交，免去手动二次点击
+        setTimeout(()=>{
+          if(claimVerifyParam && !claimSubmitting){
+            submitManualClaim();
+          }
+        }, 150);
       },
       fail:(p)=>{claimStatus('无感验证未通过，已弹出交互验证，请完成滑块');claimStatusColor(false);},
       onError:()=>{claimStatus('验证码出错，请重试');claimStatusColor(false);},
@@ -1101,10 +1115,13 @@ function claimStatusColor(ok){
   el.style.color=ok?'var(--mint, #4ade80)':'';
 }
 
+let claimSubmitting=false;
 async function submitManualClaim(){
+  if(claimSubmitting)return;
   if(!claimVerifyParam){
     claimStatus('请先完成人机验证');claimStatusColor(false);return;
   }
+  claimSubmitting=true;
   setClaimBusy(true);
   const account_id=document.getElementById('claim-account').value;
   const plan_sel=document.getElementById('claim-plan').value;
@@ -1121,7 +1138,11 @@ async function submitManualClaim(){
     else{claimStatus('领取失败：'+(d.outcomes[0]||{}).message+'，可重做验证再试');claimStatusColor(false);
       claimVerifyParam='';initClaimCaptcha();}
   }catch(e){claimStatus('提交失败：'+e.message);claimStatusColor(false);}
-  finally{setClaimBusy(false);await load();}
+  finally{
+    claimSubmitting=false;
+    setClaimBusy(false);
+    await load();
+  }
 }
 function closeClaimModal(){
   closeModal('modal-claim');
