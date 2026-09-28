@@ -16,73 +16,117 @@
       <div class="page-title">设置</div>
       <div class="page-sub">后台鉴权密钥与网关访问控制</div>
     </div>
-  </div>
-
-  <div class="settings-card">
-    <div class="section-title" style="margin-bottom:16px">鉴权</div>
-    <div class="settings-row">
-      <label>后台密码</label>
-      <div class="hint">用于登录此管理后台。修改后需用新密码重新登录。</div>
-      <input class="input" id="admin-key" type="password" placeholder="后台密码" autocomplete="new-password">
-      <div class="hint" id="admin-key-default-hint" style="display:none;color:var(--amber)">当前仍是默认口令，生产环境请立即更换。</div>
-    </div>
-    <div class="settings-row">
-      <label>网关 API Key（可选）</label>
-      <div class="hint">设置后，调用 <code>/v1/messages</code> 须携带 <code>Authorization: Bearer &lt;key&gt;</code> 或 <code>x-api-key</code>。清空并保存可关闭校验（生产必须配置）。输入框显示掩码，未改动保存不会覆盖原值。</div>
-      <input class="input" id="gateway-key" type="password" placeholder="留空表示不启用" autocomplete="new-password">
-    </div>
-    <div class="settings-row">
-      <label>额度刷新间隔（秒）</label>
-      <div class="hint">后台自动刷新各账号额度与状态的周期。设为 0 关闭自动刷新（仍可手动刷新）。修改后即时生效。</div>
-      <input class="input" id="quota-interval" type="number" min="0" step="5" placeholder="60">
-    </div>
-    <div class="settings-row">
-      <label>单账号并发上限</label>
-      <div class="hint">每个账号同时处理的最大请求数；某账号并发满时自动切下一个账号。设为 0 不限制。修改后即时生效。</div>
-      <input class="input" id="account-concurrency" type="number" min="0" step="1" placeholder="2">
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-      <button onclick="saveSettings()" class="dialog-btn dialog-btn-primary">保存</button>
+    <div class="page-actions">
+      <button onclick="load()" class="page-action-btn" title="重新从服务端加载设置">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
+        重载
+      </button>
+      <button onclick="saveSettings()" class="page-action-btn page-action-btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        保存设置
+      </button>
     </div>
   </div>
 
-  <div class="settings-card">
-    <div class="section-title" style="margin-bottom:16px">活动监控与 Bark 通知</div>
-    <div class="settings-row">
-      <label>Bark 设备 Key / 链接</label>
-      <div class="hint">支持粘贴裸 Key（如 <code>abcd1234efgh</code>）或客户端提供的完整链接（如 <code>https://api.day.app/abcd1234efgh/</code>）。输入框显示掩码，未改动保存不会覆盖原值。</div>
-      <input class="input" id="bark-key" type="password" placeholder="留空表示不启用推送" autocomplete="new-password">
+  <div class="settings-grid">
+    <!-- 鉴权与并发控制 -->
+    <div class="settings-card">
+      <div class="settings-card-hd">
+        <div class="section-title">鉴权与并发控制</div>
+      </div>
+      <div class="settings-row">
+        <label>后台密码</label>
+        <div class="hint">用于登录此管理后台。修改后需用新密码重新登录。</div>
+        <input class="input" id="admin-key" type="password" placeholder="后台密码" autocomplete="new-password">
+        <div class="hint" id="admin-key-default-hint" style="display:none;color:var(--amber)">当前仍是默认口令，生产环境请立即更换。</div>
+      </div>
+      <div class="settings-row">
+        <label>网关 API Key（可选）</label>
+        <div class="hint">设置后，调用 <code>/v1/messages</code> 须携带 <code>Authorization: Bearer &lt;key&gt;</code> 或 <code>x-api-key</code>。清空并保存可关闭校验（生产建议配置）。输入框显示掩码，未改动保存不会覆盖原值。</div>
+        <input class="input" id="gateway-key" type="password" placeholder="留空表示不启用" autocomplete="new-password">
+      </div>
+      <div class="settings-row">
+        <label>额度刷新间隔（秒）</label>
+        <div class="hint">后台自动刷新各账号额度与状态的周期。设为 0 关闭自动刷新（仍可手动刷新）。修改后即时生效。</div>
+        <input class="input" id="quota-interval" type="number" min="0" step="5" placeholder="60">
+      </div>
+      <div class="settings-row">
+        <label>单账号并发上限</label>
+        <div class="hint">每个账号同时处理的最大请求数；某账号并发满时自动切下一个账号。设为 0 不限制。修改后即时生效。</div>
+        <input class="input" id="account-concurrency" type="number" min="0" step="1" placeholder="2">
+      </div>
+      <div class="settings-footer-actions">
+        <button onclick="saveSettings()" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          保存鉴权配置
+        </button>
+      </div>
     </div>
-    <div class="settings-row">
-      <label>Bark 服务端地址</label>
-      <div class="hint">默认官方服务 <code>https://api.day.app</code>。若使用自建 Bark 服务器可在此覆盖。</div>
-      <input class="input" id="bark-server" type="text" placeholder="https://api.day.app">
-    </div>
-    <div class="settings-row">
-      <label>活动巡检间隔（秒）</label>
-      <div class="hint">后台单哨兵自动检测官方新赠送活动的周期。默认 1800 秒（30分钟），设为 0 关闭自动巡检。</div>
-      <input class="input" id="sentinel-interval" type="number" min="0" step="60" placeholder="1800">
-    </div>
-    <div class="settings-row">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-        <input type="checkbox" id="sentinel-auto-claim" style="width:16px;height:16px">
-        <span>发现新活动自动全池抢领</span>
-      </label>
-      <div class="hint">开启后，哨兵探测到新活动时，自动以单并发顺序串行（带随机抖动延时保护验证码池）为全池可用账号领券，抢领战报将合并推送至 Bark。</div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
-      <button onclick="testBark()" class="dialog-btn">测试推送</button>
-      <button onclick="saveSettings()" class="dialog-btn dialog-btn-primary">保存</button>
-    </div>
-  </div>
 
-  <div class="settings-card">
-    <div class="section-title" style="margin-bottom:12px">使用说明</div>
-    <div class="hint" style="line-height:1.9">
-      · 在「账号池」粘贴 Coding Plan JWT 或 API Key 即可加入轮询。<br>
-      · 请求按 round-robin 分发；某账号额度用完会自动切到下一个账号。<br>
-      · 账号额度、状态在「账号池」页实时刷新展示。<br>
-      · 对话端点：<code id="endpoint">/v1/messages</code>（兼容 Anthropic Messages 协议）。
+    <!-- 活动监控与 Bark 通知 -->
+    <div class="settings-card">
+      <div class="settings-card-hd">
+        <div class="section-title">活动巡检与 Bark 通知</div>
+      </div>
+      <div class="settings-row">
+        <label>Bark 设备 Key / 链接</label>
+        <div class="hint">支持粘贴裸 Key（如 <code>abcd1234efgh</code>）或客户端提供的完整链接（如 <code>https://api.day.app/abcd1234efgh/</code>）。输入框显示掩码，未改动保存不会覆盖原值。</div>
+        <input class="input" id="bark-key" type="password" placeholder="留空表示不启用推送" autocomplete="new-password">
+      </div>
+      <div class="settings-row">
+        <label>Bark 服务端地址</label>
+        <div class="hint">默认官方服务 <code>https://api.day.app</code>。若使用自建 Bark 服务器可在此覆盖。</div>
+        <input class="input" id="bark-server" type="text" placeholder="https://api.day.app">
+      </div>
+      <div class="settings-row">
+        <label>活动巡检间隔（秒）</label>
+        <div class="hint">后台单哨兵自动检测官方新赠送活动的周期。默认 1800 秒（30分钟），设为 0 关闭自动巡检。</div>
+        <input class="input" id="sentinel-interval" type="number" min="0" step="60" placeholder="1800">
+      </div>
+      <div class="settings-row">
+        <div class="settings-switch-line" onclick="toggleSentinelCheckbox()">
+          <div>
+            <label style="cursor:pointer">发现新活动自动全池抢领</label>
+            <div class="hint" style="margin-top:2px">开启后，哨兵探测到新活动时自动顺序为全池账号领券，合并推送战报至 Bark。</div>
+          </div>
+          <label class="switch" onclick="event.stopPropagation()">
+            <input type="checkbox" id="sentinel-auto-claim">
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="settings-footer-actions">
+        <button onclick="testBark()" class="btn btn-ghost">
+          <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          测试推送
+        </button>
+        <button onclick="saveSettings()" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          保存配置
+        </button>
+      </div>
+    </div>
+
+    <!-- 网关使用指南与端点 -->
+    <div class="settings-card settings-card-wide">
+      <div class="settings-card-hd">
+        <div class="section-title">网关集成与端点说明</div>
+      </div>
+      <div class="endpoint-box">
+        <div class="endpoint-line">
+          <span class="endpoint-method">POST</span>
+          <code class="endpoint-url" id="endpoint">/v1/messages</code>
+        </div>
+        <button class="endpoint-copy-btn" onclick="copyEndpoint()">
+          <svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制端点
+        </button>
+      </div>
+      <div class="hint" style="line-height:1.9">
+        · 协议兼容：完全兼容 Anthropic Messages 协议（<code>/v1/messages</code>），支持直接接入 Claude Code、Cursor 等客户端。<br>
+        · 账号池轮询：在「账号池」录入多个 Coding Plan JWT 或 API Key 即可加入轮询调度，额度耗尽或限流时自动故障转移到下一有效账号。<br>
+        · 实时可观测：可在「请求监控」实时查看请求吞吐、成功率、首字响应延迟（TTFB）与 Token 消耗走势。
+      </div>
     </div>
   </div>
 </main>
@@ -117,6 +161,30 @@ async function load(){
 
 function _isSecretMask(v){
   return v.includes('…') || v === '••••';
+}
+
+function copyEndpoint(){
+  const url=document.getElementById('endpoint').textContent;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(()=>showToast('端点地址已复制','success')).catch(()=>fallbackCopy(url));
+  }else{
+    fallbackCopy(url);
+  }
+}
+
+function fallbackCopy(text){
+  const ta=document.createElement('textarea');
+  ta.value=text;
+  ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);
+  ta.select();
+  try{document.execCommand('copy');showToast('端点地址已复制','success');}catch{showToast('复制失败，请手动复制','error');}
+  ta.remove();
+}
+
+function toggleSentinelCheckbox(){
+  const cb=document.getElementById('sentinel-auto-claim');
+  cb.checked=!cb.checked;
 }
 
 async function testBark(){

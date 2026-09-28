@@ -29,18 +29,8 @@
     </div>
   </div>
 
-  <div class="filter-bar" id="filter-bar">
-    <div class="filter-chips" id="range-chips"></div>
-    <input class="input mon-search" id="search" placeholder="搜索账号、模型、内容、错误…" oninput="onSearch(this.value)">
-    <select class="input mon-select" id="status-sel" onchange="onStatus(this.value)">
-      <option value="all">全部状态</option>
-      <option value="ok">成功</option>
-      <option value="fail">失败</option>
-      <option value="inflight">进行中</option>
-    </select>
-  </div>
-
-  <div class="stat-grid" id="stat-grid">
+  <div class="section-head"><div class="section-title">指标概览</div></div>
+  <div class="stat-grid mon-stat-grid" id="stat-grid">
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">调用</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg></span></div><div class="stat-num" id="s-calls">0</div><div class="stat-sub" id="s-calls-sub"></div><div id="s-calls-spark"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">成功率</div><span class="stat-icon" style="color:var(--mint)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.4 2.4 4.8-4.8"/></svg></span></div><div class="stat-num" id="s-rate" style="color:var(--mint)">—</div><div class="stat-sub" id="s-rate-sub"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">失败</div><span class="stat-icon" style="color:var(--red)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M15 9l-6 6"/><path d="M9 9l6 6"/></svg></span></div><div class="stat-num" id="s-fail" style="color:var(--red)">0</div><div class="stat-sub" id="s-fail-sub"></div></div>
@@ -59,7 +49,20 @@
     <div class="section-meta" id="last-updated"></div>
   </div>
 
-  <div class="acct-list" id="list"></div>
+  <div class="filter-bar" id="filter-bar">
+    <div class="filter-chips" id="range-chips"></div>
+    <input class="input mon-search" id="search" placeholder="搜索账号、模型、内容、错误…" oninput="onSearch(this.value)">
+    <select class="input mon-select" id="status-sel" onchange="onStatus(this.value)">
+      <option value="all">全部状态</option>
+      <option value="ok">成功</option>
+      <option value="fail">失败</option>
+      <option value="inflight">进行中</option>
+    </select>
+  </div>
+
+  <div class="acct-scroll">
+    <div class="acct-list" id="list"></div>
+  </div>
 </main>
 
 <script src="/static/js/auth.js?v={{APP_VERSION}}"></script>
