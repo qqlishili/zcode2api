@@ -287,7 +287,8 @@ function tierBadgeHtml(a){
   if(s.includes('max')){label='Max';cls='max';}
   else if(s.includes('pro')&&!s.includes('preview')){label='Pro';cls='pro';}
   else if(s.includes('lite')){label='Lite';cls='lite';}
-  else if(s.includes('start')||s.includes('trial')||s.includes('体验')){label='Trial';cls='trial';}
+  else if(s.includes('start')){label='Start';cls='trial';}
+  else if(s.includes('trial')||s.includes('体验')){label='Trial';cls='trial';}
   return label?`<span class="tier-b ${cls}">${label}</span>`:'';
 }
 
