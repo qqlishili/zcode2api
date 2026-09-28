@@ -33,12 +33,12 @@ class TestPureApiKeyRiskBan:
         assert acc.enabled is True
         assert acc.is_selectable() is False
 
-    def test_jwt_with_key_still_selectable_after_risk_ban(self):
+    def test_jwt_with_key_not_selectable_after_risk_ban(self):
         acc = Account.create("zai", "t", "a.b.c")
         acc.api_key = "sk-fallback"
         acc.ban_for_risk()
-        assert acc.has_apikey_fallback() is True
-        assert acc.is_selectable() is True
+        assert acc.has_apikey_fallback() is False
+        assert acc.is_selectable() is False
         assert acc.allows_billing() is False
 
     def test_pure_apikey_invalid_not_selectable(self):

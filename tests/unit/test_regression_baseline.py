@@ -17,6 +17,7 @@ from app.routes.gateway import (
     _is_captcha_error,
     _is_exhausted,
     _normalize_body,
+    _normalize_thinking_for_model,
 )
 
 
@@ -24,15 +25,18 @@ from app.routes.gateway import (
 class TestNormalizeBody:
     def test_lowercase_alias_mapped(self):
         body = {"model": "glm-5.2"}
-        assert _normalize_body(body)["model"] == "GLM-5.2"
+        assert _normalize_body(body)["model"] == "GLM-5.3-Flash"
 
     def test_provider_prefix_stripped(self):
         body = {"model": "bigmodel/GLM-5.2"}
-        assert _normalize_body(body)["model"] == "bigmodel/GLM-5.2".split("/")[-1]
+        assert _normalize_body(body)["model"] == "GLM-5.3-Flash"
 
-    def test_unknown_model_passed_through(self):
-        body = {"model": "glm-unknown"}
-        assert _normalize_body(body)["model"] == "glm-unknown"
+    def test_unknown_model_normalized_to_default_flash(self):
+        body = {"model": "claude-3-5-sonnet", "output_config": {"effort": "high"}}
+        norm = _normalize_body(body)
+        assert norm["model"] == "GLM-5.3-Flash"
+        assert norm["output_config"] == {"effort": "high"}
+        assert norm["thinking"] == {"type": "enabled"}
 
     def test_string_content_bridged_to_blocks(self):
         body = {"messages": [{"role": "user", "content": "hi"}]}
@@ -120,7 +124,7 @@ class TestAccountStateMachine:
         acc = self._acc()
         acc.api_key = "sk-fallback"
         acc.status = Status.INVALID
-        assert acc.is_selectable()
+        assert not acc.is_selectable()
         assert not acc.allows_billing()
         assert acc.uses_plan_channel() is False
 
@@ -130,7 +134,7 @@ class TestAccountStateMachine:
         acc.ban_for_risk()
         assert acc.status == Status.DISABLED
         assert acc.enabled is True
-        assert acc.is_selectable()
+        assert not acc.is_selectable()
         assert not acc.allows_billing()
 
     def test_manual_disable_never_selectable(self):
@@ -306,7 +310,7 @@ class TestGatewayHTTP:
         res = await client.get("/v1/models")
         assert res.status_code == 200
         ids = [m["id"] for m in res.json()["data"]]
-        assert ids == ["GLM-5.3-Flash", "GLM-5.3"]
+        assert ids == ["GLM-5.3-Flash"]
 
     async def test_messages_ok(self, gateway_client):
         client, upstream = gateway_client
@@ -317,8 +321,9 @@ class TestGatewayHTTP:
         assert res.status_code == 200
         assert res.json()["content"][0]["text"] == "Hello from mock upstream"
         # 上游收到归一化后的模型名与鉴权头
-        method, path, headers, _ = upstream.state.calls[-1]
+        method, path, headers, raw_body = upstream.state.calls[-1]
         assert path == "/api/v1/zcode-plan/anthropic/v1/messages"
+        assert json.loads(raw_body)["model"] == "GLM-5.3-Flash"
 
     async def test_no_account_503(self, gateway_client):
         client, _ = gateway_client
@@ -350,6 +355,7 @@ class TestThinkingNormalization:
             "output_config": {"effort": "minimal"},
             "messages": [{"role": "user", "content": "hi"}],
         })
+        assert b2["model"] == "GLM-5.3-Flash"
         assert b2["output_config"] == {"effort": "low"}
         assert b2["thinking"] == {"type": "enabled"}
 
@@ -358,6 +364,7 @@ class TestThinkingNormalization:
             "output_config": {"effort": "xhigh"},
             "messages": [{"role": "user", "content": "hi"}],
         })
+        assert b3["model"] == "GLM-5.3-Flash"
         assert b3["output_config"] == {"effort": "max"}
 
     def test_glm53_disabled_effort_removes_output_config(self):
@@ -370,29 +377,31 @@ class TestThinkingNormalization:
         assert "output_config" not in b
 
     def test_glm52_coerces_low_to_high_and_keeps_disabled(self):
-        b1 = _normalize_body({
-            "model": "glm-5.2",
+        b1 = {
+            "model": "GLM-5.2",
             "output_config": {"effort": "low"},
             "messages": [{"role": "user", "content": "hi"}],
-        })
+        }
+        _normalize_thinking_for_model(b1, "GLM-5.2")
         assert b1["output_config"] == {"effort": "high"}
         assert b1["thinking"] == {"type": "enabled"}
 
-        b2 = _normalize_body({
-            "model": "glm-5.2",
+        b2 = {
+            "model": "GLM-5.2",
             "output_config": {"effort": "disabled"},
             "messages": [{"role": "user", "content": "hi"}],
-        })
+        }
+        _normalize_thinking_for_model(b2, "GLM-5.2")
         assert b2["output_config"] == {"effort": "disabled"}
         assert b2["thinking"] == {"type": "disabled"}
 
     def test_glm5_turbo_strips_effort_and_uses_enable_mode(self):
-        b = _normalize_body({
-            "model": "glm-5-turbo",
+        b = {
+            "model": "GLM-5-Turbo",
             "output_config": {"effort": "high"},
             "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b["model"] == "GLM-5-Turbo"
+        }
+        _normalize_thinking_for_model(b, "GLM-5-Turbo")
         assert "output_config" not in b
         assert b["thinking"] == {"type": "enabled"}
 
@@ -488,7 +497,7 @@ class TestThinkingHistoryStripAndAffinity:
         assert repaired["messages"][1]["content"] == [{"type": "text", "text": "a1"}]
         assert len(original["messages"][1]["content"]) == 3
 
-    def test_session_affinity_key_and_sticky_failover(self):
+    def test_session_affinity_key_and_sticky_failover(self, fresh_app):
         from app.routes.gateway import (
             _bind_sticky_account,
             _extract_session_affinity_key,
@@ -527,8 +536,28 @@ class TestThinkingHistoryStripAndAffinity:
         acc2 = store.add_account("zai", "sticky-acc-2", "sk-sticky-test-2")
         try:
             _bind_sticky_account(key1, acc1.id)
+            t_created = _session_affinity[key1][1]
             chosen = _get_sticky_account("zai", key1, set(), limit=0)
             assert chosen is not None and chosen.id == acc1.id
+            # 固定生命周期：命中时不刷新 created_at
+            assert _session_affinity[key1][1] == t_created
+
+            # 连续绑定达最大请求步数（20 次）后自动解绑轮转
+            for _ in range(19):
+                _bind_sticky_account(key1, acc1.id)
+            assert _session_affinity[key1][2] == 20
+            assert _get_sticky_account("zai", key1, set(), limit=0) is None
+            assert key1 not in _session_affinity
+
+            # 模型额度感知选号：acc1 仅有 Flash，acc2 有 GLM-5.3，请求 glm-5.3（小写）应精准选 acc2
+            acc1.quota = {"GLM-5.3-Flash": {"remaining": 1000}}
+            acc2.quota = {"GLM-5.3-Flash": {"remaining": 1000}, "GLM-5.3": {"remaining": 500}}
+            picked = store.select("zai", model="glm-5.3")
+            assert picked is not None and picked.id == acc2.id
+
+            _bind_sticky_account(key1, acc1.id)
+            # 会话中途切换模型到 GLM-5.3，粘性在 acc1 上应主动让出给显式支持 GLM-5.3 的 acc2
+            assert _get_sticky_account("zai", key1, set(), limit=0, model="GLM-5.3") is None
 
             assert _get_sticky_account("zai", key1, {acc1.id}, limit=0) is None
             acc1.status = Status.DISABLED

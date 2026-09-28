@@ -360,6 +360,9 @@ def build_app() -> FastAPI:
         if scenario == "claim_claimed":
             return Response(json.dumps({"code": 1003, "msg": "already claimed"}),
                             media_type="application/json")
+        if scenario == "claim_daily_limit":
+            return Response(json.dumps({"code": 1005, "msg": "今日领取名额已用完"}),
+                            media_type="application/json")
         return Response(json.dumps({"code": 0, "data": {"plan_id": payload["plan_id"]}}),
                         media_type="application/json")
 

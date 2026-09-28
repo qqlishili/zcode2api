@@ -89,7 +89,7 @@ async def cmd_login(args: list[str]) -> None:
                 acc = store.add_account("zai", "oauth-login", zcode_jwt)
                 print(c(f"\n✔ 已保存 Coding Plan JWT 账号: {acc.name} ({acc.id})", "green"))
                 await _cli_ingest_followup(acc)
-            if access_token:
+            elif access_token:
                 try:
                     key = await flow.exchange_api_key(access_token)
                     acc_key = store.add_account("zai", "oauth-apikey", key)

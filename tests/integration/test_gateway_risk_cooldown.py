@@ -34,8 +34,8 @@ def _set_cooling(acc, seconds: float = 600.0) -> None:
 
 @pytest.mark.integration
 class TestRiskControlBan:
-    async def test_invalid_jwt_falls_back_to_apikey(self, gateway_client, fresh_app):
-        """JWT 已失效但同账号有 API Key 时走回退通道，不再 503。"""
+    async def test_invalid_jwt_does_not_fallback_to_zero_balance_apikey(self, gateway_client, fresh_app):
+        """免费赠送池模式下，JWT 失效即使残留 api_key 也不走 api.z.ai 伪回退，直接跳过。"""
         client, mock = gateway_client
         from tests.conftest import seed_account
 
@@ -48,61 +48,15 @@ class TestRiskControlBan:
 
         before = len(mock.state.calls)
         res = await client.post("/v1/messages", json=_MSG_BODY)
-        assert res.status_code == 200
-        paths = [c[1] for c in mock.state.calls[before:] if c[1].endswith("/messages")]
-        assert any(p == "/api/anthropic/v1/messages" for p in paths)
-        assert not any("zcode-plan" in p for p in paths)
-        after = fresh_app.find("zai", acc.id)
-        assert after.status == Status.INVALID  # Key 成功不得把废 JWT 洗成 active
-
-    async def test_invalid_jwt_key_5xx_does_not_revive_plan(self, gateway_client, fresh_app, monkeypatch):
-        """废 JWT 走 Key 后 5xx 耗尽，不得把 status 洗成 cooling（否则冷却结束会重打 Plan）。"""
-        client, mock = gateway_client
-        from tests.conftest import seed_account
-
-        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
-        monkeypatch.setattr(settings, "RETRY_5XX_WAIT", 0)
-        jwt = "hF.eyJzdWIiOiJmIn0.sig"
-        key = "sk-fallback-5xx-aaaa"
-        acc = seed_account(fresh_app, jwt, name="a-fb-5xx")
-        acc.api_key = key
-        acc.status = Status.INVALID
-        acc.last_error = "鉴权失败 HTTP 401"
-        fresh_app.update_account(acc)
-        mock.state.sequences[key[:16]] = ["server_error"]
-
-        before = len(mock.state.calls)
-        res = await client.post("/v1/messages", json=_MSG_BODY)
         assert res.status_code == 503
+        paths = [c[1] for c in mock.state.calls[before:] if c[1].endswith("/messages")]
+        assert not any(p == "/api/anthropic/v1/messages" for p in paths)
         after = fresh_app.find("zai", acc.id)
         assert after.status == Status.INVALID
-        assert after.uses_plan_channel() is False
-        assert after.allows_billing() is False
-        paths = [c[1] for c in mock.state.calls[before:] if c[1].endswith("/messages")]
-        assert not any("zcode-plan" in p for p in paths)
+        assert after.is_selectable() is False
 
-    async def test_invalid_jwt_key_connect_fail_does_not_revive_plan(self, gateway_client, fresh_app):
-        """废 JWT 走 Key 后连接失败，不得洗成 cooling。"""
-        client, mock = gateway_client
-        from tests.conftest import seed_account
-
-        jwt = "hF.eyJzdWIiOiJmIn0.sig"
-        key = "sk-fallback-conn-bbbb"
-        acc = seed_account(fresh_app, jwt, name="a-fb-conn")
-        acc.api_key = key
-        acc.status = Status.INVALID
-        acc.last_error = "鉴权失败 HTTP 401"
-        fresh_app.update_account(acc)
-        mock.state.sequences[key[:16]] = ["connect_fail_first"]
-
-        res = await client.post("/v1/messages", json=_MSG_BODY)
-        assert res.status_code == 503
-        after = fresh_app.find("zai", acc.id)
-        assert after.status == Status.INVALID
-        assert after.uses_plan_channel() is False
-
-    async def test_plan_401_then_key_401_does_not_loop(self, gateway_client, fresh_app):
-        """Plan 401 切 Key 后 Key 再 401：换号，不得同账号死循环。"""
+    async def test_plan_401_switches_to_next_jwt_without_key_fallback(self, gateway_client, fresh_app):
+        """Plan 401 时不触发同账号 0 余额 Key 回退，直接切换到池内下一个 JWT 账号。"""
         client, mock = gateway_client
         from tests.conftest import seed_account
 
@@ -111,20 +65,23 @@ class TestRiskControlBan:
         acc = seed_account(fresh_app, jwt, name="a-fb-401")
         acc.api_key = key
         fresh_app.update_account(acc)
+        acc2 = seed_account(fresh_app, _GOOD_JWT, name="a-good-jwt")
         mock.state.sequences[jwt[:16]] = ["auth_invalid"]
-        mock.state.sequences[key[:16]] = ["auth_invalid"]
 
         before = len(mock.state.calls)
         res = await client.post("/v1/messages", json=_MSG_BODY)
-        assert res.status_code == 503
+        assert res.status_code == 200
         after = fresh_app.find("zai", acc.id)
         assert after.status == Status.INVALID
+        assert after.is_selectable() is False
+        after2 = fresh_app.find("zai", acc2.id)
+        assert after2.use_count == 1
         paths = [c[1] for c in mock.state.calls[before:] if c[1].endswith("/messages")]
-        assert paths.count("/api/v1/zcode-plan/anthropic/v1/messages") == 1
-        assert paths.count("/api/anthropic/v1/messages") == 1
+        assert paths.count("/api/v1/zcode-plan/anthropic/v1/messages") == 2
+        assert paths.count("/api/anthropic/v1/messages") == 0
 
-    async def test_3012_falls_back_to_apikey_same_request(self, gateway_client, fresh_app):
-        """真风控封禁 JWT 后，同一次请求切 API Key，不 503。"""
+    async def test_3012_bans_account_and_skips_apikey_fallback(self, gateway_client, fresh_app):
+        """真风控封禁 JWT 后，直接标记 DISABLED 下线，不走 0 余额 API Key 回退。"""
         client, mock = gateway_client
         from tests.conftest import seed_account
 
@@ -133,13 +90,14 @@ class TestRiskControlBan:
         fresh_app.update_account(acc)
         mock.state.sequences[_RISK_JWT[:16]] = ["risk_control_3012"]
 
+        before = len(mock.state.calls)
         res = await client.post("/v1/messages", json=_MSG_BODY)
-        assert res.status_code == 200
+        assert res.status_code == 503
         assert acc.status == Status.DISABLED
-        assert acc.is_selectable() is True
-        paths = [c[1] for c in mock.state.calls if c[1].endswith("/messages")]
+        assert acc.is_selectable() is False
+        paths = [c[1] for c in mock.state.calls[before:] if c[1].endswith("/messages")]
         assert "/api/v1/zcode-plan/anthropic/v1/messages" in paths
-        assert "/api/anthropic/v1/messages" in paths
+        assert "/api/anthropic/v1/messages" not in paths
 
     async def test_pure_apikey_3012_not_selectable(self, gateway_client, fresh_app):
         """纯 API Key 账号 3012 后不得再被选中（主键不是 fallback）。"""
@@ -269,9 +227,8 @@ class Test429Retry:
         acc = fresh_app.list_accounts("zai")[0]
         assert acc.use_count == 1
 
-    async def test_plan_429_exhausted_falls_back_to_key_budget(self, gateway_client, fresh_app, monkeypatch):
-        """Plan 通道 429 烧完预算后，回退 Key 通道应有自己的独立预算，
-        不得直接换号把回退饿死（每次请求两通道各享 RETRY_429_TIMES 次重试）。"""
+    async def test_plan_429_exhausted_switches_account_without_key_fallback(self, gateway_client, fresh_app, monkeypatch):
+        """Plan 通道 429 烧完预算后直接切换下一个账号，不打 0 余额的 api.z.ai Key 回退通道。"""
         client, mock = gateway_client
         from app.routes import gateway as gw
         from tests.conftest import seed_account
@@ -292,10 +249,10 @@ class Test429Retry:
         before_jwt = mock.state.counters.get(bind_jwt, 0)
         before_key = mock.state.counters.get(bind_key, 0)
         res = await client.post("/v1/messages", json=_MSG_BODY)
-        # 两通道各 1 + 2 次重试 = 各 3 次打到上游后才换号 → 503（唯一账号）
+        # 仅走 Plan 通道 1 + 2 = 3 次重试后换号 → 503（唯一账号），Key 通道 0 次请求
         assert res.status_code == 503
         assert mock.state.counters.get(bind_jwt, 0) - before_jwt == 3
-        assert mock.state.counters.get(bind_key, 0) - before_key == 3
+        assert mock.state.counters.get(bind_key, 0) - before_key == 0
         # 429 不是账号故障：通道状态不得被污染
         after = fresh_app.find("zai", acc.id)
         assert after.status == Status.ACTIVE

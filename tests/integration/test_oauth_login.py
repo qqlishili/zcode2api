@@ -220,20 +220,16 @@ class TestOAuthLoginFlow:
         assert fid not in admin_api._login_flows
 
     async def test_ready_poll_reentry_protected(self, gateway_client):
-        """P2-1 回归：ready 后会话已摘除再兑换，重复/并发 poll 不会触发第二份
-        兑换链（z/login → getCustomerInfo → api_keys/copy），也不会重复入池。"""
+        """P2-1 回归：ready 后会话已摘除，重复/并发 poll 不会重复入池或重复刷新额度。"""
         client, mock = gateway_client
         fid = (await client.post("/admin/api/login/start", json={"label": "acct-3"},
                                  headers={"Authorization": "Bearer zcode"})).json()["flow_id"]
-        # mock 上游 session 级共享，calls 跨用例累积 —— 记录基线后断言增量
-        copy_calls_before = sum(1 for c in mock.state.calls
-                                if c[1].endswith("/api_keys/copy/mock-api-key-id"))
         mock.state.oauth_state = "ready"
         first = (await client.get(f"/admin/api/login/poll/{fid}",
                                   headers={"Authorization": "Bearer zcode"})).json()
         assert first["status"] == "ready"
 
-        # 无论如何并发再 poll 一轮 —— 已摘除的会话只能拿到 expired，绝不重入兑换
+        # 无论如何并发再 poll 一轮 —— 已摘除的会话只能拿到 expired，绝不重入
         results = await asyncio.gather(*[
             client.get(f"/admin/api/login/poll/{fid}",
                        headers={"Authorization": "Bearer zcode"}) for _ in range(4)
@@ -241,10 +237,6 @@ class TestOAuthLoginFlow:
         assert all(r.json()["status"] == "expired" for r in results)
 
         await _drain_login_followup()
-        # 兑换链只跑了一遍：copy 端点恰好 +1 次；账号只入池了 1 个
-        copy_calls_after = sum(1 for c in mock.state.calls
-                               if c[1].endswith("/api_keys/copy/mock-api-key-id"))
-        assert copy_calls_after - copy_calls_before == 1
         accounts = (await client.get("/admin/api/accounts",
                                      headers={"Authorization": "Bearer zcode"})).json()
         assert accounts["stats"]["total"] == 1
@@ -254,22 +246,21 @@ class TestOAuthLoginFlow:
         res = await client.post("/admin/api/login/start")
         assert res.status_code == 401
 
-    async def test_exchange_api_key_chain_on_ready(self, gateway_client):
-        """ready 后应完整走兑换链（z/login → getCustomerInfo → create → copy），
-        兑换出的 apiKey 回填到账号（api_key 模式作为 JWT 的回退凭证）。"""
+    async def test_jwt_ready_refreshes_quota_without_0_balance_apikey_exchange(self, gateway_client):
+        """JWT 授权 ready 后立即触发一次额度刷新（billing 三端点），且不再兑换 0 余额的 zcode-api-key。"""
         client, mock = gateway_client
         fid = (await client.post("/admin/api/login/start", json={"label": "acct-2"},
                                  headers={"Authorization": "Bearer zcode"})).json()["flow_id"]
+        copy_calls_before = sum(1 for c in mock.state.calls
+                                if c[1].endswith("/api_keys/copy/mock-api-key-id"))
         mock.state.oauth_state = "ready"
         poll = (await client.get(f"/admin/api/login/poll/{fid}",
                                  headers={"Authorization": "Bearer zcode"})).json()
         assert poll["status"] == "ready"
         await _drain_login_followup()
         paths = [c[1] for c in mock.state.calls]
-        assert "/api/auth/z/login" in paths
-        assert "/api/biz/customer/getCustomerInfo" in paths
-        assert any(p.endswith("/api_keys") for p in paths)
-        # copy secret → apiKey.secretKey 组合入账（agent 回退通道用）
-        assert any(p.endswith("/api_keys/copy/mock-api-key-id") for p in paths)
+        copy_calls_after = sum(1 for c in mock.state.calls
+                               if c[1].endswith("/api_keys/copy/mock-api-key-id"))
+        assert copy_calls_after == copy_calls_before
         # ready 后立即触发一次额度刷新（billing 三端点）
         assert any(p.endswith("/billing/current") for p in paths)

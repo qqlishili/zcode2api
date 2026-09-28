@@ -54,10 +54,11 @@ def test_captcha_defaults_match_zcode2api():
 
 
 def test_model_map():
+    assert constants.DEFAULT_MODEL == "GLM-5.3-Flash"
     assert constants.MODEL_NAME_MAP["glm-5.3-flash"] == "GLM-5.3-Flash"
-    assert constants.MODEL_NAME_MAP["glm-5.2"] == "GLM-5.2"
-    assert constants.MODEL_NAME_MAP["glm-turbo"] == "GLM-5-Turbo"
-    assert constants.AVAILABLE_MODELS == ["GLM-5.3-Flash", "GLM-5.3"]
+    assert constants.MODEL_NAME_MAP["glm-5.2"] == "GLM-5.3-Flash"
+    assert constants.MODEL_NAME_MAP["glm-turbo"] == "GLM-5.3-Flash"
+    assert constants.AVAILABLE_MODELS == ["GLM-5.3-Flash"]
 
 
 def test_rejection_signals():

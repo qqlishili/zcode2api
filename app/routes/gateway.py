@@ -174,12 +174,10 @@ def _normalize_thinking_for_model(body: dict, model: str | None) -> None:
 
 
 def _normalize_body(body: dict) -> dict:
-    model = body.get("model")
-    if isinstance(model, str) and "/" in model:
-        model = "/".join(model.split("/")[1:])
-    if isinstance(model, str):
-        model = MODEL_NAME_MAP.get(model.lower(), model)
-        body["model"] = model
+    # 纯免费赠送池模式：将任意外部请求模型名统一归一化为 DEFAULT_MODEL（GLM-5.3-Flash），
+    # 防止客户端传入 claude-*/gpt-*/glm-5.2 等触发上游 3006 model not allowed 或误耗非免费池窗口
+    model = constants.DEFAULT_MODEL
+    body["model"] = model
 
     # 上游对 max_tokens 有硬校验（400 code 1210），钳制到合法区间并记录钳制动作
     raw = body.get("max_tokens")
@@ -194,7 +192,7 @@ def _normalize_body(body: dict) -> dict:
                 logs.warn("gateway", f"max_tokens {mt} 超出上游范围 [1,{constants.MAX_TOKENS_LIMIT}]，钳制为 {clamped}")
             body["max_tokens"] = clamped
 
-    _normalize_thinking_for_model(body, model if isinstance(model, str) else None)
+    _normalize_thinking_for_model(body, model)
 
     messages = body.get("messages")
     if isinstance(messages, list):
@@ -711,10 +709,11 @@ def _responses_stream_response(
                              headers={"Cache-Control": "no-cache"})
 
 
-# ── 会话亲和路由（保上游 ephemeral 缓存命中；冷却/满并发自动降级轮询）──────────
-_SESSION_AFFINITY_TTL = 900.0
+# ── 会话亲和路由（保多轮对话缓存与思维链签名连续；固定窗口/满步数/满并发自动轮转）────
+_SESSION_AFFINITY_TTL = 600.0
+_SESSION_AFFINITY_MAX_REQUESTS = 20
 _SESSION_AFFINITY_MAX_SIZE = 2048
-_session_affinity: dict[str, tuple[str, float]] = {}
+_session_affinity: dict[str, tuple] = {}
 
 
 def _extract_session_affinity_key(
@@ -725,7 +724,7 @@ def _extract_session_affinity_key(
     """提取会话亲和键 (affinity_key, prefer_sticky)。
 
     显式 session header / metadata 首轮即粘性；未显式指定时按首条非 system 消息
-    哈希派生，首轮走 round-robin 分散落号并记绑定，次轮起固定同号以命中上游缓存。
+    哈希派生，首轮走 round-robin 分散落号并记绑定，次轮起在固定窗口内复用同号。
     """
     if isinstance(incoming_headers, dict):
         lower_headers = {str(k).lower(): v for k, v in incoming_headers.items() if isinstance(k, str)}
@@ -786,37 +785,56 @@ def _get_sticky_account(
     affinity_key: str | None,
     skip_ids: set[str],
     limit: int,
+    model: str | None = None,
 ) -> Account | None:
-    """查询粘性绑定的账号；若账号已不可用、冷却中或并发已满则返回 None 以触发平滑漂移。"""
+    """查询粘性绑定的账号。
+
+    采用固定生命周期（Fixed-Window TTL，禁止命中时滑动续期）+ 单轮最大请求步数上限：
+    一旦超过固定时长、达到步数上限、目标模型无额度、冷却中或并发已满，立即解绑并返回 None，
+    使长会话平滑轮转到池内其它健康账号，防止单账号被永久钉死过热触发 3012 风控。
+    """
     if not affinity_key:
         return None
     entry = _session_affinity.get(affinity_key)
     if entry is None:
         return None
-    acc_id, ts = entry
+    acc_id, created_at = entry[0], entry[1]
+    req_count = entry[2] if len(entry) > 2 else 0
     now = time.time()
-    if now - ts > _SESSION_AFFINITY_TTL:
+    if now - created_at > _SESSION_AFFINITY_TTL or req_count >= _SESSION_AFFINITY_MAX_REQUESTS:
         _session_affinity.pop(affinity_key, None)
         return None
     if acc_id in skip_ids:
         return None
     acc = store.find(provider, acc_id)
-    if acc is None or not acc.is_selectable(now):
+    if acc is None or not acc.is_selectable(now) or not acc.has_model_quota(model):
+        _session_affinity.pop(affinity_key, None)
         return None
+    if model and not acc.explicitly_supports_model(model):
+        # 若会话中途切换到当前账号不具备的模型（如老号无 GLM-5.3），且池内有支持该模型的其它账号，则让出粘性
+        if any(
+            other.id != acc.id and other.is_selectable(now) and other.explicitly_supports_model(model)
+            for other in store.list_accounts(provider)
+        ):
+            return None
     if limit > 0 and _inflight.get(acc.id, 0) >= limit:
         return None
-    _session_affinity[affinity_key] = (acc.id, now)
     return acc
 
 
 def _bind_sticky_account(affinity_key: str | None, account_id: str) -> None:
-    """记录或更新会话粘性绑定的账号 ID（含 TTL 清理与容量淘汰）。"""
+    """记录或更新会话粘性绑定的账号 ID（固定创建时间戳 created_at 不滑动，仅累加请求计数）。"""
     if not affinity_key or not account_id:
         return
     now = time.time()
-    _session_affinity[affinity_key] = (account_id, now)
+    prev = _session_affinity.get(affinity_key)
+    if prev is not None and prev[0] == account_id and (now - prev[1] <= _SESSION_AFFINITY_TTL):
+        prev_count = prev[2] if len(prev) > 2 else 0
+        _session_affinity[affinity_key] = (account_id, prev[1], prev_count + 1)
+    else:
+        _session_affinity[affinity_key] = (account_id, now, 1)
     if len(_session_affinity) > _SESSION_AFFINITY_MAX_SIZE:
-        expired = [k for k, (_, ts) in _session_affinity.items() if now - ts > _SESSION_AFFINITY_TTL]
+        expired = [k for k, v in _session_affinity.items() if now - v[1] > _SESSION_AFFINITY_TTL]
         for k in expired:
             _session_affinity.pop(k, None)
         if len(_session_affinity) > _SESSION_AFFINITY_MAX_SIZE:
@@ -835,14 +853,15 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
     tried: set[str] = set()
     limit = _limit()
     attempts = 0
+    req_model = str(body.get("model") or "").strip() if isinstance(body, dict) else ""
     affinity_key, prefer_sticky = _extract_session_affinity_key(provider, body, incoming_headers)
 
     while attempts < MAX_ACCOUNT_ATTEMPTS:
         account = None
         if attempts == 0 and prefer_sticky:
-            account = _get_sticky_account(provider, affinity_key, tried, limit)
+            account = _get_sticky_account(provider, affinity_key, tried, limit, model=req_model)
         if account is None:
-            account = store.select(provider, skip_ids=tried)
+            account = store.select(provider, skip_ids=tried, model=req_model)
         if account is None:
             break
         tried.add(account.id)

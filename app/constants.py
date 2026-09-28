@@ -64,20 +64,21 @@ ACTIVATION_SCREEN_RESOLUTION = "2560x1440"
 CAPTCHA_DEFAULTS = {"enabled": True, "prefix": "no8xfe", "region": "cn", "sceneId": "11xygtvd"}
 
 # ── 模型名 ───────────────────────────────────────────────────────────────────
-# Z.AI 上游模型名大小写敏感；客户端传小写别名时映射到官方名（gateway.MODEL_NAME_MAP）
+# 纯免费赠送池模式：全站唯一消费 ZCode 免费赠送的 GLM-5.3-Flash 额度池，
+# 网关入口将客户端传入的任意模型名统一归一化为 DEFAULT_MODEL（避免上游 3006 model not allowed）
+DEFAULT_MODEL = "GLM-5.3-Flash"
 MODEL_NAME_MAP = {
-    "codex-auto-review": "GLM-5.3-Flash",
-    "glm-5.3-flash": "GLM-5.3-Flash",
-    "glm-5.3": "GLM-5.3",
-    "glm-5.2": "GLM-5.2",
-    "glm-5-turbo": "GLM-5-Turbo",
-    "glm-turbo": "GLM-5-Turbo",
-    "glm-5.1": "GLM-5.1",
-    "glm-4.7": "GLM-4.7",
+    "codex-auto-review": DEFAULT_MODEL,
+    "glm-5.3-flash": DEFAULT_MODEL,
+    "glm-5.3": DEFAULT_MODEL,
+    "glm-5.2": DEFAULT_MODEL,
+    "glm-5-turbo": DEFAULT_MODEL,
+    "glm-turbo": DEFAULT_MODEL,
+    "glm-5.1": DEFAULT_MODEL,
+    "glm-4.7": DEFAULT_MODEL,
 }
-# /v1/models 对外公布（2026-09-05 实测：当前账号套餐不含 GLM-5.2/5-Turbo，
-# 上游 3006 model not allowed；按账号实际余额窗口公布）
-AVAILABLE_MODELS = ["GLM-5.3-Flash", "GLM-5.3"]
+# /v1/models 对外公布唯一免费赠送池模型
+AVAILABLE_MODELS = [DEFAULT_MODEL]
 
 # 上游 max_tokens 合法范围（2026-09-06 实测：超限报 400 code 1210
 # 「max_tokens参数非法：限制数值范围[1,131072]」，客户端（如 auto-compact 续传）
