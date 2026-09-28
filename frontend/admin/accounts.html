@@ -1009,11 +1009,19 @@ async function openClaimModal(id, targetPlanId){
   if(id)sel.value=id;
 
   const curAcc=allAccounts.find(a=>a.id===sel.value);
-  if(curAcc && !hasUnclaimedActivity(curAcc)){
-    const hasPlans = (curAcc.claimable_plans || []).length > 0;
-    if(hasPlans || (curAcc.plans && curAcc.plans.length > 0)){
+  if(curAcc){
+    const held = getHeldPlanIds(curAcc);
+    const targetNorm = String(targetPlanId || '').toLowerCase().trim();
+    if(targetNorm && held.has(targetNorm)){
       showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
       return;
+    }
+    if(!targetNorm && !hasUnclaimedActivity(curAcc)){
+      const hasPlans = (curAcc.claimable_plans || []).length > 0;
+      if(hasPlans || (curAcc.plans && curAcc.plans.length > 0)){
+        showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+        return;
+      }
     }
   }
 
@@ -1146,18 +1154,27 @@ async function submitManualClaim(){
   if(claimSubmitting)return;
   const account_id=document.getElementById('claim-account').value;
   const curAcc=allAccounts.find(a=>a.id===account_id);
-  if(curAcc && !hasUnclaimedActivity(curAcc)){
-    showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
-    closeClaimModal();
-    return;
+  const plan_sel=document.getElementById('claim-plan').value;
+  const plan_manual=document.getElementById('claim-plan-id').value.trim();
+  const targetPid = (plan_manual || plan_sel || '').toLowerCase().trim();
+  if(curAcc){
+    const held = getHeldPlanIds(curAcc);
+    if(targetPid && held.has(targetPid)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      closeClaimModal();
+      return;
+    }
+    if(!targetPid && !hasUnclaimedActivity(curAcc)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      closeClaimModal();
+      return;
+    }
   }
   if(!claimVerifyParam){
     claimStatus('请先完成人机验证');claimStatusColor(false);return;
   }
   claimSubmitting=true;
   setClaimBusy(true);
-  const plan_sel=document.getElementById('claim-plan').value;
-  const plan_manual=document.getElementById('claim-plan-id').value.trim();
   try{
     const d=await api('POST','/claim/manual',{
       account_id,
@@ -1222,7 +1239,7 @@ function fmtDur(s){s=Math.max(0,Math.round(s));if(s<60)return s+'秒';const m=Ma
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
 function openConfirm(title,body,cb){_cb=async()=>{closeModal('modal-confirm');await cb();};document.getElementById('confirm-title').textContent=title;document.getElementById('confirm-body').innerHTML=body;openModal('modal-confirm');}
-document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el){el.classList.remove('open');if(el.id==='modal-add')stopLoginPoll();}}));
+document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el){if(el.id==='modal-claim')closeClaimModal();else{el.classList.remove('open');if(el.id==='modal-add')stopLoginPoll();}}}));
 
 /* 最近请求 tick 悬停明细浮层：全局单例、fixed 定位（不受 .acct-scroll 裁剪）、
    视口内自动贴边与上下翻转，mouseover 委托（5s 轮询重渲染后新元素照常触发） */
