@@ -13,13 +13,33 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timedelta, timezone
 import json
+import random
+import time
 
 import httpx
 
 from . import constants, logs, settings
 from .captcha import captcha_manager
 from .models import Account, Status
+
+_TZ_BEIJING = timezone(timedelta(hours=8))
+
+
+def calculate_claim_blocked_until(now: float | None = None) -> float:
+    """计算 1005 今日名额用完后的避让截止时间戳。
+
+    基准：北京时间（UTC+8）次日凌晨 00:05:00
+    抖动：叠加 0 ~ 300 秒（5分钟）随机离散 Jitter，打散集群解封流量，防止上游 WAF 踩踏。
+    """
+    now_ts = now if now is not None else time.time()
+    dt = datetime.fromtimestamp(now_ts, tz=_TZ_BEIJING)
+    next_day_0005 = (dt + timedelta(days=1)).replace(
+        hour=0, minute=5, second=0, microsecond=0
+    )
+    jitter = random.uniform(0, 300)
+    return next_day_0005.timestamp() + jitter
 
 
 class ClaimError(Exception):
@@ -44,6 +64,9 @@ def billing_block_reason(account: Account, *, action: str = "领取") -> str | N
     """JWT 不可打 billing 时的用户文案；可打则返回 None。"""
     if account.is_cooling():
         return f"账号冷却中（风控/限流），已跳过{action}"
+    if action == "领取" and account.is_claim_blocked():
+        dt_str = datetime.fromtimestamp(account.claim_blocked_until or time.time(), tz=_TZ_BEIJING).strftime("%H:%M:%S")
+        return f"今日领取名额已用完，重置前已跳过领取（预计重置时间: {dt_str}）"
     if account.mode != "jwt" or not (account.jwt_token or "").strip():
         return f"非 Coding Plan 账号，已跳过{action}"
     if not account.enabled:
@@ -53,6 +76,20 @@ def billing_block_reason(account: Account, *, action: str = "领取") -> str | N
     if account.status == Status.INVALID or not account.uses_plan_channel():
         return AUTH_EXPIRED_MESSAGE
     return None
+
+
+def _mark_claim_blocked(account: Account) -> None:
+    """标记 1005 名额用完避让期并持久化。"""
+    from .store import store
+
+    live = store.find(account.provider, account.id)
+    blocked = calculate_claim_blocked_until()
+    if live is not None:
+        live.claim_blocked_until = blocked
+        store.update_account(live)
+        account.claim_blocked_until = live.claim_blocked_until
+    else:
+        account.claim_blocked_until = blocked
 
 
 def _mark_auth_failure(account: Account) -> None:
@@ -183,6 +220,9 @@ async def auto_claim_all_plans(account: Account) -> list[dict]:
     """
     if not (account.mode == "jwt" and account.jwt_token):
         return []
+    if account.is_claim_blocked():
+        logs.info("claim", f"账号 {account.name} 处于名额满避让期，跳过自动领取")
+        return []
     outcomes: list[dict] = []
 
     try:
@@ -282,6 +322,11 @@ async def _post_claim(account: Account, headers: dict, plan_id: str) -> dict:
     )
     code = _business_code(body)
     if code != 0:
+        if code == 1005:
+            _mark_claim_blocked(account)
+            blocked_ts = account.claim_blocked_until or time.time()
+            dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
+            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}")
         raise ClaimError(_fail_message(code, body))
     return body
 
@@ -335,6 +380,11 @@ async def claim(account: Account, plan_id: str | None = None) -> dict:
         code = _business_code(body)
         if code == 0:
             return {"plan_id": plan_id, "plan_name": plan_name, "grants": grants}
+        if code == 1005:
+            _mark_claim_blocked(account)
+            blocked_ts = account.claim_blocked_until or time.time()
+            dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
+            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}")
         if code == 3007 and attempt == 1:
             logs.warn("claim", f"账号 {account.name} 验证码被拒，换码重试")
             captcha_manager.invalidate()

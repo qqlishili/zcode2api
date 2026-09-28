@@ -92,6 +92,31 @@ def _bonus_active(plan: dict, now: float) -> bool:
     return False
 
 
+def _canonical_model_key(bal: dict) -> str:
+    """提取并归一化模型键名。
+
+    优先深度检查 capabilities 数组中的 model: 协议标签；若包含 flash（大小写无关）
+    则无条件归一化为 constants.DEFAULT_MODEL（GLM-5.3-Flash）。
+    兜底检查 show_name 与 model 字段；非 Flash 模型保留原样。
+    """
+    for cap in bal.get("capabilities") or []:
+        if isinstance(cap, str) and cap.lower().startswith("model:"):
+            mid = cap[len("model:"):].strip().lower()
+            if "flash" in mid:
+                return constants.DEFAULT_MODEL
+    raw = str(bal.get("show_name") or bal.get("model") or "").strip()
+    if "flash" in raw.lower():
+        return constants.DEFAULT_MODEL
+    return raw or "model"
+
+
+def _safe_units(val) -> int:
+    try:
+        return int(float(val or 0))
+    except (ValueError, TypeError):
+        return 0
+
+
 async def fetch_quota(account: Account) -> dict:
     """拉取单个账号的 方案 / 余额 / 用量，写回账号状态并持久化。
 
@@ -161,27 +186,38 @@ async def fetch_quota(account: Account) -> dict:
             pass
 
     quota_map: dict = {}
+    balance_parsed_ok = False
     if balance_res is not None and balance_res.status_code == 200:
         try:
             data = balance_res.json()
-            result["balance"] = data
-            for bal in (data.get("data") or {}).get("balances") or []:
-                name = bal.get("show_name") or bal.get("model") or "model"
-                window = {
-                    "total": bal.get("total_units"),
-                    "used": bal.get("used_units"),
-                    "remaining": bal.get("remaining_units"),
-                    "expires_at": bal.get("expires_at"),
-                }
-                prev = quota_map.get(name)
-                if prev:
-                    # 防御：同模型多窗口（如日窗 + 一次性）合并，避免后者覆盖前者
-                    for k in ("total", "used", "remaining"):
-                        prev[k] = (prev.get(k) or 0) + (window.get(k) or 0)
-                    prev["expires_at"] = max(prev.get("expires_at") or 0, window.get("expires_at") or 0)
-                    logs.warn("quota", f"balance 同名窗口 {name} 已合并")
-                else:
-                    quota_map[name] = window
+            if isinstance(data, dict):
+                result["balance"] = data
+                now_ts = now
+                for bal in (data.get("data") or {}).get("balances") or []:
+                    exp = bal.get("expires_at")
+                    try:
+                        exp_val = float(exp) if exp is not None else 0
+                        if exp_val and exp_val <= now_ts:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+                    name = _canonical_model_key(bal)
+                    window = {
+                        "total": _safe_units(bal.get("total_units")),
+                        "used": _safe_units(bal.get("used_units")),
+                        "remaining": _safe_units(bal.get("remaining_units")),
+                        "expires_at": bal.get("expires_at"),
+                    }
+                    prev = quota_map.get(name)
+                    if prev:
+                        # 同模型多窗口（如日窗 + 一次性活动赠送池）正常累加合并
+                        for k in ("total", "used", "remaining"):
+                            prev[k] = (prev.get(k) or 0) + (window.get(k) or 0)
+                        prev["expires_at"] = max(prev.get("expires_at") or 0, window.get("expires_at") or 0)
+                    else:
+                        quota_map[name] = window
+                balance_parsed_ok = True
         except (ValueError, KeyError):
             pass
 
@@ -192,31 +228,45 @@ async def fetch_quota(account: Account) -> dict:
         except (ValueError, KeyError):
             pass
 
-    if quota_map:
+    # 只要上游 /billing/balance 成功响应 200 并合法解析，物理事实即为基准进行真相同步
+    if balance_parsed_ok:
         account.quota = quota_map
-        # 额度耗尽判定：所有日窗口剩余 <= 0。注意 balance 不含一次性赠送池——
-        # 赠送池有效时不判耗尽，否则账号会被路由跳过而实际仍有 3 亿级可用额度
-        now = time.time()
-        remainings = [
-            q.get("remaining") for q in quota_map.values() if q.get("remaining") is not None
-        ]
-        daily_exhausted = bool(remainings) and all((r or 0) <= 0 for r in remainings)
-        has_bonus = _bonus_active(account.plan, now) or any(
-            _bonus_active(p, now) for p in account.plans
-        )
-        has_daily = bool(remainings) and any((r or 0) > 0 for r in remainings)
-        if daily_exhausted and not has_bonus:
-            account.status = Status.EXHAUSTED
-            account.last_error = "额度已用完"
-        elif account.status in (Status.EXHAUSTED, Status.COOLING) and (
-            has_daily or has_bonus
-        ):
-            # 额度恢复（窗口重置 / 赠送池生效）→ 重新激活。冷却期内不提前解除；
-            # 废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。
-            if not account.is_cooling():
-                account.status = Status.ACTIVE
-                account.last_error = None
-                account.cooling_until = None
+        if quota_map:
+            # 额度耗尽判定：优先锚定主免费池模型 DEFAULT_MODEL（GLM-5.3-Flash，大小写无关），
+            # 防止新号在 GLM-5.3-Flash 耗尽后因闲置的 300 万 GLM-5.3 余量阻塞 EXHAUSTED 状态或触发误恢复；
+            # 若 quota_map 不含主模型窗口（如离线 Mock 环境），回退按全部窗口余量判定。
+            target_norm = constants.DEFAULT_MODEL.strip().lower()
+            flash_remainings = [
+                q.get("remaining")
+                for k, q in quota_map.items()
+                if isinstance(q, dict)
+                and str(k).strip().lower() == target_norm
+                and q.get("remaining") is not None
+            ]
+            target_remainings = flash_remainings if flash_remainings else [
+                q.get("remaining")
+                for q in quota_map.values()
+                if isinstance(q, dict) and q.get("remaining") is not None
+            ]
+            all_exhausted = bool(target_remainings) and all((r or 0) <= 0 for r in target_remainings)
+            has_remaining = bool(target_remainings) and any((r or 0) > 0 for r in target_remainings)
+            if all_exhausted:
+                account.status = Status.EXHAUSTED
+                account.last_error = "额度已用完"
+            elif account.status in (Status.EXHAUSTED, Status.COOLING) and has_remaining:
+                # 额度恢复（窗口重置 / 新领套餐到账）→ 重新激活。冷却期内不提前解除；
+                # 废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。
+                if not account.is_cooling():
+                    account.status = Status.ACTIVE
+                    account.last_error = None
+                    account.cooling_until = None
+        else:
+            # balance_res 成功响应 200 但 balances 列表为空：
+            # 说明上游确认该账号物理上已无任何有效额度窗口（套餐到期或未开通）。
+            # 必须清空 account.quota 避免残留过期快照；若账号当前为 ACTIVE，无额度时立即转为 EXHAUSTED。
+            if account.status == Status.ACTIVE:
+                account.status = Status.EXHAUSTED
+                account.last_error = "额度已用完"
 
     store.update_account(account)
     return result or {"error": "无法获取额度数据"}

@@ -51,6 +51,7 @@ class Account:
     last_used_at: float | None = None
     last_checked_at: float | None = None
     cooling_until: float | None = None
+    claim_blocked_until: float | None = None  # 1005 名额用完避让截止时间戳（Unix 秒）
     last_error: str | None = None
     created_at: float = field(default_factory=time.time)
     # 每账号客户端指纹（fingerprint.DeviceProfile；dataclass 存 dict，取用时还原）
@@ -90,16 +91,15 @@ class Account:
     def has_apikey_fallback(self) -> bool:
         """同账号是否持有可走 api.z.ai 的 API Key（JWT 死后的对话回退）。
 
-        仅 JWT 账号的附加 Key 算回退；纯 apiKey 账号的主键不是 fallback，
-        风控/失效后不得靠这把 Key 继续被选中。
+        纯免费赠送池模式下，OAuth 附属生成的 zcode-api-key 在 api.z.ai 恒为 0 余额
+        （HTTP 429 code 1113），启用回退会导致故障号滞留轮询池并制造无效报错，故固定关闭。
         """
-        return self.mode == "jwt" and bool((self.api_key or "").strip())
+        return False
 
     def uses_plan_channel(self) -> bool:
         """当前是否允许走 Coding Plan JWT 通道（messages + billing）。
 
-        invalid / 风控 disabled / 手动停用 都视为 JWT 不可用；有 Key 时对话
-        走回退通道，但 billing/claim 仍必须停（Key 通道没有套餐领取）。
+        invalid / 风控 disabled / 手动停用 都视为 JWT 不可用。
         """
         if self.mode != "jwt" or not (self.jwt_token or "").strip():
             return False
@@ -123,8 +123,7 @@ class Account:
     def is_selectable(self, now: float | None = None) -> bool:
         """是否可被轮询选中。
 
-        JWT 失效 / 风控禁用后，若同账号有 API Key，仍可选中并走回退通道；
-        手动 enabled=False 永远不选。
+        JWT 失效 / 风控禁用 / 额度耗尽 / 手动停用 均不可选；冷却期满后自动恢复可选。
         """
         if not self.enabled:
             return False
@@ -137,12 +136,50 @@ class Account:
             return bool(self.cooling_until and now >= self.cooling_until)
         return True
 
+    def has_model_quota(self, model: str | None) -> bool:
+        """检查当前账号对指定模型是否仍有可用额度（大小写无关，冷启动空配额默认放行）。
+
+        - 若未指定 model 或账号尚未拉取过 quota（冷启动），返回 True；
+        - 若 quota 中存在同名模型窗口，则要求 remaining > 0（或 remaining 为 None）；
+        - 若 quota 非空但未包含该模型窗口，返回 True（由 store.select 优先挑选显式包含该模型余量的账号）。
+        """
+        if not model or not self.quota or not isinstance(self.quota, dict):
+            return True
+        target = model.strip().lower()
+        if not target:
+            return True
+        for k, win in self.quota.items():
+            if isinstance(k, str) and k.strip().lower() == target and isinstance(win, dict):
+                rem = win.get("remaining")
+                return rem is None or rem > 0
+        return True
+
+    def explicitly_supports_model(self, model: str | None) -> bool:
+        """账号是否处于冷启动（未拉配额）或显式持有目标模型的正余量窗口。"""
+        if not model or not self.quota or not isinstance(self.quota, dict):
+            return True
+        target = model.strip().lower()
+        if not target:
+            return True
+        for k, win in self.quota.items():
+            if isinstance(k, str) and k.strip().lower() == target and isinstance(win, dict):
+                rem = win.get("remaining")
+                return rem is None or rem > 0
+        return False
+
     def is_cooling(self, now: float | None = None) -> bool:
         """冷却是否仍在生效（含风控指数退避）。冷却期内不应产生任何上游流量。"""
         if self.status != Status.COOLING:
             return False
         now = now or time.time()
         return bool(self.cooling_until and now < self.cooling_until)
+
+    def is_claim_blocked(self, now: float | None = None) -> bool:
+        """是否处于 1005 名额用完后的避让冷却期。"""
+        if not self.claim_blocked_until:
+            return False
+        now = now or time.time()
+        return now < self.claim_blocked_until
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -190,6 +227,7 @@ class Account:
             "last_used_at": self.last_used_at,
             "last_checked_at": self.last_checked_at,
             "cooling_until": self.cooling_until,
+            "claim_blocked_until": self.claim_blocked_until,
             "last_error": self.last_error,
             "created_at": self.created_at,
             "fingerprint": self.fingerprint_view(),

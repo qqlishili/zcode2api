@@ -11,15 +11,15 @@
 - 请求/响应：标准 Anthropic Messages API（含 `stream: true` 的 SSE 透传）。
 - 上游转发目标由账号模式决定：JWT → `zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`；API Key → `api.z.ai/api/anthropic/v1/messages`。
 - 行为：多轮会话亲和选号 + 池内 round-robin 选号（`store.select`）→ 单账号失败按分类换号（≤`MAX_ACCOUNT_ATTEMPTS=5`，满号跳过不计）→ 验证码挑战原账号重试（≤3）。429/5xx/验证码等待期间释放该账号并发槽，醒后重新占槽或换号。
-- 模型名规范化：小写化后映射（`glm-5.2→GLM-5.2`、`glm-5-turbo→GLM-5-Turbo`、`glm-turbo→GLM-5-Turbo`、`glm-5.1→GLM-5.1`、`glm-4.7→GLM-4.7`）；未知名原样透传。
+- 模型名规范化：纯免费赠送池模式下，网关入口将客户端传入的任意模型名统一归一化为 `constants.DEFAULT_MODEL`（`GLM-5.3-Flash`），并按 `GLM-5.3-Flash` 思考契约转换 `thinking` / `output_config.effort`。
 
 ### 1.2 `GET /v1/models`
 
 ```json
-{ "object": "list", "data": [ { "id": "GLM-5.3-Flash", "type": "model", "display_name": "GLM-5.3-Flash", "created_at": "…" }, ... ] }
+{ "object": "list", "data": [ { "id": "GLM-5.3-Flash", "type": "model", "display_name": "GLM-5.3-Flash", "created_at": "…" } ] }
 ```
 
-模型清单来自 `constants.AVAILABLE_MODELS`（按账号实际余额窗口公布，当前 `GLM-5.3-Flash` / `GLM-5.3`）。
+模型清单来自 `constants.AVAILABLE_MODELS`（当前公布唯一免费赠送池模型 `GLM-5.3-Flash`）。
 
 ### 1.3 `POST /v1/chat/completions`（OpenAI 兼容）
 

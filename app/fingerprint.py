@@ -68,7 +68,7 @@ _HOST_PLATFORMS = ("darwin", "win32", "linux")
 _HOST_ARCHS = ("arm64", "x64")
 _OS_VERSIONS = {
     "darwin": ("22.6.0", "23.6.0", "24.5.0", "24.6.0", "25.5.0"),
-    "win32": ("10.0.19045", "10.0.22000", "10.0.22621", "10.0.22631", "10.0.26100", "10.0.26200"),
+    "win32": ("10", "11", "10.0.19045", "10.0.22000", "10.0.22621", "10.0.22631", "10.0.26100", "10.0.26200"),
     "linux": ("5.15.0-91-generic", "6.1.0-18-amd64", "6.8.0-45-generic"),
 }
 # 语言-时区真实地区组合（X-Client-Language ↔ X-Client-Timezone，激活事件同源）
@@ -84,8 +84,8 @@ _LOCALES = (
 )
 
 _SCREEN_RE = re.compile(r"^\d{3,4}x\d{3,4}$")
-# os.release() 形态门（host_real 放行用）：主版本.次版本.修订 + 可选后缀
-_RELEASE_SHAPE = re.compile(r"^\d+\.\d+(\.\d+)?[\w.\-]*$")
+# os.release() 形态门（host_real 放行用）：主版本[.次版本.修订] + 可选后缀（Win 10/11 返回单版本数字）
+_RELEASE_SHAPE = re.compile(r"^\d+(\.\d+)*[\w.\-]*$")
 
 
 @dataclass(frozen=True)

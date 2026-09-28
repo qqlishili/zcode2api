@@ -232,36 +232,26 @@ function allEntitlements(a){
   return out;
 }
 
-// 赠送授权是否已被 balance 窗口体现（上游 2026-09-06 起把 one_time 池并入 balance；
-// 同模型窗口 total >= 授权量即视为已含，避免赠送重复渲染/重复计数）
-function bonusCoveredByBalance(a, e){
-  const grant=Number(e.grant_units)||0;
-  if(!grant)return false;
-  return Object.entries(a.quota||{}).some(([k,w])=>{
-    if(k!==e.show_name)return false;
-    return Number(w&&w.total)||0>=grant;
-  });
+// 提取账号中匹配 GLM-5.3-Flash（不区分大小写）的配额窗口键列表
+function flashQuotaKeys(q){
+  return Object.keys(q||{}).filter(k=>String(k).trim().toLowerCase()==='glm-5.3-flash');
 }
 
 function renderStats(s){
   set('s-total',s.total||0);
   set('s-active',s.active||0);
   set('s-exhausted',s.exhausted||0);
-  // 总额度（剩余）= 日窗口余额 + 已生效一次性活动赠送
-  // （上游不暴露赠送池实际剩余，按授权量计入；悬停有说明）
-  const now=Date.now()/1000;
+  // 总额度（剩余）：上游 billing/balance 已合并日免费窗与一次性活动赠送池，
+  // 聚焦统计主免费池 GLM-5.3-Flash 的真实剩余额度（不含闲置的 GLM-5.3 窗口）
   let totalRem=0;
   allAccounts.forEach(a=>{
-    Object.values(a.quota||{}).forEach(w=>{totalRem+=Number(w.remaining)||0;});
-    allEntitlements(a).forEach(e=>{
-      const eff=Number(e.effective_at)||0;
-      let ends=Number(e.ends_at||e.expires_at)||e._planEnds||0;
-      if(e.period==='one_time'&&eff>0&&eff<=now&&(!ends||now<=ends)
-         &&!bonusCoveredByBalance(a,e))totalRem+=Number(e.grant_units)||0;
-    });
+    const q=a.quota||{};
+    const fKeys=flashQuotaKeys(q);
+    const keys=fKeys.length?fKeys:Object.keys(q);
+    keys.forEach(k=>{totalRem+=Number((q[k]||{}).remaining)||0;});
   });
   set('s-quota',fmtNum(totalRem));
-  document.getElementById('s-quota').title=`精确剩余：${Math.round(totalRem).toLocaleString('zh-CN')} tokens · 日窗口余额 + 已生效一次性活动赠送（赠送池按授权量计入，上游不提供实际剩余）`;
+  document.getElementById('s-quota').title=`精确剩余：${Math.round(totalRem).toLocaleString('zh-CN')} tokens · GLM-5.3-Flash 实时可用余额（含日免费窗与活动赠送池）`;
 }
 
 function renderFilters(){
@@ -322,8 +312,11 @@ function statusCell(a){
       sub=`<div class="cell-sub${days<=7?' warn-line':''}" title="当前套餐有效期">套餐至 ${fmtDate(planEnd)}</div>`;
     }
   }
+  const claimBlocked=Number(a.claim_blocked_until)||0;
+  const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
+  const claimSub=claimLeft>0?`<div class="cell-sub" title="今日活动名额已满，${fmtDur(claimLeft)}后自动解除避让"><span style="color:var(--amber)">⏳ 领取避让 ${fmtDur(claimLeft)}</span></div>`:'';
   const err=a.last_error?`<div class="cell-sub err-line" title="${esc(a.last_error)}">${esc(a.last_error.length>26?a.last_error.slice(0,26)+'…':a.last_error)}</div>`:'';
-  return `<span class="badge badge-${a.status}">${STATUS_LABEL[a.status]||a.status}</span>${sub}${err}`;
+  return `<span class="badge badge-${a.status}">${STATUS_LABEL[a.status]||a.status}</span>${sub}${claimSub}${err}`;
 }
 
 function tickbarHtml(a){
@@ -354,9 +347,13 @@ function actionsCell(a){
   const isJwt=a.mode==='jwt';
   const loading=refreshing.has(a.id);
   const enabled=a.enabled!==false&&a.status!=='disabled';
+  const claimBlocked=Number(a.claim_blocked_until)||0;
+  const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
+  const claimBtnTitle=claimLeft>0?`今日名额已满，避让中（${fmtDur(claimLeft)}后可重试）`:'自动领取赠送额度';
+  const claimBtnStyle=claimLeft>0?'opacity:0.4;':'';
   return `<div class="acct-actions">
     ${isJwt?`<button onclick="refreshOne('${a.id}')" class="row-icon-btn${loading?' is-loading':''}" title="刷新额度"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg></button>
-    <button onclick="claimOne('${a.id}')" class="row-icon-btn${claiming.has(a.id)?' is-loading':''}" title="自动领取赠送额度"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg></button>
+    <button onclick="claimOne('${a.id}')" class="row-icon-btn${claiming.has(a.id)?' is-loading':''}" style="${claimBtnStyle}" title="${claimBtnTitle}"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg></button>
     <button onclick="openClaimModal('${a.id}')" class="row-icon-btn" title="手动领取活动套餐（浏览器过验证码）"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg></button>`:''}
     <button onclick="openEdit('${a.id}')" class="row-icon-btn" title="编辑"><svg viewBox="0 0 24 24"><path d="m4 20 4.5-1 9.5-9.5-3.5-3.5L5 15.5z"/><path d="m13.5 5.5 3.5 3.5"/></svg></button>
     <button onclick="doDelete('${a.id}')" class="row-icon-btn row-icon-danger" title="删除"><svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg></button>
@@ -378,7 +375,8 @@ function rowHtml(a){
 
 function quotaCell(a){
   const q=a.quota||{};
-  const keys=Object.keys(q);
+  const fKeys=flashQuotaKeys(q);
+  const keys=fKeys.length?fKeys:Object.keys(q);
   let rows=keys.map(k=>{
     const w=q[k]||{};const rem=Number(w.remaining)||0,tot=Number(w.total)||0;
     const rawPct=tot>0?Math.max(0,Math.min(100,(rem/tot)*100)):0;
@@ -396,30 +394,9 @@ function quotaCell(a){
       <span class="quota-row-val" title="${rawTip}"><span>${fmtNum(rem)} / ${fmtNum(tot)}</span>${exp?`<span class="quota-row-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>`:''}</span>
     </div>`;
   });
-  // 活动额度（plan.entitlements）：
-  // ① one_time 已生效 —— billing/balance 不体现这类一次性赠送，单独渲染「活动赠送」行
-  // ② 待生效（effective_at 在未来）—— 斜纹流动条，过点自动转正
+  // 待生效活动套餐（effective_at 在未来）—— 斜纹流动条，过点自动并入 balance
   const now=Date.now()/1000;
   const ents=allEntitlements(a);
-  ents.filter(e=>{
-    const eff=Number(e.effective_at)||0, ends=Number(e.ends_at||e.expires_at)||e._planEnds||0;
-    return e.period==='one_time'&&eff>0&&eff<=now&&(!ends||now<=ends)
-      &&!bonusCoveredByBalance(a,e);
-  }).forEach(e=>{
-    const eff=Number(e.effective_at)||0;
-    // 上游 entitlement 不带结束时间：借用套餐有效期（赠送随套餐到期）
-    let ends=Number(e.ends_at||e.expires_at)||e._planEnds||0;
-    const endTxt=ends?`${fmtDate(eff)} ~ ${fmtDate(ends)}`:`${fmtDate(eff)} 起有效`;
-    const tip=`活动赠送 ${fmtNum(e.grant_units)} · ${fmtDate(eff)} 生效${ends?'，'+fmtDate(ends)+' 结束（按套餐有效期）':''} · 实际剩余以上游账单为准`;
-    rows.push(`<div class="quota-row is-bonus">
-      <span class="quota-row-name" title="${tip}">${esc(shortModel(e.show_name||'活动额度'))}</span>
-      <span class="quota-row-bar-wrap" title="${tip}">
-        <span class="quota-row-pct" style="color:var(--mint)"><span>100%</span><span>剩余 ${fmtNum(e.grant_units)}</span></span>
-        <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
-      </span>
-      <span class="quota-row-val"><span>+${fmtNum(e.grant_units)}</span><span class="quota-row-exp" title="${tip}">${endTxt}</span></span>
-    </div>`);
-  });
   ents.filter(e=>Number(e.effective_at)>now).forEach(e=>{
     const eff=Number(e.effective_at)||0;
     const tip=`${esc(e._planName||'')} · ${fmtDate(eff)} 起生效${e._planEnds?'，套餐 '+fmtDate(e._planEnds)+' 结束':''}`;
@@ -435,7 +412,7 @@ function quotaCell(a){
   if(!rows.length){
     if(a.mode!=='jwt')return '<span class="quota-empty">—</span>';
     return planList(a).length===0
-      ?'<span class="quota-empty" title="上游 billing/current 返回空套餐列表：可能套餐未开通，或新账号试用额度未列入 billing（不影响路由使用，以实际请求结果为准）">无套餐数据 · billing 为空</span>'
+      ?'<span class="quota-empty" title="上游 billing/current 返回空套餐列表：套餐已到期或未开通（以实际请求结果为准）">无有效额度 · 套餐已到期或 billing 为空</span>'
       :'<span class="quota-empty">额度未获取，点右上角刷新</span>';
   }
   return '<div class="quota-rows">'+rows.join('')+'</div>';

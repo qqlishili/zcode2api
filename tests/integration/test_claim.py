@@ -209,6 +209,40 @@ class TestClaim:
         assert "已经领取过" in outcome["message"]
         assert stub.solve_count == 1  # 非 3007 不重试
 
+    async def test_claim_daily_limit_triggers_backoff_and_short_circuits(self, claim_env, fresh_app):
+        """上游 1005 今日名额用完：触发时序避让（claim_blocked_until），后续领取本地短路且不调验证码。"""
+        import time
+        client, mock, stub, acc = claim_env
+        mock.state.claim_scenario = "claim_daily_limit"
+
+        # 第一次请求：上游返回 1005
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id], "plan_id": "mock-claim-plan"},
+                                headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is False
+        assert "今日领取名额已用完" in outcome["message"]
+        assert "已自动避让" in outcome["message"]
+        assert stub.solve_count == 1
+
+        # 检查持久化：account.claim_blocked_until 已经被写入，且在未来（大于当前时间）
+        live = fresh_app.find("zai", acc.id)
+        assert live.claim_blocked_until is not None
+        assert live.claim_blocked_until > time.time()
+        assert live.is_claim_blocked() is True
+
+        # 第二次请求：处于避让期，本地短路，直接拦截，stub.solve_count 依然为 1（未消耗算力打码）
+        res2 = await client.post("/admin/api/claim",
+                                 json={"account_ids": [acc.id], "plan_id": "mock-claim-plan"},
+                                 headers={"Authorization": "Bearer zcode"})
+        assert res2.status_code == 200
+        outcome2 = res2.json()["outcomes"][0]
+        assert outcome2["ok"] is False
+        assert "今日领取名额已用完" in outcome2["message"]
+        assert "跳过领取" in outcome2["message"]
+        assert stub.solve_count == 1  # 严格短路，验证码未被再次求解！
+
     async def test_claim_captcha_solve_failure_business_receipt(self, claim_env, monkeypatch):
         """验证码求解最终失败（CaptchaSolveError）→ 200 业务回执，而非 500（2026-09-07）。"""
         from app.captcha import CaptchaSolveError
