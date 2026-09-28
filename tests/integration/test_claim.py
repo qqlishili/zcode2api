@@ -623,3 +623,19 @@ class TestAutoClaimOnPoolEntry:
         assert outcome["skipped"] is True
         assert "已持有该套餐" in outcome["message"]
         assert stub.solve_count == 0
+
+    async def test_claim_auto_picks_skips_when_no_plans_available(self, claim_env):
+        """当上游没有待领取的套餐时（如国际账号或无活动期），自动跳过且不报错（归一化为 skipped）。"""
+        client, mock, stub, acc = claim_env
+        mock.state.claim_scenario = "claim_none"
+
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id]},
+                                headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is True
+        assert outcome["skipped"] is True
+        assert "暂无可领取的活动套餐" in outcome["message"]
+        assert stub.solve_count == 0
+

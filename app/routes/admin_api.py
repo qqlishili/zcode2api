@@ -503,14 +503,17 @@ async def claim(payload: dict = Body(default=None)):
             result = await do_claim(acc, plan_id)
         except ClaimError as err:
             err_msg = str(err)
-            if not plan_id and ("已领取过" in err_msg or "已经领取过" in err_msg):
-                logs.info("claim", f"账号 {acc.name} 已领取过该活动，自动跳过")
+            is_no_plan = not plan_id and ("没有待领取的套餐" in err_msg or "无可领" in err_msg or "暂无可领" in err_msg)
+            is_already_claimed = not plan_id and ("已领取过" in err_msg or "已经领取过" in err_msg or "已持有" in err_msg)
+            if is_no_plan or is_already_claimed:
+                reason = "暂无可领取的活动套餐，已自动跳过" if is_no_plan else "活动套餐已领取过，已自动跳过"
+                logs.info("claim", f"账号 {acc.name} {reason}")
                 outcomes.append({
                     "account_id": acc.id,
                     "account_name": acc.name,
                     "ok": True,
                     "skipped": True,
-                    "message": "活动套餐已领取过，已自动跳过",
+                    "message": reason,
                 })
                 continue
             logs.warn("claim", f"账号 {acc.name} 领取失败: {err}")

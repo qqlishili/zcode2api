@@ -367,8 +367,16 @@ function actionsCell(a){
   const enabled=a.enabled!==false&&a.status!=='disabled';
   const claimBlocked=Number(a.claim_blocked_until)||0;
   const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
-  const claimBtnTitle=claimLeft>0?`今日名额已满，避让中（${fmtDur(claimLeft)}后可重试）`:'自动领取赠送额度';
-  const claimBtnStyle=claimLeft>0?'opacity:0.4;':'';
+  let claimBtnTitle='自动领取赠送额度';
+  let claimBtnStyle='';
+  if(claimLeft>0){
+    claimBtnTitle=`今日名额已满，避让中（${fmtDur(claimLeft)}后可重试）`;
+    claimBtnStyle='opacity:0.4;';
+  } else if(!hasUnclaimedActivity(a)&&((a.plans&&a.plans.length)||(a.plan_slots&&a.plan_slots.length)||a.quota)){
+    const hasPlans=(a.claimable_plans||[]).length>0;
+    claimBtnTitle=hasPlans?'已持有当前活动套餐，无需重复领取':'当前暂无待领取的活动套餐';
+    claimBtnStyle='opacity:0.45;';
+  }
     const defaultPid = (a.claimable_plans && a.claimable_plans[0] && a.claimable_plans[0].plan_id) || '';
     return `<div class="acct-actions">
     ${isJwt?`<button onclick="refreshOne('${a.id}')" class="row-icon-btn${loading?' is-loading':''}" title="刷新额度"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg></button>
@@ -803,9 +811,18 @@ function hasUnclaimedActivity(a){
 }
 
 function claimToast(o){
-  if(o.skipped) showToast(`「${o.account_name}」${o.message || '已领取过该活动，已跳过'}`, 'info');
-  else if(o.ok) showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
-  else showToast(`「${o.account_name}」领取失败：${o.message || '未知错误'}`, 'error');
+  if(o.skipped) {
+    showToast(`「${o.account_name}」${o.message || '已跳过'}`, 'info');
+  } else if(o.ok) {
+    showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
+  } else {
+    const msg = o.message || '';
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
+      showToast(`「${o.account_name}」${msg}`, 'info');
+    } else {
+      showToast(`「${o.account_name}」领取失败：${msg || '未知错误'}`, 'error');
+    }
+  }
 }
 
 async function claimOne(id){
@@ -816,6 +833,9 @@ async function claimOne(id){
     if(hasPlans){
       showToast(`「${acc.name}」已持有该活动套餐，无需重复领取`, 'info');
       return;
+    } else if((acc.plans && acc.plans.length > 0) || (acc.plan_slots && acc.plan_slots.length > 0) || acc.quota){
+      showToast(`「${acc.name}」当前暂无待领取的活动套餐`, 'info');
+      return;
     }
   }
   claiming.add(id);
@@ -824,7 +844,12 @@ async function claimOne(id){
     const d = await api('POST', '/claim', { account_ids: [id] });
     (d.outcomes || []).forEach(claimToast);
   }catch(e){
-    showToast('领取失败: ' + e.message, 'error');
+    const msg = e.message || '';
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
+      showToast(`「${acc ? acc.name : id}」${msg}`, 'info');
+    } else {
+      showToast('领取失败: ' + msg, 'error');
+    }
   }finally{
     claiming.delete(id);
     await load();
