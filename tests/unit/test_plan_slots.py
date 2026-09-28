@@ -142,10 +142,31 @@ class TestBuildPlanSlots:
         assert start_slot["pid"] == "zcode-v3-start-plan-regular"
         assert start_slot["name"] == "ZCode Start Plan"
         assert len(start_slot["items"]) == 2
-        # 完整保留 GLM-5.3-Flash 与 GLM-5.3 两个模型
-        model_names = [it["name"] for it in start_slot["items"]]
-        assert "GLM-5.3-Flash" in model_names
-        assert "GLM-5.3" in model_names
+        # 完整保留并严格排序：GLM-5.3 严格在 GLM-5.3-Flash 下面
+        assert start_slot["items"][0]["name"] == "GLM-5.3-Flash"
+        assert start_slot["items"][1]["name"] == "GLM-5.3"
+
+    def test_model_order_flash_always_first_even_if_upstream_reversed(self):
+        """测试即使上游 balances 中 GLM-5.3 排在第一位，槽位内也强制将 GLM-5.3-Flash 置顶。"""
+        raw_balance = {
+            "plans": [
+                {
+                    "plan_id": "p-1",
+                    "name": "套餐一",
+                    "status": "active",
+                }
+            ],
+            "balances": [
+                # 逆序输入：GLM-5.3 在前，GLM-5.3-Flash 在后
+                {"plan_id": "p-1", "show_name": "GLM-5.3", "total_units": 3000000, "used_units": 0},
+                {"plan_id": "p-1", "show_name": "GLM-5.3-Flash", "total_units": 5000000, "used_units": 0},
+            ],
+        }
+        slots = _build_plan_slots(raw_balance, [])
+        items = slots[0]["items"]
+        assert len(items) == 2
+        assert items[0]["name"] == "GLM-5.3-Flash"
+        assert items[1]["name"] == "GLM-5.3"
 
     def test_orphan_loose_balances_fallback(self):
         """测试未挂载 plan_id 的孤儿额度桶归入 Default 槽位，不丢弃任何模型配额。"""

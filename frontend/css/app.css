@@ -106,8 +106,8 @@ select.input option{background:var(--panel);color:var(--ink)}
 
 /* ── 账号池列表（CPA-Manager-Plus 风格 6 列表格：凭证/状态/最近请求/用量/额度/操作）── */
 .acct-scroll{overflow-x:auto}
-.acct-table{display:flex;flex-direction:column;gap:8px;min-width:1020px}
-.acct-head,.acct-row{display:grid;grid-template-columns:minmax(180px,1.15fr) 150px 150px 150px minmax(240px,1.5fr) 176px;gap:14px;align-items:center}
+.acct-table{display:flex;flex-direction:column;gap:8px;min-width:1080px}
+.acct-head,.acct-row{display:grid;grid-template-columns:minmax(170px,1.1fr) 135px minmax(320px,2fr) 125px 120px 176px;gap:14px;align-items:center}
 .acct-head{padding:0 16px;font-size:11px;font-weight:600;color:var(--ink-mute);letter-spacing:.03em}
 .acct-head .th-actions{text-align:right}
 .acct-row{border:1px solid var(--hairline-soft);border-radius:10px;background:var(--panel);padding:12px 16px;transition:border-color .15s}
@@ -300,51 +300,31 @@ select.input option{background:var(--panel);color:var(--ink)}
   .mon-search{width:100%}
 }
 
-/* ── 多套餐卡片分组与待领横幅（对齐 zcode-switch）── */
-.plan-grp + .plan-grp{margin-top:8px;padding-top:8px;border-top:1px dashed var(--hairline-soft)}
-.pg-head{display:flex;align-items:center;gap:7px;margin-bottom:5px;min-width:0}
-.pg-name{
-  font-size:12px;
-  font-weight:600;
-  color:var(--ink-dim);
-  font-family:var(--mono);
-  letter-spacing:.02em;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  min-width:0;
-}
-.pg-exp{margin-left:auto;flex:none;font-family:var(--mono);font-size:11px;color:var(--ink-mute);white-space:nowrap}
-.pg-exp.warn-line{color:var(--amber)}
+/* ── Antigravity Plan Card & Quota Display ── */
+.row-quota-slot{display:flex;flex-direction:column;gap:6px;min-width:0;width:100%}
 
+/* 待领活动横幅 */
 .claim-strip{
   display:flex;
   align-items:center;
   gap:8px;
   padding:6px 10px;
-  margin-bottom:8px;
-  border:1px solid rgba(232,163,61,.4);
+  border:1px solid rgba(232,163,61,.35);
   background:rgba(232,163,61,.08);
-  border-radius:var(--radius);
+  border-radius:6px;
   color:var(--amber);
   font-size:12px;
   min-width:0;
+  transition:border-color .15s, background .15s;
+}
+.claim-strip:hover{
+  background:rgba(232,163,61,.12);
+  border-color:rgba(232,163,61,.5);
 }
 .claim-strip svg{flex:none;color:var(--amber)}
-.claim-name{
-  font-weight:600;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-.claim-grants{
-  color:var(--ink-dim);
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  flex:1;
-  min-width:0;
-}
+.claim-info{display:flex;align-items:center;gap:6px;min-width:0;flex:1;overflow:hidden}
+.claim-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.claim-grants{font-size:11px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .btn-claim{
   flex:none;
   font-family:inherit;
@@ -364,3 +344,123 @@ select.input option{background:var(--panel);color:var(--ink)}
 }
 .btn-claim:hover{background:#f0b055}
 .btn-claim:disabled{opacity:0.5;cursor:not-allowed}
+
+/* 套餐卡片：Antigravity Surface 设计规范 */
+.plan-card{
+  background:var(--panel-2);
+  border:1px solid var(--hairline-soft);
+  border-radius:8px;
+  padding:8px 10px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+  transition:border-color .15s, box-shadow .15s;
+}
+.plan-card:hover{
+  border-color:rgba(255,255,255,.14);
+}
+.plan-card-hd{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-width:0;
+}
+.plan-hd-left{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+  overflow:hidden;
+}
+.plan-card-name{
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink);
+  letter-spacing:.01em;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.plan-card-exp{
+  flex:none;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--ink-mute);
+  white-space:nowrap;
+}
+.plan-card-exp.warn-line{color:var(--amber)}
+
+/* 模型配额项（精炼层次：上标题+余量，中平滑条，下数值+到期） */
+.plan-card-body{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  min-width:0;
+}
+.quota-card-item{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  min-width:0;
+}
+.quota-card-item + .quota-card-item{
+  margin-top:2px;
+  padding-top:6px;
+  border-top:1px dashed rgba(255,255,255,.05);
+}
+.qci-top{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-size:11.5px;
+  line-height:1.2;
+}
+.qci-name{
+  font-weight:600;
+  color:var(--ink-dim);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.qci-pct{
+  font-family:var(--mono);
+  font-size:11px;
+  font-weight:600;
+  white-space:nowrap;
+  flex:none;
+}
+.qci-track{
+  display:block;
+  height:4px;
+  border-radius:999px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.04);
+  overflow:hidden;
+}
+.qci-fill{
+  display:block;
+  height:100%;
+  border-radius:999px;
+  transition:width .3s, background-color .3s;
+}
+.qci-btm{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  font-size:10.5px;
+  color:var(--ink-mute);
+  font-family:var(--mono);
+  line-height:1.2;
+}
+.qci-val{
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.qci-exp{
+  white-space:nowrap;
+  opacity:.75;
+}

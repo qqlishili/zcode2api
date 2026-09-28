@@ -182,7 +182,8 @@ async def refresh(payload: dict = Body(default=None)):
     targets = [a for a in pool if a.allows_billing()]
     skipped_cooling = sum(1 for a in pool if a.is_cooling())
     skipped_invalid = len(pool) - len(targets) - skipped_cooling
-    summary = await refresh_accounts(targets)
+    include_claimable = bool(payload.get("include_claimable", True)) if payload else True
+    summary = await refresh_accounts(targets, include_claimable=include_claimable)
     return {
         "summary": summary,
         "count": len(targets),

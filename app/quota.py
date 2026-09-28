@@ -256,10 +256,21 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
             "items": loose_items,
         })
 
-    # 4. 计算各个 Slot 的汇总统计值（对齐 zcode-switch 汇总逻辑）
+    # 4. 计算各个 Slot 的汇总统计值并对模型项进行确定性排序（GLM-5.3 严格在 GLM-5.3-Flash 下面）
+    def _model_sort_key(item: dict) -> tuple:
+        name = str(item.get("name") or "").strip().lower()
+        if "flash" in name:
+            prio = 0
+        elif "glm-5" in name or "glm" in name:
+            prio = 1
+        else:
+            prio = 2
+        return (prio, name)
+
     for s in slots:
         items = s.get("items") or []
         if items:
+            items.sort(key=_model_sort_key)
             t_sum = sum(it.get("total") or 0 for it in items)
             u_sum = sum(it.get("used") or 0 for it in items)
             r_sum = sum(it.get("remaining") or 0 for it in items)
@@ -446,15 +457,15 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
     return result or {"error": "无法获取额度数据"}
 
 
-async def refresh_accounts(accounts: list[Account]) -> dict:
-    """并发刷新一批账号，返回汇总。"""
+async def refresh_accounts(accounts: list[Account], include_claimable: bool = True) -> dict:
+    """并发刷新一批账号，返回汇总。默认 include_claimable=True 联动探测待领活动。"""
     if not accounts:
         return {"ok": 0, "fail": 0}
-    sem = asyncio.Semaphore(8)
+    sem = asyncio.Semaphore(4)
 
     async def _one(acc: Account) -> bool:
         async with sem:
-            res = await fetch_quota(acc)
+            res = await fetch_quota(acc, include_claimable=include_claimable)
             return "error" not in res
 
     results = await asyncio.gather(*[_one(a) for a in accounts], return_exceptions=True)

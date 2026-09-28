@@ -30,10 +30,6 @@
         <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
         刷新额度
       </button>
-      <button onclick="checkAllClaim()" class="page-action-btn" id="btn-check-claim">
-        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        检查活动
-      </button>
       <button onclick="claimAll()" class="page-action-btn" id="btn-claim-all">
         <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>
         一键领取
@@ -274,7 +270,7 @@ function renderList(){
   const el=document.getElementById('acct-list');
   if(!items.length){el.innerHTML='<div class="empty-state">暂无账号，点击右上角「新增」添加</div>';return;}
   el.innerHTML=`<div class="acct-scroll"><div class="acct-table">
-    <div class="acct-head"><span>凭证 / 账号</span><span>可用状态</span><span>最近请求</span><span>历史用量</span><span>额度信息</span><span class="th-actions">操作</span></div>
+    <div class="acct-head"><span>凭证 / 账号</span><span>可用状态</span><span>额度信息</span><span>最近请求</span><span>历史用量</span><span class="th-actions">操作</span></div>
     ${items.map(rowHtml).join('')}
   </div></div>`;
 }
@@ -371,9 +367,9 @@ function rowHtml(a){
   return `<div class="acct-row${isDisabled?' is-disabled':''}" data-id="${a.id}">
     <div class="cell cred">${credCell(a)}</div>
     <div class="cell status">${statusCell(a)}</div>
+    <div class="cell quota">${quotaCell(a)}</div>
     <div class="cell recent"><div class="recent-ts">${fmtDateSec(a.last_used_at)}</div>${tickbarHtml(a)}</div>
     <div class="cell usage">${usageCell(a)}</div>
-    <div class="cell quota">${quotaCell(a)}</div>
     <div class="cell actions">${actionsCell(a)}</div>
   </div>`;
 }
@@ -391,17 +387,20 @@ function grantLabel(p) {
 
 function claimStripHtml(a) {
   const plans = a.claimable_plans || [];
-  const p = plans[0];
-  if (!p) return '';
-  const label = p.name || p.plan_id || '节日活动套餐';
-  const grants = grantLabel(p);
-  const targetPid = p.plan_id || '';
-  return `<div class="claim-strip" title="${esc(p.description || label)}">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>
-    <span class="claim-name">${esc(label)}</span>
-    ${grants ? `<span class="claim-grants">${esc(grants)}</span>` : ''}
-    <button class="btn-claim" onclick="openClaimModal('${a.id}','${esc(targetPid)}')">领取</button>
-  </div>`;
+  if (!plans.length) return '';
+  return plans.map(p => {
+    const label = p.name || p.plan_id || '节日活动套餐';
+    const grants = grantLabel(p);
+    const targetPid = p.plan_id || '';
+    return `<div class="claim-strip" title="${esc(p.description || label)}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>
+      <div class="claim-info">
+        <span class="claim-name">${esc(label)}</span>
+        ${grants ? `<span class="claim-grants">${esc(grants)}</span>` : ''}
+      </div>
+      <button class="btn-claim" onclick="openClaimModal('${a.id}','${esc(targetPid)}')">领取</button>
+    </div>`;
+  }).join('');
 }
 
 function expireInfo(s) {
@@ -415,6 +414,16 @@ function expireInfo(s) {
   return { text: soon && hasTime ? str : str.slice(0, 10), soon, warn };
 }
 
+function sortPlanItems(items) {
+  return (items || []).slice().sort((a, b) => {
+    const na = String(a.name || '').toLowerCase();
+    const nb = String(b.name || '').toLowerCase();
+    const pa = na.includes('flash') ? 0 : (na.includes('glm') ? 1 : 2);
+    const pb = nb.includes('flash') ? 0 : (nb.includes('glm') ? 1 : 2);
+    return pa - pb || na.localeCompare(nb);
+  });
+}
+
 function balRowHtml(it) {
   const tot = Number(it.total) || 0;
   const rem = Number(it.remaining) || 0;
@@ -426,13 +435,18 @@ function balRowHtml(it) {
   const color = (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
   const exp = it.expires_at ? String(it.expires_at) : '';
   const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${pctStr}已用)`;
-  return `<div class="quota-row">
-    <span class="quota-row-name" title="${esc(it.name)}">${esc(shortModel(it.name))}</span>
-    <span class="quota-row-bar-wrap" title="${rawTip}">
-      <span class="quota-row-pct" style="color:${color}"><span>${Math.round(remPct)}% 剩余</span><span>${fmtNum(rem)}</span></span>
-      <span class="quota-row-track"><span class="quota-row-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></span></span>
-    </span>
-    <span class="quota-row-val" title="${rawTip}"><span>${fmtNum(rem)} / ${fmtNum(tot)}</span>${exp ? `<span class="quota-row-exp" title="本额度到期时间">至 ${esc(exp.slice(5, 16))}</span>` : ''}</span>
+  return `<div class="quota-card-item">
+    <div class="qci-top">
+      <span class="qci-name" title="${esc(it.name)}">${esc(shortModel(it.name))}</span>
+      <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
+    </div>
+    <div class="qci-track" title="${rawTip}">
+      <div class="qci-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></div>
+    </div>
+    <div class="qci-btm" title="${rawTip}">
+      <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
+      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.slice(5, 16))}</span>` : ''}
+    </div>
   </div>`;
 }
 
@@ -441,38 +455,50 @@ function planGroupHtml(p) {
   const exp = expireInfo(p.expire);
   const tierCode = p.tier_code || (p.tier ? String(p.tier).toLowerCase() : 'other');
   const tierHtml = p.tier ? `<span class="tier-b ${tierCode}">${esc(p.tier)}</span>` : '';
-  const items = p.items || [];
+  const items = sortPlanItems(p.items || []);
   const rows = items.map(balRowHtml).join('');
   return `
-  <div class="plan-grp">
-    <div class="pg-head">
-      ${tierHtml}
-      <span class="pg-name" title="${esc(label)}">${esc(label)}</span>
-      ${exp ? `<span class="pg-exp${exp.warn ? ' warn-line' : ''}" title="套餐有效期至 ${esc(exp.text)}">至 ${esc(exp.text)}</span>` : ''}
+  <div class="plan-card">
+    <div class="plan-card-hd">
+      <div class="plan-hd-left">
+        ${tierHtml}
+        <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
+      </div>
+      ${exp ? `<span class="plan-card-exp${exp.warn ? ' warn-line' : ''}" title="套餐有效期至 ${esc(exp.text)}">至 ${esc(exp.text)}</span>` : ''}
     </div>
-    <div class="quota-rows">${rows}</div>
+    <div class="plan-card-body">${rows}</div>
   </div>`;
 }
 
 function fallbackQuotaHtml(a) {
   const q = a.quota || {};
   const fKeys = flashQuotaKeys(q);
-  const keys = fKeys.length ? fKeys : Object.keys(q);
+  const keys = (fKeys.length ? fKeys : Object.keys(q)).sort((a, b) => {
+    const na = a.toLowerCase(), nb = b.toLowerCase();
+    const pa = na.includes('flash') ? 0 : (na.includes('glm') ? 1 : 2);
+    const pb = nb.includes('flash') ? 0 : (nb.includes('glm') ? 1 : 2);
+    return pa - pb || na.localeCompare(nb);
+  });
   let rows = keys.map(k => {
     const w = q[k] || {}; const rem = Number(w.remaining) || 0, tot = Number(w.total) || 0;
-    const rawPct = tot > 0 ? Math.max(0, Math.min(100, (rem / tot) * 100)) : 0;
-    const pctRound = Math.round(rawPct * 10) / 10;
-    const pctStr = rawPct > 0 && rawPct < 100 ? (Number.isInteger(pctRound) ? pctRound + '%' : rawPct.toFixed(1) + '%') : Math.round(rawPct) + '%';
-    const color = (rem <= 0 || rawPct < 15) ? 'var(--red)' : (rawPct < 50 ? 'var(--amber)' : 'var(--mint)');
+    const used = Number(w.used) || Math.max(0, tot - rem);
+    const rawPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
+    const remPct = tot > 0 ? (rem / tot) * 100 : 0;
+    const color = (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
     const exp = Number(w.expires_at) || 0;
-    const rawTip = `剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${rawPct.toFixed(2)}%)`;
-    return `<div class="quota-row">
-      <span class="quota-row-name" title="${esc(k)}">${esc(shortModel(k))}</span>
-      <span class="quota-row-bar-wrap" title="${rawTip}">
-        <span class="quota-row-pct" style="color:${color}"><span>${pctStr}</span><span>剩余 ${fmtNum(rem)}</span></span>
-        <span class="quota-row-track"><span class="quota-row-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></span></span>
-      </span>
-      <span class="quota-row-val" title="${rawTip}"><span>${fmtNum(rem)} / ${fmtNum(tot)}</span>${exp ? `<span class="quota-row-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>` : ''}</span>
+    const rawTip = `${k}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens`;
+    return `<div class="quota-card-item">
+      <div class="qci-top">
+        <span class="qci-name" title="${esc(k)}">${esc(shortModel(k))}</span>
+        <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
+      </div>
+      <div class="qci-track" title="${rawTip}">
+        <div class="qci-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></div>
+      </div>
+      <div class="qci-btm" title="${rawTip}">
+        <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
+        ${exp ? `<span class="qci-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>` : ''}
+      </div>
     </div>`;
   });
   // 待生效活动套餐
@@ -481,22 +507,27 @@ function fallbackQuotaHtml(a) {
   ents.filter(e => Number(e.effective_at) > now).forEach(e => {
     const eff = Number(e.effective_at) || 0;
     const tip = `${esc(e._planName || '')} · ${fmtDate(eff)} 起生效${e._planEnds ? '，套餐 ' + fmtDate(e._planEnds) + ' 结束' : ''}`;
-    rows.push(`<div class="quota-row is-pending">
-      <span class="quota-row-name" title="${tip}">${esc(shortModel(e.show_name || '待生效'))}</span>
-      <span class="quota-row-bar-wrap" title="${tip}">
-        <span class="quota-row-pct" style="color:var(--amber)"><span>待生效</span><span>+${fmtNum(e.grant_units)}</span></span>
-        <span class="quota-row-track"><span class="quota-row-fill" style="width:100%"></span></span>
-      </span>
-      <span class="quota-row-val"><span>+${fmtNum(e.grant_units)}</span><span class="quota-row-exp" title="${tip}">${e.period === 'one_time' ? '一次性' : '每' + (e.period || '')} · ${fmtDate(eff)} 生效</span></span>
+    rows.push(`<div class="quota-card-item is-pending">
+      <div class="qci-top">
+        <span class="qci-name" title="${tip}">${esc(shortModel(e.show_name || '待生效'))}</span>
+        <span class="qci-pct" style="color:var(--amber)">待生效</span>
+      </div>
+      <div class="qci-track" title="${tip}">
+        <div class="qci-fill" style="width:100%;background:var(--amber)"></div>
+      </div>
+      <div class="qci-btm">
+        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
+        <span class="qci-exp" title="${tip}">${fmtDate(eff)} 生效</span>
+      </div>
     </div>`);
   });
   if (!rows.length) {
     if (a.mode !== 'jwt') return '<span class="quota-empty">—</span>';
     return planList(a).length === 0
-      ? '<span class="quota-empty" title="上游 billing/current 返回空套餐列表：套餐已到期或未开通（以实际请求结果为准）">无有效额度 · 套餐已到期或 billing 为空</span>'
-      : '<span class="quota-empty">额度未获取，点右上角刷新</span>';
+      ? '<span class="quota-empty" title="上游 billing/current 返回空套餐列表：套餐已到期或未开通">无有效额度 · 套餐已到期</span>'
+      : '<span class="quota-empty">额度未获取，点上方「刷新额度」</span>';
   }
-  return '<div class="quota-rows">' + rows.join('') + '</div>';
+  return `<div class="plan-card"><div class="plan-card-body">${rows.join('')}</div></div>`;
 }
 
 function quotaCell(a) {
@@ -656,79 +687,55 @@ async function refreshOne(id){
   catch(e){showToast('刷新失败: '+e.message,'error');}
   finally{refreshing.delete(id);await load();}
 }
+let refreshAllRunning = false;
+let refreshAllCooldownUntil = 0;
+let refreshAllTicker = null;
+
 async function refreshAll(){
-  showToast('正在刷新全部额度…','info');
-  try{const d=await api('POST','/accounts/refresh',{all:true});showToast(`刷新完成：成功 ${d.summary.ok}，失败 ${d.summary.fail}`,'success');load();}
-  catch(e){showToast('刷新失败: '+e.message,'error');}
-}
-
-/* ── 全局活动巡检（5秒串行避让与60秒冷却，对齐 zcode-switch refreshClaim）── */
-let checkClaimRunning = false;
-let checkClaimCooldownUntil = 0;
-let checkClaimTicker = null;
-
-async function checkAllClaim() {
-  if (checkClaimRunning) return;
+  if(refreshAllRunning) return;
   const now = Date.now();
-  if (now < checkClaimCooldownUntil) {
-    const left = Math.ceil((checkClaimCooldownUntil - now) / 1000);
-    showToast(`请等待冷却时间（${left}秒）后再次检查`, 'info');
+  if(now < refreshAllCooldownUntil){
+    const left = Math.ceil((refreshAllCooldownUntil - now) / 1000);
+    showToast(`请等待刷新冷却（${left}秒）后重试`, 'info');
     return;
   }
-  const jwts = allAccounts.filter(a => a.mode === 'jwt' && a.enabled !== false && a.status !== 'disabled');
-  if (!jwts.length) {
-    showToast('暂无启用的 JWT 账号', 'info');
-    return;
+  const btn = document.getElementById('btn-refresh-all');
+  refreshAllRunning = true;
+  if(btn){
+    btn.disabled = true;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新中…`;
   }
-  checkClaimRunning = true;
-  const btn = document.getElementById('btn-check-claim');
-  if (btn) btn.disabled = true;
-  let foundCount = 0;
+  showToast('正在一体化刷新额度与待领活动…', 'info');
 
-  try {
-    for (let i = 0; i < jwts.length; i++) {
-      const a = jwts[i];
-      if (btn) btn.textContent = `检查中 ${i + 1}/${jwts.length}`;
-      try {
-        const res = await api('POST', `/accounts/${a.id}/claim_refresh`);
-        if (res.ok && res.plans && res.plans.length > 0) {
-          foundCount++;
-          const idx = allAccounts.findIndex(acc => acc.id === a.id);
-          if (idx >= 0) allAccounts[idx] = res.account || allAccounts[idx];
-          renderList();
-        }
-      } catch (err) {
-        console.warn(`检查账号 ${a.name} 活动失败:`, err);
-      }
-      if (i < jwts.length - 1) {
-        await new Promise(res => setTimeout(res, 5000));
-      }
-    }
-  } finally {
-    checkClaimRunning = false;
-    checkClaimCooldownUntil = Date.now() + 60000;
-    startCheckClaimTicker();
+  try{
+    const d = await api('POST', '/accounts/refresh', { all: true, include_claimable: true });
     await load(true);
-    showToast(`活动检查完成：${jwts.length} 个账号中发现 ${foundCount} 个待领活动`, 'success');
+    showToast(`刷新完成：成功 ${d.summary.ok}，失败 ${d.summary.fail}，已同步探测待领活动`, 'success');
+  }catch(e){
+    showToast('刷新失败: ' + e.message, 'error');
+  }finally{
+    refreshAllRunning = false;
+    refreshAllCooldownUntil = Date.now() + 60000;
+    startRefreshAllTicker();
   }
 }
 
-function startCheckClaimTicker() {
-  if (checkClaimTicker) clearInterval(checkClaimTicker);
-  const btn = document.getElementById('btn-check-claim');
-  checkClaimTicker = setInterval(() => {
-    const left = Math.ceil((checkClaimCooldownUntil - Date.now()) / 1000);
-    if (left > 0) {
-      if (btn) {
+function startRefreshAllTicker(){
+  if(refreshAllTicker) clearInterval(refreshAllTicker);
+  const btn = document.getElementById('btn-refresh-all');
+  refreshAllTicker = setInterval(() => {
+    const left = Math.ceil((refreshAllCooldownUntil - Date.now()) / 1000);
+    if(left > 0){
+      if(btn){
         btn.disabled = true;
-        btn.textContent = `检查活动 (${left}s)`;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新额度 (${left}s)`;
       }
-    } else {
-      clearInterval(checkClaimTicker);
-      checkClaimTicker = null;
-      if (btn) {
+    }else{
+      clearInterval(refreshAllTicker);
+      refreshAllTicker = null;
+      if(btn){
         btn.disabled = false;
-        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg> 检查活动`;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新额度`;
       }
     }
   }, 1000);
