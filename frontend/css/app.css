@@ -107,7 +107,7 @@ select.input option{background:var(--panel);color:var(--ink)}
 /* ── 账号池列表（CPA-Manager-Plus 风格 6 列表格：凭证/状态/最近请求/用量/额度/操作）── */
 .acct-scroll{overflow-x:auto}
 .acct-table{display:flex;flex-direction:column;gap:8px;min-width:1080px}
-.acct-head,.acct-row{display:grid;grid-template-columns:minmax(170px,1.1fr) 135px minmax(320px,2fr) 125px 120px 176px;gap:14px;align-items:center}
+.acct-head,.acct-row{display:grid;grid-template-columns:minmax(170px,1.1fr) 155px minmax(320px,2fr) 125px 120px 176px;gap:14px;align-items:center}
 .acct-head{padding:0 16px;font-size:11px;font-weight:600;color:var(--ink-mute);letter-spacing:.03em}
 .acct-head .th-actions{text-align:right}
 .acct-row{border:1px solid var(--hairline-soft);border-radius:10px;background:var(--panel);padding:12px 16px;transition:border-color .15s}
@@ -392,75 +392,79 @@ select.input option{background:var(--panel);color:var(--ink)}
 }
 .plan-card-exp.warn-line{color:var(--amber)}
 
-/* 模型配额项（精炼层次：上标题+余量，中平滑条，下数值+到期） */
+/* 模型配额项（对齐 zcode-switch 事实真源紧凑三列网格：模型名 + 胶囊条 + 余量/总量） */
 .plan-card-body{
   display:flex;
   flex-direction:column;
-  gap:6px;
+  gap:5px;
   min-width:0;
 }
-.quota-card-item{
-  display:flex;
-  flex-direction:column;
-  gap:3px;
-  min-width:0;
-}
-.quota-card-item + .quota-card-item{
-  margin-top:2px;
-  padding-top:6px;
-  border-top:1px dashed rgba(255,255,255,.05);
-}
-.qci-top{
-  display:flex;
+.q-win{
+  display:grid;
   align-items:center;
-  justify-content:space-between;
-  gap:8px;
-  font-size:11.5px;
-  line-height:1.2;
+  min-width:0;
 }
-.qci-name{
+.q-win.mini{
+  grid-template-columns:82px 1fr 100px;
+  gap:8px;
+}
+.q-win.mini.is-pending{
+  opacity:.85;
+}
+.q-win-label{
+  font-size:11.5px;
   font-weight:600;
   color:var(--ink-dim);
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis;
+  min-width:0;
 }
-.qci-pct{
+.q-win-val{
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--ink-mute);
+  white-space:nowrap;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+
+/* 进度条：对齐 zcode-switch 胶囊条，高度 18px，内嵌居中剩余百分比 */
+.qbar{
+  height:18px;
+  border-radius:4px;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.05);
+  overflow:hidden;
+  position:relative;
+  min-width:60px;
+}
+.qbar-fill{
+  height:100%;
+  background:var(--mint);
+  border-radius:3px;
+  transition:width .3s ease, background-color .3s ease;
+}
+.qbar.warn .qbar-fill{
+  background:var(--amber);
+}
+.qbar.danger .qbar-fill{
+  background:var(--red);
+}
+.qbar-pct{
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
   font-family:var(--mono);
   font-size:11px;
   font-weight:600;
-  white-space:nowrap;
-  flex:none;
-}
-.qci-track{
-  display:block;
-  height:4px;
-  border-radius:999px;
-  background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.04);
-  overflow:hidden;
-}
-.qci-fill{
-  display:block;
-  height:100%;
-  border-radius:999px;
-  transition:width .3s, background-color .3s;
-}
-.qci-btm{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:8px;
-  font-size:10.5px;
   color:var(--ink-mute);
-  font-family:var(--mono);
-  line-height:1.2;
+  letter-spacing:.02em;
+  pointer-events:none;
 }
-.qci-val{
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;
-}
-.qci-exp{
-  white-space:nowrap;
-  opacity:.75;
+.qbar-pct.in-fill{
+  color:#0d1117;
+  font-weight:700;
 }

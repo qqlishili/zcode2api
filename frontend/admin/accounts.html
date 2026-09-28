@@ -309,7 +309,7 @@ function statusCell(a){
     const planEnd=Math.max(0,...planList(a).map(pl=>Number(pl.ends_at)||Number(pl.expires_at)||0));
     if(planEnd){
       const days=Math.ceil((planEnd*1000-Date.now())/86400000);
-      sub=`<div class="cell-sub${days<=7?' warn-line':''}" title="当前套餐有效期">套餐至 ${fmtDate(planEnd)}</div>`;
+      sub=`<div class="cell-sub${days<=7?' warn-line':''}" title="当前套餐有效期">有效期 ${fmtDateFull(planEnd)}</div>`;
     }
   }
   const claimBlocked=Number(a.claim_blocked_until)||0;
@@ -424,46 +424,37 @@ function sortPlanItems(items) {
   });
 }
 
+function quotaBarHtml(remPct) {
+  const pct = Math.max(0, Math.min(100, Number(remPct) || 0));
+  const danger = pct <= 10 ? ' danger' : (pct <= 30 ? ' warn' : '');
+  const txt = Math.round(pct) + '%';
+  const txtCls = pct >= 55 ? ' in-fill' : '';
+  return `<div class="qbar${danger}"><div class="qbar-fill" style="width:${pct.toFixed(1)}%"></div><span class="qbar-pct${txtCls}">${txt}</span></div>`;
+}
+
 function balRowHtml(it) {
   const tot = Number(it.total) || 0;
   const rem = Number(it.remaining) || 0;
-  const used = Number(it.used) || 0;
-  const rawPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
-  const pctRound = Math.round(rawPct * 10) / 10;
-  const pctStr = rawPct > 0 && rawPct < 100 ? (Number.isInteger(pctRound) ? pctRound + '%' : rawPct.toFixed(1) + '%') : Math.round(rawPct) + '%';
   const remPct = tot > 0 ? (rem / tot) * 100 : 0;
-  const color = (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
-  const exp = it.expires_at ? String(it.expires_at) : '';
-  const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${pctStr}已用)`;
-  return `<div class="quota-card-item">
-    <div class="qci-top">
-      <span class="qci-name" title="${esc(it.name)}">${esc(shortModel(it.name))}</span>
-      <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
-    </div>
-    <div class="qci-track" title="${rawTip}">
-      <div class="qci-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></div>
-    </div>
-    <div class="qci-btm" title="${rawTip}">
-      <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
-      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.slice(5, 16))}</span>` : ''}
-    </div>
+  const valStr = tot > 0 ? `${fmtNum(rem)} / ${fmtNum(tot)}` : fmtNum(rem);
+  const label = shortModel(it.name);
+  const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${Math.round(remPct)}% 剩余)`;
+  return `<div class="q-win mini" title="${esc(rawTip)}">
+    <span class="q-win-label" title="${esc(it.name)}">${esc(label)}</span>
+    ${quotaBarHtml(remPct)}
+    <span class="q-win-val">${esc(valStr)}</span>
   </div>`;
 }
 
 function planGroupHtml(p) {
   const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
   const exp = expireInfo(p.expire);
-  const tierCode = p.tier_code || (p.tier ? String(p.tier).toLowerCase() : 'other');
-  const tierHtml = p.tier ? `<span class="tier-b ${tierCode}">${esc(p.tier)}</span>` : '';
   const items = sortPlanItems(p.items || []);
   const rows = items.map(balRowHtml).join('');
   return `
   <div class="plan-card">
     <div class="plan-card-hd">
-      <div class="plan-hd-left">
-        ${tierHtml}
-        <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
-      </div>
+      <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
       ${exp ? `<span class="plan-card-exp${exp.warn ? ' warn-line' : ''}" title="套餐有效期至 ${esc(exp.text)}">至 ${esc(exp.text)}</span>` : ''}
     </div>
     <div class="plan-card-body">${rows}</div>
@@ -481,24 +472,13 @@ function fallbackQuotaHtml(a) {
   });
   let rows = keys.map(k => {
     const w = q[k] || {}; const rem = Number(w.remaining) || 0, tot = Number(w.total) || 0;
-    const used = Number(w.used) || Math.max(0, tot - rem);
-    const rawPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
     const remPct = tot > 0 ? (rem / tot) * 100 : 0;
-    const color = (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
-    const exp = Number(w.expires_at) || 0;
+    const valStr = tot > 0 ? `${fmtNum(rem)} / ${fmtNum(tot)}` : fmtNum(rem);
     const rawTip = `${k}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens`;
-    return `<div class="quota-card-item">
-      <div class="qci-top">
-        <span class="qci-name" title="${esc(k)}">${esc(shortModel(k))}</span>
-        <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
-      </div>
-      <div class="qci-track" title="${rawTip}">
-        <div class="qci-fill" style="width:${rawPct.toFixed(1)}%;background:${color}"></div>
-      </div>
-      <div class="qci-btm" title="${rawTip}">
-        <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
-        ${exp ? `<span class="qci-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>` : ''}
-      </div>
+    return `<div class="q-win mini" title="${esc(rawTip)}">
+      <span class="q-win-label" title="${esc(k)}">${esc(shortModel(k))}</span>
+      ${quotaBarHtml(remPct)}
+      <span class="q-win-val">${esc(valStr)}</span>
     </div>`;
   });
   // 待生效活动套餐
@@ -507,18 +487,10 @@ function fallbackQuotaHtml(a) {
   ents.filter(e => Number(e.effective_at) > now).forEach(e => {
     const eff = Number(e.effective_at) || 0;
     const tip = `${esc(e._planName || '')} · ${fmtDate(eff)} 起生效${e._planEnds ? '，套餐 ' + fmtDate(e._planEnds) + ' 结束' : ''}`;
-    rows.push(`<div class="quota-card-item is-pending">
-      <div class="qci-top">
-        <span class="qci-name" title="${tip}">${esc(shortModel(e.show_name || '待生效'))}</span>
-        <span class="qci-pct" style="color:var(--amber)">待生效</span>
-      </div>
-      <div class="qci-track" title="${tip}">
-        <div class="qci-fill" style="width:100%;background:var(--amber)"></div>
-      </div>
-      <div class="qci-btm">
-        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
-        <span class="qci-exp" title="${tip}">${fmtDate(eff)} 生效</span>
-      </div>
+    rows.push(`<div class="q-win mini is-pending" title="${esc(tip)}">
+      <span class="q-win-label">${esc(shortModel(e.show_name || '待生效'))}</span>
+      <div class="qbar warn"><div class="qbar-fill" style="width:100%"></div><span class="qbar-pct in-fill">待生效</span></div>
+      <span class="q-win-val">+${fmtNum(e.grant_units)}</span>
     </div>`);
   });
   if (!rows.length) {
@@ -544,12 +516,17 @@ function quotaCell(a) {
   return `<div class="row-quota-slot">${strip}${inner}</div>`;
 }
 function shortModel(n){return String(n).replace(/^GLM[- ]?/i,'GLM-')||n;}
-/* M 缩写（百万 token，保留两位小数） */
+/* M 缩写（百万 token，去除无意义尾零，保持紧凑自然） */
 function fmtNum(v){
   const n=Number(v);if(!isFinite(n))return '—';
-  if(n===0)return '0.00 M';
-  if(Math.abs(n)>=1e4)return (n/1e6).toFixed(2)+' M';
-  return (n/1e6).toFixed(4)+' M';
+  if(n===0)return '0 M';
+  const m=n/1e6;
+  if(Math.abs(n)>=1e4){
+    const s=m.toFixed(2);
+    return (s.indexOf('.')>=0?s.replace(/\.?0+$/,''):s)+' M';
+  }
+  const s=m.toFixed(4);
+  return (s.indexOf('.')>=0?s.replace(/\.?0+$/,''):s)+' M';
 }
 
 /* ── Actions ── */
@@ -915,6 +892,7 @@ function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmtDate(d){if(!d)return'—';const dt=new Date(d*1000);return isNaN(dt)?'—':dt.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
 function fmtDateSec(d){if(!d)return'—';const dt=new Date(d*1000);return isNaN(dt)?'—':dt.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function fmtDateFull(d){if(!d)return'—';const dt=new Date(Number(d)*1000);if(isNaN(dt.getTime()))return'—';const Y=dt.getFullYear(),M=String(dt.getMonth()+1).padStart(2,'0'),D=String(dt.getDate()).padStart(2,'0'),h=String(dt.getHours()).padStart(2,'0'),m=String(dt.getMinutes()).padStart(2,'0'),s=String(dt.getSeconds()).padStart(2,'0');return `${Y}-${M}-${D} ${h}:${m}:${s}`;}
 function fmtDur(s){s=Math.max(0,Math.round(s));if(s<60)return s+'秒';const m=Math.floor(s/60);if(m<60)return m+'分';const h=Math.floor(m/60);return h+'小时'+(m%60?(m%60)+'分':'');}
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
