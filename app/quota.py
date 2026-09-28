@@ -142,6 +142,13 @@ def _extract_expire(obj: dict) -> str | None:
             s = v.strip()
             if not s:
                 continue
+            try:
+                dt_iso = datetime.fromisoformat(s.replace("Z", "+00:00"))
+                if dt_iso.tzinfo is None:
+                    dt_iso = dt_iso.replace(tzinfo=_TZ_BEIJING)
+                return dt_iso.astimezone(_TZ_BEIJING).strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                pass
             if "T" in s:
                 s = s.replace("T", " ")
             if len(s) >= 16:

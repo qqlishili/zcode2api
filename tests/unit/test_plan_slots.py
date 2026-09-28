@@ -31,9 +31,13 @@ class TestExtractExpire:
         assert res.startswith("20")
 
     def test_extract_from_iso_string(self):
-        iso = "2026-09-28T23:59:59Z"
-        res = _extract_expire({"expires_at": iso})
-        assert res == "2026-09-28 23:59"
+        # 不带时区后缀的本地 ISO 时间串
+        iso_local = "2026-09-28T23:59:59"
+        assert _extract_expire({"expires_at": iso_local}) == "2026-09-28 23:59"
+
+        # 带 Z (UTC) 时区的 ISO 时间串，正确转换为北京时间 (+8h)
+        iso_utc = "2026-09-28T16:00:00Z"
+        assert _extract_expire({"expires_at": iso_utc}) == "2026-09-29 00:00"
 
     def test_empty_or_none(self):
         assert _extract_expire({}) is None
