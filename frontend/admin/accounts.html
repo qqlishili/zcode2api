@@ -377,7 +377,10 @@ function actionsCell(a){
     claimBtnTitle=hasPlans?'已持有当前活动套餐，无需重复领取':'当前暂无待领取的活动套餐';
     claimBtnStyle='opacity:0.45;';
   }
-    const defaultPid = (a.claimable_plans && a.claimable_plans[0] && a.claimable_plans[0].plan_id) || '';
+    const poolPlans = getPoolKnownActivityPlans();
+    const held = getHeldPlanIds(a);
+    const unclaimedPool = poolPlans.find(p => !held.has(String(p.plan_id || '').toLowerCase()));
+    const defaultPid = (a.claimable_plans && a.claimable_plans[0] && a.claimable_plans[0].plan_id) || (unclaimedPool && unclaimedPool.plan_id) || '';
     return `<div class="acct-actions">
     ${isJwt?`<button onclick="refreshOne('${a.id}')" class="row-icon-btn${loading?' is-loading':''}" title="刷新额度"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg></button>
     <button onclick="claimOne('${a.id}')" class="row-icon-btn${claiming.has(a.id)?' is-loading':''}" style="${claimBtnStyle}" title="${claimBtnTitle}"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg></button>
@@ -799,15 +802,50 @@ function getHeldPlanIds(a){
   return held;
 }
 
-function hasUnclaimedActivity(a){
-  // 检查账号是否有尚未领取的待领活动
-  const claimable = a.claimable_plans || [];
-  if(!claimable.length) return false;
-  const held = getHeldPlanIds(a);
-  return claimable.some(p => {
-    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
-    return pid && !held.has(pid);
+function getPoolKnownActivityPlans(){
+  const nowSec = Math.floor(Date.now() / 1000);
+  const known = new Map();
+  allAccounts.forEach(a => {
+    (a.plans || []).forEach(p => {
+      const pid = String(p.plan_id || p.planId || '').trim();
+      const lower = pid.toLowerCase();
+      if(!pid || lower === 'zcode-v3-start-plan' || lower === 'zcode-v3-start-plan-0817' || lower === 'default') return;
+      const ends = Number(p.ends_at || p.expires_at || 0);
+      if(ends && ends <= nowSec) return;
+      if(!known.has(lower) || (p.priority || 0) > (known.get(lower).priority || 0)){
+        known.set(lower, {...p, plan_id: pid});
+      }
+    });
+    (a.claimable_plans || []).forEach(p => {
+      const pid = String(p.plan_id || p.planId || '').trim();
+      const lower = pid.toLowerCase();
+      if(!pid || lower === 'zcode-v3-start-plan' || lower === 'zcode-v3-start-plan-0817' || lower === 'default') return;
+      const ends = Number(p.ends_at || p.expires_at || 0);
+      if(ends && ends <= nowSec) return;
+      if(!known.has(lower) || (p.priority || 0) > (known.get(lower).priority || 0)){
+        known.set(lower, {...p, plan_id: pid});
+      }
+    });
   });
+  const list = Array.from(known.values());
+  list.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+  return list;
+}
+
+function hasUnclaimedActivity(a){
+  // 检查账号是否有尚未领取的待领活动（结合本号 preview 与池内已知有效活动）
+  const held = getHeldPlanIds(a);
+  const claimable = a.claimable_plans || [];
+  for(const p of claimable){
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    if(pid && !held.has(pid)) return true;
+  }
+  const poolPlans = getPoolKnownActivityPlans();
+  for(const p of poolPlans){
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    if(pid && !held.has(pid)) return true;
+  }
+  return false;
 }
 
 function claimToast(o){
@@ -973,26 +1011,47 @@ async function loadClaimPlans(targetPlanId){
   const sel=document.getElementById('claim-plan');
   const acctId=document.getElementById('claim-account').value;
   const curAcc=allAccounts.find(a=>a.id===acctId);
-  const localPlans=(curAcc&&curAcc.claimable_plans)||[];
-  if(localPlans.length){
+  const poolPlans=getPoolKnownActivityPlans();
+  const dedupMap=new Map();
+  [...((curAcc&&curAcc.claimable_plans)||[]), ...poolPlans].forEach(p=>{
+    const pid=String(p.plan_id||p.planId||'').trim();
+    if(pid && !dedupMap.has(pid.toLowerCase())) dedupMap.set(pid.toLowerCase(), p);
+  });
+
+  function renderOpts(plans){
+    if(!plans.length){
+      sel.innerHTML='<option value="">自动选择</option><option value="" disabled>（当前无可领活动套餐）</option>';
+      return;
+    }
+    const held = curAcc ? getHeldPlanIds(curAcc) : new Set();
     sel.innerHTML='<option value="">自动选择（可领套餐中优先级最高）</option>'+
-      localPlans.map(p=>`<option value="${esc(p.plan_id)}"${targetPlanId===p.plan_id?' selected':''}>${esc(p.name||p.plan_id)}</option>`).join('');
-  } else {
-    sel.innerHTML='<option value="">加载中…</option>';
+      plans.map(p=>{
+        const pid=p.plan_id||p.planId;
+        const isHeld=held.has(String(pid).toLowerCase());
+        const tag=isHeld?' [已持有]':' [推荐可领]';
+        const isSel=(targetPlanId===pid)||(!targetPlanId && !isHeld);
+        return `<option value="${esc(pid)}"${isSel?' selected':''}>${esc(p.name||pid)}${tag}</option>`;
+      }).join('');
   }
+
+  const initialList = Array.from(dedupMap.values());
+  initialList.sort((a,b)=>(b.priority||0)-(a.priority||0));
+  renderOpts(initialList);
+
   try{
     const d=await api('GET','/claim/preview?account_id='+encodeURIComponent(acctId));
     const item=(d.preview||[])[0]||{};
-    const plans=item.plans||localPlans||[];
-    if(item.error)claimStatus('套餐列表：'+item.error);
-    sel.innerHTML='<option value="">自动选择（可领套餐中优先级最高）</option>'+
-      plans.map(p=>`<option value="${esc(p.plan_id)}"${targetPlanId===p.plan_id?' selected':''}>${esc(p.name||p.plan_id)}</option>`).join('')+
-      (!plans.length?'<option value="" disabled>（当前无可领活动套餐）</option>':'');
+    const serverPlans=item.plans||[];
+    if(item.error)claimStatus('套餐提示：'+item.error);
+    serverPlans.forEach(p=>{
+      const pid=String(p.plan_id||p.planId||'').trim();
+      if(pid && !dedupMap.has(pid.toLowerCase())) dedupMap.set(pid.toLowerCase(), p);
+    });
+    const finalPlans=Array.from(dedupMap.values());
+    finalPlans.sort((a,b)=>(b.priority||0)-(a.priority||0));
+    renderOpts(finalPlans);
   }catch(e){
-    if(!localPlans.length){
-      sel.innerHTML='<option value="">自动选择（列表加载失败，可直接填 plan_id）</option>';
-      claimStatus('套餐列表加载失败：'+e.message);
-    }
+    // 已由本地候选渲染兜底
   }
 }
 

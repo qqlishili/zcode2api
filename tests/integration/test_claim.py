@@ -625,7 +625,7 @@ class TestAutoClaimOnPoolEntry:
         assert stub.solve_count == 0
 
     async def test_claim_auto_picks_skips_when_no_plans_available(self, claim_env):
-        """当上游没有待领取的套餐时（如国际账号或无活动期），自动跳过且不报错（归一化为 skipped）。"""
+        """当上游没有待领取的套餐且池内无有效活动时，自动跳过且不报错（归一化为 skipped）。"""
         client, mock, stub, acc = claim_env
         mock.state.claim_scenario = "claim_none"
 
@@ -638,4 +638,58 @@ class TestAutoClaimOnPoolEntry:
         assert outcome["skipped"] is True
         assert "暂无可领取的活动套餐" in outcome["message"]
         assert stub.solve_count == 0
+
+    async def test_claim_pool_active_plans_shared_experience(self, claim_env, fresh_app):
+        """集群经验共享：当上游 preview 为空时，自动提取池内其他账号持有的有效活动并成功认领。"""
+        import time
+
+        from tests.conftest import seed_account
+
+        client, mock, stub, acc_b = claim_env
+        mock.state.claim_scenario = "claim_none"  # 上游 preview 返回空 plans: []
+
+        # 账号 A：已持有未过期的大促活动套餐
+        acc_a = seed_account(fresh_app, "h1.eyJzdWIiOiJhY2N0LWEifQ.sig", name="pool-account-a")
+        live_a = fresh_app.find("zai", acc_a.id)
+        live_a.plans = [
+            {
+                "plan_id": "zcode-v3-start-plan-trust-0929",
+                "name": "ZCode Trust Build",
+                "description": "ZCode Global Build",
+                "priority": 110,
+                "status": "active",
+                "ends_at": time.time() + 86400,
+                "entitlements": [
+                    {
+                        "show_name": "GLM-5.3-Flash",
+                        "meter": "model_usage",
+                        "unit_type": "token",
+                        "grant_units": 100000000,
+                        "period": "one_time",
+                    }
+                ],
+            }
+        ]
+        fresh_app.update_account(live_a)
+
+        # 账号 B（未领账号）拉取 preview：即使上游下发空列表，也能从池内经验共享中发现 Trust 活动
+        res = await client.get(f"/admin/api/claim/preview?account_id={acc_b.id}",
+                               headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        preview_plans = res.json()["preview"][0]["plans"]
+        assert len(preview_plans) == 1
+        assert preview_plans[0]["plan_id"] == "zcode-v3-start-plan-trust-0929"
+        assert preview_plans[0]["name"] == "ZCode Trust Build"
+
+        # 账号 B 发起 claim：自动选中池内共享的最高优先级活动并成功领取
+        claim_res = await client.post("/admin/api/claim",
+                                      json={"account_ids": [acc_b.id]},
+                                      headers={"Authorization": "Bearer zcode"})
+        assert claim_res.status_code == 200
+        outcomes = claim_res.json()["outcomes"]
+        assert len(outcomes) == 1
+        assert outcomes[0]["ok"] is True
+        assert outcomes[0]["plan_id"] == "zcode-v3-start-plan-trust-0929"
+        assert outcomes[0]["plan_name"] == "ZCode Trust Build"
+
 
