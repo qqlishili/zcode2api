@@ -54,21 +54,21 @@ if (proxyUrl) {
   }
 }
 
-// ── 指纹（常量；与 zapi 同款 SwiftShader 形态，避免按次漂移）────────────────
+// ── 指纹：真实桌面环境（Windows 10 + RTX 3060 + 真实 1080P），剔除 SwiftShader 虚拟机特征 ──
 function generateFingerprint() {
   const userAgent =
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
   return {
     userAgent,
     uaMajor: "127",
     uaFull: "127.0.0.0",
-    platform: "Linux x86_64",
-    screen: { w: 1280, h: 720, aw: 1280, ah: 720 },
-    webglUnmaskedVendor: "Google Inc. (Google)",
+    platform: "Win32",
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
     webglUnmaskedRenderer:
-      "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
     canvasImage:
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAExJREFUWEft0kEKACAMQ9G7/537u3S2Q0RwbvMhCclM9fXqYgEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAfvAC8lAATHJmK7bAAAAAElFTkSuQmCC",
   };
 }
 const fp = generateFingerprint();

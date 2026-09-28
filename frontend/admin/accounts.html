@@ -417,7 +417,13 @@ function grantLabel(p) {
 function claimStripHtml(a) {
   const plans = a.claimable_plans || [];
   if (!plans.length) return '';
-  return plans.map(p => {
+  const held = getHeldPlanIds(a);
+  const unheld = plans.filter(p => {
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    return pid && !held.has(pid);
+  });
+  if (!unheld.length) return '';
+  return unheld.map(p => {
     const label = p.name || p.plan_id || '节日活动套餐';
     const grants = grantLabel(p);
     const targetPid = p.plan_id || '';
@@ -855,13 +861,10 @@ function claimToast(o){
     showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
   } else {
     const msg = o.message || '';
-    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过') || msg.includes('已持有')){
       showToast(`「${o.account_name}」${msg}`, 'info');
     } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
-      showToast(`「${o.account_name}」触发上游机房风控(3012)，正在呼起浏览器验证…`, 'info');
-      if(!claimAllRunning && o.account_id){
-        openClaimModal(o.account_id, o.plan_id);
-      }
+      showToast(`「${o.account_name}」触发上游机房风控(3012)，可点击右侧盾牌手动过验证`, 'info');
     } else {
       showToast(`「${o.account_name}」领取失败：${msg || '未知错误'}`, 'error');
     }
@@ -888,11 +891,10 @@ async function claimOne(id){
     (d.outcomes || []).forEach(claimToast);
   }catch(e){
     const msg = e.message || '';
-    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过')){
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过') || msg.includes('已持有')){
       showToast(`「${acc ? acc.name : id}」${msg}`, 'info');
     } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
-      showToast(`「${acc ? acc.name : id}」触发上游机房风控(3012)，正在呼起浏览器验证…`, 'info');
-      openClaimModal(id);
+      showToast(`「${acc ? acc.name : id}」触发上游机房风控(3012)，可点击右侧盾牌手动过验证`, 'info');
     } else {
       showToast('领取失败: ' + msg, 'error');
     }
@@ -1005,7 +1007,30 @@ async function openClaimModal(id, targetPlanId){
   const sel=document.getElementById('claim-account');
   sel.innerHTML=jwtAll.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
   if(id)sel.value=id;
-  sel.onchange=()=>{claimVerifyParam='';claimStatus('账号已切换，请重新完成人机验证');initClaimCaptcha();loadClaimPlans(targetPlanId);};
+
+  const curAcc=allAccounts.find(a=>a.id===sel.value);
+  if(curAcc && !hasUnclaimedActivity(curAcc)){
+    const hasPlans = (curAcc.claimable_plans || []).length > 0;
+    if(hasPlans || (curAcc.plans && curAcc.plans.length > 0)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      return;
+    }
+  }
+
+  sel.onchange=()=>{
+    claimVerifyParam='';
+    const accNow = allAccounts.find(a=>a.id===sel.value);
+    if(accNow && !hasUnclaimedActivity(accNow)){
+      claimStatus('「' + accNow.name + '」已持有当前活动套餐，无需重复领取');
+      claimStatusColor(true);
+      const box=document.getElementById('claim-captcha-box');
+      if(box) box.innerHTML='<span class="dialog-help" style="color:var(--mint, #4ade80)">账号已持有该活动套餐，无需验证</span>';
+      return;
+    }
+    claimStatus('账号已切换，请完成人机验证');
+    initClaimCaptcha();
+    loadClaimPlans(targetPlanId);
+  };
   document.getElementById('claim-plan-id').value=targetPlanId||'';
   claimVerifyParam='';
   claimStatus('');
@@ -1092,12 +1117,13 @@ async function initClaimCaptcha(){
         claimVerifyParam=typeof param==='string'?param:(param&&param.captchaVerifyParam)||'';
         claimStatus('✓ 人机验证已通过，正在自动提交领取…');
         claimStatusColor(true);
-        // 对齐 zcode-switch：验证通过后自动立即提交，免去手动二次点击
+        // 对齐 zcode-switch：仅在弹窗打开且未在提交中时自动提交一次
         setTimeout(()=>{
-          if(claimVerifyParam && !claimSubmitting){
+          const modal=document.getElementById('modal-claim');
+          if(modal && modal.classList.contains('open') && claimVerifyParam && !claimSubmitting){
             submitManualClaim();
           }
-        }, 150);
+        }, 120);
       },
       fail:(p)=>{claimStatus('无感验证未通过，已弹出交互验证，请完成滑块');claimStatusColor(false);},
       onError:()=>{claimStatus('验证码出错，请重试');claimStatusColor(false);},
@@ -1118,12 +1144,18 @@ function claimStatusColor(ok){
 let claimSubmitting=false;
 async function submitManualClaim(){
   if(claimSubmitting)return;
+  const account_id=document.getElementById('claim-account').value;
+  const curAcc=allAccounts.find(a=>a.id===account_id);
+  if(curAcc && !hasUnclaimedActivity(curAcc)){
+    showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+    closeClaimModal();
+    return;
+  }
   if(!claimVerifyParam){
     claimStatus('请先完成人机验证');claimStatusColor(false);return;
   }
   claimSubmitting=true;
   setClaimBusy(true);
-  const account_id=document.getElementById('claim-account').value;
   const plan_sel=document.getElementById('claim-plan').value;
   const plan_manual=document.getElementById('claim-plan-id').value.trim();
   try{
@@ -1133,12 +1165,20 @@ async function submitManualClaim(){
       captcha_region:claimCfgRegion||undefined,
       plan_id:plan_manual||plan_sel||undefined,
     });
+    claimVerifyParam='';
     d.outcomes.forEach(claimToast);
-    if(d.summary.ok)closeModal('modal-claim');
-    else{claimStatus('领取失败：'+(d.outcomes[0]||{}).message+'，可重做验证再试');claimStatusColor(false);
-      claimVerifyParam='';initClaimCaptcha();}
-  }catch(e){claimStatus('提交失败：'+e.message);claimStatusColor(false);}
-  finally{
+    if(d.summary.ok){
+      closeClaimModal();
+    } else {
+      claimStatus('领取失败：'+(d.outcomes[0]||{}).message+'，可重做验证再试');
+      claimStatusColor(false);
+      initClaimCaptcha();
+    }
+  }catch(e){
+    claimVerifyParam='';
+    claimStatus('提交失败：'+e.message);
+    claimStatusColor(false);
+  }finally{
     claimSubmitting=false;
     setClaimBusy(false);
     await load();
@@ -1146,6 +1186,10 @@ async function submitManualClaim(){
 }
 function closeClaimModal(){
   closeModal('modal-claim');
+  claimVerifyParam='';
+  claimSubmitting=false;
+  const box=document.getElementById('claim-captcha-box');
+  if(box) box.innerHTML='';
   try{window.AliyunCaptchaConfig=undefined;}catch(e){}
 }
 
