@@ -299,3 +299,68 @@ select.input option{background:var(--panel);color:var(--ink)}
   .mon-grid-agg > :nth-child(n+6){display:none}
   .mon-search{width:100%}
 }
+
+/* ── 多套餐卡片分组与待领横幅（对齐 zcode-switch）── */
+.plan-grp + .plan-grp{margin-top:8px;padding-top:8px;border-top:1px dashed var(--hairline-soft)}
+.pg-head{display:flex;align-items:center;gap:7px;margin-bottom:5px;min-width:0}
+.pg-name{
+  font-size:12px;
+  font-weight:600;
+  color:var(--ink-dim);
+  font-family:var(--mono);
+  letter-spacing:.02em;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  min-width:0;
+}
+.pg-exp{margin-left:auto;flex:none;font-family:var(--mono);font-size:11px;color:var(--ink-mute);white-space:nowrap}
+.pg-exp.warn-line{color:var(--amber)}
+
+.claim-strip{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:6px 10px;
+  margin-bottom:8px;
+  border:1px solid rgba(232,163,61,.4);
+  background:rgba(232,163,61,.08);
+  border-radius:var(--radius);
+  color:var(--amber);
+  font-size:12px;
+  min-width:0;
+}
+.claim-strip svg{flex:none;color:var(--amber)}
+.claim-name{
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.claim-grants{
+  color:var(--ink-dim);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  flex:1;
+  min-width:0;
+}
+.btn-claim{
+  flex:none;
+  font-family:inherit;
+  font-size:12px;
+  font-weight:600;
+  height:24px;
+  padding:0 10px;
+  border-radius:4px;
+  cursor:pointer;
+  background:var(--amber);
+  border:1px solid var(--amber);
+  color:var(--amber-ink,#0a0b0e);
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  transition:opacity .15s,background .15s;
+}
+.btn-claim:hover{background:#f0b055}
+.btn-claim:disabled{opacity:0.5;cursor:not-allowed}

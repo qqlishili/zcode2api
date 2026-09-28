@@ -9,6 +9,7 @@ import asyncio
 import os
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -16,6 +17,7 @@ from . import constants, logs, settings
 from .models import Account, Status
 from .store import store
 
+_TZ_BEIJING = timezone(timedelta(hours=8))
 _DEVICE_MID: str | None = None
 
 
@@ -117,10 +119,156 @@ def _safe_units(val) -> int:
         return 0
 
 
-async def fetch_quota(account: Account) -> dict:
+def _extract_expire(obj: dict) -> str | None:
+    """对齐 zcode-switch extract_expire：从对象中提取并格式化过期时间字符串 (YYYY-MM-DD HH:MM)。"""
+    keys = (
+        "nextRenewTime", "expireTime", "expire_time", "endTime", "end_time", "expireAt", "expiredTime",
+        "validEndTime", "expires_at", "expiresAt", "expired_at", "period_end", "ends_at",
+    )
+    for k in keys:
+        v = obj.get(k)
+        if v is None:
+            continue
+        try:
+            n = float(v)
+            if n > 1_000_000_000_000:
+                n = n / 1000.0
+            if n > 1_000_000_000:
+                dt = datetime.fromtimestamp(n, tz=_TZ_BEIJING)
+                return dt.strftime("%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            pass
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                continue
+            if "T" in s:
+                s = s.replace("T", " ")
+            if len(s) >= 16:
+                return s[:16]
+            return s
+    return None
+
+
+def _plan_tier_from_id(plan_id: str, name: str | None = None) -> tuple[str, str]:
+    """对齐 zcode-switch plan_tier_from_id：从 plan_id 与 name 计算套餐层级与代码。"""
+    hay = (plan_id or "").lower()
+    if name:
+        hay += " " + name.lower()
+    if "max" in hay:
+        return ("Max", "max")
+    if "pro" in hay:
+        return ("Pro", "pro")
+    if "lite" in hay:
+        return ("Lite", "lite")
+    if "start" in hay:
+        return ("Start Plan", "start")
+    if any(k in hay for k in ("trial", "taste", "experience", "gift", "weekend", "promo", "activity", "trust", "体验", "赠送")):
+        return ("体验", "trial")
+    return (name or plan_id or "Other", "other")
+
+
+def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
+    """从 billing/balance 与 billing/current 数据构建结构化多套餐层级槽位（对齐 zcode-switch）。"""
+    raw_plans = balance_data.get("plans") or current_plans or []
+    slots: list[dict] = []
+
+    # 1. 优先从 active 套餐数组构建槽位
+    for pl in raw_plans:
+        if not isinstance(pl, dict):
+            continue
+        status = str(pl.get("status") or "").lower()
+        if status and status != "active":
+            continue
+        pid = str(pl.get("plan_id") or pl.get("planId") or "").strip()
+        pname = str(pl.get("name") or pid).strip()
+        tier, tier_code = _plan_tier_from_id(pid, pname)
+        expire = _extract_expire(pl)
+        slots.append({
+            "pid": pid,
+            "name": pname or pid or "常规套餐",
+            "tier": tier,
+            "tier_code": tier_code,
+            "expire": expire,
+            "total": None,
+            "used": None,
+            "remaining": None,
+            "percent_used": None,
+            "items": [],
+        })
+
+    # 2. 遍历 balances 额度桶，分发至目标套餐
+    raw_balances = balance_data.get("balances") or []
+    loose_items: list[dict] = []
+
+    for bal in raw_balances:
+        if not isinstance(bal, dict):
+            continue
+        tot = _safe_units(bal.get("total_units"))
+        used = _safe_units(bal.get("used_units"))
+        rem = _safe_units(bal.get("remaining_units") if bal.get("remaining_units") is not None else bal.get("available_units"))
+        model_name = str(bal.get("show_name") or bal.get("name") or bal.get("model") or "Unknown").strip()
+        exp_str = _extract_expire(bal)
+        pct = round(used / tot * 100.0, 1) if tot > 0 else 0.0
+
+        item = {
+            "name": model_name,
+            "total": tot,
+            "used": used,
+            "remaining": rem,
+            "percent_used": pct,
+            "unit": str(bal.get("unit_type") or "token"),
+            "expires_at": exp_str or bal.get("expires_at"),
+        }
+
+        bpid = str(bal.get("plan_id") or bal.get("planId") or "").strip()
+        target = next((s for s in slots if s["pid"] and s["pid"] == bpid), None) if bpid else None
+        if not target and len(slots) == 1 and not bpid:
+            target = slots[0]
+
+        if target:
+            if not target.get("expire") and exp_str:
+                target["expire"] = exp_str
+            target["items"].append(item)
+        else:
+            loose_items.append(item)
+
+    # 3. 孤儿额度桶容错兜底：未匹配到任何套餐的额度，放入默认常规槽位
+    if loose_items:
+        max_exp = next((it["expires_at"] for it in loose_items if it.get("expires_at")), None)
+        slots.append({
+            "pid": "default",
+            "name": "常规额度",
+            "tier": "Standard",
+            "tier_code": "free",
+            "expire": max_exp,
+            "total": None,
+            "used": None,
+            "remaining": None,
+            "percent_used": None,
+            "items": loose_items,
+        })
+
+    # 4. 计算各个 Slot 的汇总统计值（对齐 zcode-switch 汇总逻辑）
+    for s in slots:
+        items = s.get("items") or []
+        if items:
+            t_sum = sum(it.get("total") or 0 for it in items)
+            u_sum = sum(it.get("used") or 0 for it in items)
+            r_sum = sum(it.get("remaining") or 0 for it in items)
+            s["total"] = t_sum
+            s["used"] = u_sum
+            s["remaining"] = r_sum
+            s["percent_used"] = round(u_sum / t_sum * 100.0, 1) if t_sum > 0 else 0.0
+
+    return slots
+
+
+async def fetch_quota(account: Account, include_claimable: bool = False) -> dict:
     """拉取单个账号的 方案 / 余额 / 用量，写回账号状态并持久化。
 
-    返回结构: {"billing":..., "balance":..., "usage":..., "error":...}
+    当 include_claimable=True 时，同步探测待领取活动套餐（并发前置日活上报）。
+    返回结构: {"billing":..., "balance":..., "usage":..., "claimable":..., "error":...}
     """
     live = store.find(account.provider, account.id)
     if live is None:
@@ -231,6 +379,7 @@ async def fetch_quota(account: Account) -> dict:
     # 只要上游 /billing/balance 成功响应 200 并合法解析，物理事实即为基准进行真相同步
     if balance_parsed_ok:
         account.quota = quota_map
+        account.plan_slots = _build_plan_slots(data.get("data") or {}, account.plans)
         if quota_map:
             # 额度耗尽判定：优先锚定主免费池模型 DEFAULT_MODEL（GLM-5.3-Flash，大小写无关），
             # 防止新号在 GLM-5.3-Flash 耗尽后因闲置的 300 万 GLM-5.3 余量阻塞 EXHAUSTED 状态或触发误恢复；
@@ -267,6 +416,24 @@ async def fetch_quota(account: Account) -> dict:
             if account.status == Status.ACTIVE:
                 account.status = Status.EXHAUSTED
                 account.last_error = "额度已用完"
+            account.plan_slots = []
+
+    # 当 include_claimable=True 时，同步探测待领取活动套餐（并发前置日活上报，带独立短超时与异常隔离）
+    if include_claimable and account.mode == "jwt" and account.jwt_token and account.allows_billing():
+        try:
+            from .claim import preview_plans, report_activation_events
+
+            try:
+                # 兼容 5 秒短超时，前置激活事件上报（不阻断 preview）
+                await asyncio.wait_for(report_activation_events(account), timeout=5.0)
+            except Exception as act_err:
+                logs.warn("quota", f"账号 {account.name} 刷新前置日活上报跳过: {act_err}")
+
+            claim_plans = await asyncio.wait_for(preview_plans(account), timeout=8.0)
+            account.claimable_plans = claim_plans
+            result["claimable"] = claim_plans
+        except Exception as claim_err:
+            logs.info("quota", f"账号 {account.name} 待领活动探测跳过/异常: {claim_err}")
 
     store.update_account(account)
     return result or {"error": "无法获取额度数据"}

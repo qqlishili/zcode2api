@@ -42,6 +42,8 @@ class Account:
     quota: dict = field(default_factory=dict)
     plan: dict = field(default_factory=dict)        # 当前激活方案（billing/current plans[0]，兼容保留）
     plans: list = field(default_factory=list)       # 全部方案（上游 plans 数组；多套餐时 entitlements 不丢）
+    plan_slots: list = field(default_factory=list)       # 多套餐层级槽位（对齐 zcode-switch PlanSlot；含各个套餐独立的过期时间与模型额度桶）
+    claimable_plans: list = field(default_factory=list)  # 当前可领取的活动套餐列表（取自 /billing/preview）
     usage: dict = field(default_factory=dict)       # 近期用量原始数据
 
     use_count: int = 0
@@ -220,6 +222,9 @@ class Account:
             "quota": self.quota,
             "plan": self.plan,
             "plans": self.plans,
+            "plan_slots": self.plan_slots,
+            "claimable_plans": self.claimable_plans,
+            "claim_badge": bool(self.claimable_plans),
             "use_count": self.use_count,
             "fail_count": self.fail_count,
             "risk_strikes": self.risk_strikes,

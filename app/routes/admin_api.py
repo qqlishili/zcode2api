@@ -201,8 +201,36 @@ async def refresh_one(account_id: str):
     blocked = billing_block_reason(acc, action="上游刷新")
     if blocked:
         return {"ok": False, "message": blocked, "account": acc.public_view()}
-    res = await fetch_quota(acc)
+    res = await fetch_quota(acc, include_claimable=True)
     return {"ok": "error" not in res, "result": res, "account": acc.public_view()}
+
+
+@router.post("/accounts/{account_id}/claim_refresh")
+async def claim_refresh_one(account_id: str):
+    """单独探测单账号待领活动（对齐 zcode-switch claim_refresh）。"""
+    acc = store.find_any(account_id)
+    if not acc:
+        raise HTTPException(404, "账号不存在")
+    if acc.mode != "jwt":
+        return {"ok": False, "message": "仅 Coding Plan (JWT) 账号支持活动探测", "plans": []}
+    blocked = billing_block_reason(acc, action="上游查询")
+    if blocked:
+        return {"ok": False, "message": blocked, "plans": acc.claimable_plans, "account": acc.public_view()}
+    try:
+        from ..claim import preview_plans, report_activation_events
+
+        try:
+            await asyncio.wait_for(report_activation_events(acc), timeout=5.0)
+        except Exception as act_err:
+            logs.warn("claim", f"账号 {acc.name} 激活上报跳过: {act_err}")
+
+        plans = await asyncio.wait_for(preview_plans(acc), timeout=8.0)
+        acc.claimable_plans = plans
+        store.update_account(acc)
+        return {"ok": True, "plans": plans, "account": acc.public_view()}
+    except Exception as err:
+        logs.warn("claim", f"账号 {acc.name} 探测活动失败: {err}")
+        return {"ok": False, "message": str(err), "plans": acc.claimable_plans, "account": acc.public_view()}
 
 
 # ── OAuth 登录（Z.AI）────────────────────────────────────────────────────────
@@ -525,7 +553,7 @@ async def claim_manual(payload: dict = Body(...)):
         return {"outcomes": [{"account_id": acc.id, "account_name": acc.name,
                               "ok": False, "message": str(err)}],
                 "summary": {"ok": 0, "fail": 1}}
-    await refresh_accounts([acc])
+    await fetch_quota(acc, include_claimable=True)
     return {"outcomes": [{"account_id": acc.id, "account_name": acc.name,
                           "ok": True, **result}],
             "summary": {"ok": 1, "fail": 0}}
