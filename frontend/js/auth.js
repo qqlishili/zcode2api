@@ -37,12 +37,25 @@ function _keyStore(k){
 }
 const adminKey=_keyStore('zcode2api_admin_key');
 
-async function verifyKey(url,key){
-  return (await fetch(url,{headers:key?{Authorization:`Bearer ${key}`}:{}})).ok;
+function isKeyVerified(key){
+  if(!key)return false;
+  return sessionStorage.getItem('zcode_admin_verified')===key;
 }
-function adminLogout(){adminKey.clear();location.href='/admin/login';}
 
-/* 统一的后台 API 调用封装 */
+async function verifyKey(url,key){
+  if(!key)return false;
+  if(isKeyVerified(key))return true;
+  const ok=(await fetch(url,{headers:{Authorization:`Bearer ${key}`}})).ok;
+  if(ok)sessionStorage.setItem('zcode_admin_verified',key);
+  return ok;
+}
+function adminLogout(){
+  adminKey.clear();
+  sessionStorage.removeItem('zcode_admin_verified');
+  location.href='/admin/login';
+}
+
+/* 统一的后台 API 调用封装（内置 401 自动拦截跳转） */
 async function api(method,path,body){
   const key=await adminKey.get();
   const r=await fetch(ADMIN_API+path,{
@@ -50,6 +63,12 @@ async function api(method,path,body){
     headers:{...(body!=null&&{'Content-Type':'application/json'}),Authorization:`Bearer ${key}`},
     ...(body!=null&&{body:JSON.stringify(body)}),
   });
+  if(r.status===401){
+    adminKey.clear();
+    sessionStorage.removeItem('zcode_admin_verified');
+    location.href='/admin/login';
+    throw new Error('未授权或会话已失效，请重新登录');
+  }
   if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.status);}
   return r.json();
 }

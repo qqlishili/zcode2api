@@ -21,7 +21,7 @@ def _html(name: str) -> HTMLResponse:
     if not path.exists():
         raise HTTPException(404, "页面不存在")
     body = path.read_text(encoding="utf-8").replace(_TOKEN, settings.frontend_version())
-    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+    return HTMLResponse(body, headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @router.get("/", include_in_schema=False)

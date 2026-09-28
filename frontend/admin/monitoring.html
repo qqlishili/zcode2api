@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>zcode-hub · 请求监控</title>
-  <link href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" rel="stylesheet">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css"></noscript>
   <link href="/static/css/app.css?v={{APP_VERSION}}" rel="stylesheet">
 </head>
 <body>
@@ -253,10 +255,11 @@ async function doClear(){
 }
 
 (async()=>{
-  const key=await adminKey.get();
-  if(!key||!await verifyKey(ADMIN_API+'/verify',key).catch(()=>false))return location.href='/admin/login';
   renderChips();
-  await renderAdminHeader();
+  renderAdminHeader();
+  const key=await adminKey.get();
+  if(!key)return location.href='/admin/login';
+  if(!isKeyVerified(key)&&!await verifyKey(ADMIN_API+'/verify',key).catch(()=>false))return location.href='/admin/login';
   await load();
   pollTimer=setInterval(()=>{if(!document.hidden)load().catch(()=>{});},5000);
 })();

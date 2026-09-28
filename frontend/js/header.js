@@ -1,9 +1,9 @@
-/* 后台公共头部渲染 */
-async function renderAdminHeader(){
+/* 后台公共头部渲染（零阻塞即时挂载 + 悬停极速预取） */
+let _cachedVersion=sessionStorage.getItem('zcode_hub_version')||'';
+
+function renderAdminHeader(){
   const mount=document.getElementById('admin-header');
   if(!mount)return;
-  let version='';
-  try{const r=await fetch('/meta');if(r.ok)version='v'+(await r.json()).version;}catch{}
   const active=mount.dataset.active||location.pathname;
   const nav=[
     ['/admin/accounts','账号池'],
@@ -20,11 +20,44 @@ async function renderAdminHeader(){
         </div>
         <nav class="admin-nav">${nav}</nav>
         <div class="admin-header-right">
-          ${version?`<span class="admin-header-version">${version}</span>`:''}
+          <span class="admin-header-version" id="header-version" style="${_cachedVersion?'':'display:none'}">${_cachedVersion}</span>
           <button onclick="adminLogout()" class="admin-header-icon-btn" title="退出登录" aria-label="退出登录">
             <svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
           </button>
         </div>
       </div>
     </header>`;
+
+  // 异步获取最新版本号并缓存，不阻塞页面关键渲染路径
+  if(!_cachedVersion){
+    fetch('/meta').then(r=>r.ok?r.json():null).then(d=>{
+      if(d&&d.version){
+        _cachedVersion='v'+d.version;
+        sessionStorage.setItem('zcode_hub_version',_cachedVersion);
+        const el=document.getElementById('header-version');
+        if(el){el.textContent=_cachedVersion;el.style.display='';}
+      }
+    }).catch(()=>{});
+  }
+
+  initNavPrefetch();
+}
+
+/* 导航链接悬停预拉取（Hover Prefetch）：提前将目标页面载入缓存，实现秒开 */
+function initNavPrefetch(){
+  const links=document.querySelectorAll('.admin-nav-link');
+  links.forEach(a=>{
+    const href=a.getAttribute('href');
+    if(!href||href===location.pathname)return;
+    const doPrefetch=()=>{
+      if(a._prefetched)return;
+      a._prefetched=true;
+      const link=document.createElement('link');
+      link.rel='prefetch';
+      link.href=href;
+      document.head.appendChild(link);
+    };
+    a.addEventListener('mouseenter',doPrefetch,{once:true});
+    a.addEventListener('touchstart',doPrefetch,{once:true,passive:true});
+  });
 }
