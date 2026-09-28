@@ -13,6 +13,7 @@ from . import logs, settings
 from .captcha import captcha_manager
 from .quota import monitor
 from .routes import admin_api, gateway, pages
+from .sentinel import sentinel
 
 # 修正 Windows 中文控制台可能出现的乱码
 for _stream in (sys.stdout, sys.stderr):
@@ -112,6 +113,7 @@ async def lifespan(app: FastAPI):
         logs.ok("install", f"存量账号补配安装身份 ×{installed}")
     monitor.start()
     captcha_manager.start()   # 验证码预解池后台补充
+    sentinel.start()          # 官方活动哨兵后台巡检
     _run_install_sequence_on_start()
     base = f"http://{_display_host()}:{settings.PORT}"
     logs.banner([
@@ -122,6 +124,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await sentinel.stop()
         await monitor.stop()
         await captcha_manager.close()
         await gateway.close_shared_client()

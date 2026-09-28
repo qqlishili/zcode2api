@@ -86,17 +86,18 @@ zcode-hub/
 
 ```
 client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
-   1. 选号：优先命中同会话粘性绑定账号（保上游 ephemeral 缓存），不可用/首轮则走 store.select（round-robin；跳过 exhausted / 冷却中 / 手动停用；
-      JWT invalid/风控 disabled 仅当同账号有 API Key 回退时可选）
+   1. 选号：优先命中同会话粘性绑定账号（固定窗口 600s / 单轮最多 20 次请求，禁止滑动续期以防单号过热；
+      保多轮对话缓存与 thinking 签名连续），到期/满步数/不可用/首轮则走 store.select
+      （round-robin 单调游标；跳过 exhausted / 冷却中 / invalid / 风控 disabled / 手动停用 / 目标模型无余量；
+      优先选择显式持有目标模型余量的账号）
    2. 并发槽：该号在飞 ≥ account_concurrency 则跳号（不排队；跳过不计 attempt）
    3. 构建上游请求（每账号指纹 + 透传头过滤 + Plan/Key 通道）
    4. 响应分类：
       ok                 → 透传/翻译返回；释放槽在流关闭时
       402/额度关键词      → EXHAUSTED，换号
-      429                → 不冷却，原地等 Retry-After 后重试（等待期间放槽）；
-                           Plan 预算耗尽且有 Key 则 force_fallback
-      401/403(非验证码)   → INVALID；JWT+Key 可切回退，纯 Key 不可再选
-      3012/405 风控       → ban_for_risk（DISABLED）；JWT+Key 可切回退
+      429                → 不冷却，原地等 Retry-After 后重试（等待期间放槽）；重试耗尽换下一个账号
+      401/403(非验证码)   → INVALID，换号
+      3012/405 风控       → ban_for_risk（DISABLED），换号
       403(验证码挑战)     → 刷新验证码原账号重试（≤3 次）
       5xx                → 重试后 COOLING，换号
       其它 4xx           → 原样回传客户端
@@ -118,34 +119,52 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
             │         │────────────────────────▶│ DISABLED│ （手动启用）
             └─────────┘                         └─────────┘
    成功响应可清除 COOLING/EXHAUSTED（不得洗掉 INVALID/风控 DISABLED）。
-   JWT+Key：INVALID/DISABLED 仍可选，对话走 api.z.ai 回退；纯 apiKey 不可再选。
+   免费赠送池模式下不启用 OAuth 0 余额 API Key 回退，INVALID/DISABLED 账号直接隔离下线。
 ```
 
 参数：`MAX_ACCOUNT_ATTEMPTS=5`、`COOLING_SECONDS=300`（仅 5xx/连接失败）、`RETRY_429_TIMES=5`、`ACCOUNT_CONCURRENCY=2`（0 = 不限）。额度耗尽由后台 `quota` 刷新探测恢复，没有独立 `exhausted_retry_seconds`。
 
 ### 4.3 额度监控
 
-后台任务按 `quota_refresh_interval`（默认 60s，meta 表可改，0 = 关）刷新池内 JWT 账号；冷却 / invalid / 风控禁用 / 手动停用不打 billing。每个账号探测 `billing/current` + `billing/balance` + `usage`。日窗口耗尽且无赠送池 → EXHAUSTED；额度恢复且非冷却 → 回 ACTIVE。废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。成功对话后的 billing 刷新有 `BILLING_REFRESH_MIN_INTERVAL`（默认 60s）去抖。
+后台任务按 `quota_refresh_interval`（默认 60s，meta 表可改，0 = 关）刷新池内 JWT 账号；冷却 / invalid / 风控禁用 / 手动停用不打 billing。每个账号探测 `billing/current` + `billing/balance` + `usage`。上游 `billing/balance` 响应 200 且合法解析时以物理事实强制同步覆盖：若 `balances` 为空（套餐自然到期或未开通），彻底清空 `account.quota` 避免残留历史快照，并置为 EXHAUSTED（原因 `no_active_quota` / `额度已用完`）；若返回非空窗口，优先深度提取 `capabilities` 中的 `model:<id>` 协议标签（若含 `flash` 则无条件归一化为 `GLM-5.3-Flash`，并兜底检查 `show_name` / `model` 是否含 `flash`），过滤 `expires_at <= now` 的过期残留窗口后，确保周期性日窗与异名活动赠送池（如 `GLM-5.3-Flash 体验版`）安全累加合并至标准的 `GLM-5.3-Flash` 单一窗口；耗尽判定优先以主免费池模型 `DEFAULT_MODEL`（`GLM-5.3-Flash`）的 `remaining <= 0` 判定 EXHAUSTED（避免闲置的 `GLM-5.3` 余量阻塞耗尽状态或引发误恢复；无主模型窗口时回退按全窗口判定）；额度恢复且非冷却 → 回 ACTIVE。废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。成功对话后的 billing 刷新有 `BILLING_REFRESH_MIN_INTERVAL`（默认 60s）去抖。
 
 ### 4.4 活动领取
 
 ```
 入池（Web/CLI）或后台「领取」：
-  JWT 且 allows_billing → GET billing/preview（Bearer JWT + 每账号 X-Device-Mid）
-  ├─ 无可领套餐 → 结束
-  ├─ 有可领 → 取验证码 verifyParam → POST billing/claim
-  │    ├─ 1003 已领取 / 1002 结束 / 1005 名额用完 → 记失败文案
-  │    ├─ 3007 验证码失败 → 换码重试一次
-  │    └─ 401 → 标 INVALID
-  └─ 领取成功 → 刷新额度
+  JWT 且 allows_billing →
+  ├─ 处于 1005 避让期（is_claim_blocked） → 直接短路跳过，不打上游 HTTP，不打码
+  └─ 未避让 → GET billing/preview（Bearer JWT + 每账号 X-Device-Mid）
+       ├─ 无可领套餐 → 结束
+       ├─ 有可领 → 取验证码 verifyParam → POST billing/claim
+       │    ├─ 1005 名额用完 → 标记 claim_blocked_until（北京时间次日 00:05 + 0~300s Jitter 离散避让）
+       │    ├─ 1003 已领取 / 1002 结束 → 记失败文案
+       │    ├─ 3007 验证码失败 → 换码重试一次
+       │    └─ 401 → 标 INVALID
+       └─ 领取成功 → 刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
 ```
 
-### 4.5 凭证进入池内的路径
+### 4.5 Bark 活动监控与智能领券哨兵（Sentinel）
+
+```
+Sentinel 后台巡检循环（默认 1800 秒，单例持有强引用防 GC）：
+  ├─ 动态挑选 1 个活跃健康 JWT 账号作为探针（单轮上限 3 次，遇 401 标记失效并轮换下一位，防死锁）
+  ├─ 调用 preview_plans（无验证码、只读零开销）
+  ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans），无新增则休眠
+  └─ 发现全新 plan_id：
+       ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 0.6~1.5s 离散随机抖动延时，
+       │  为全池可用 JWT 账号触发 auto_claim_all_plans（严格避开验证码池与 Solver 拥堵）
+       ├─ 汇总活动详情与全池抢领战报，格式化构建消息
+       ├─ POST JSON 投递 Bark（POST https://api.day.app/push，超时 8s，全量异常捕获）
+       └─ 时序安全落库：投递完成后将新 plan_id 持久化写入 sentinel_seen_plans（防静默丢单）
+```
+
+### 4.6 凭证进入池内的路径
 
 | 路径 | 流程 |
 |------|------|
-| Web OAuth | `POST /admin/api/login/start` → 浏览器授权官方 callback → `GET login/poll` ready 入池 JWT；API Key 兑换后台回填 |
+| Web OAuth | `POST /admin/api/login/start` → 浏览器授权官方 callback → `GET login/poll` ready 入池 JWT 并后台刷新额度与自动领取套餐 |
 | Web / CLI 粘贴 | `POST /admin/api/accounts` 或 `cli.py add-account`（JWT 或 Key） |
 | JSON 导入 | `GET/POST /admin/api/export|import` 或 `cli.py export/import`（明文 name/mode/secret） |
 

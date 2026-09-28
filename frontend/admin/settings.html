@@ -47,6 +47,36 @@
   </div>
 
   <div class="settings-card">
+    <div class="section-title" style="margin-bottom:16px">活动监控与 Bark 通知</div>
+    <div class="settings-row">
+      <label>Bark 设备 Key / 链接</label>
+      <div class="hint">支持粘贴裸 Key（如 <code>abcd1234efgh</code>）或客户端提供的完整链接（如 <code>https://api.day.app/abcd1234efgh/</code>）。输入框显示掩码，未改动保存不会覆盖原值。</div>
+      <input class="input" id="bark-key" type="password" placeholder="留空表示不启用推送" autocomplete="new-password">
+    </div>
+    <div class="settings-row">
+      <label>Bark 服务端地址</label>
+      <div class="hint">默认官方服务 <code>https://api.day.app</code>。若使用自建 Bark 服务器可在此覆盖。</div>
+      <input class="input" id="bark-server" type="text" placeholder="https://api.day.app">
+    </div>
+    <div class="settings-row">
+      <label>活动巡检间隔（秒）</label>
+      <div class="hint">后台单哨兵自动检测官方新赠送活动的周期。默认 1800 秒（30分钟），设为 0 关闭自动巡检。</div>
+      <input class="input" id="sentinel-interval" type="number" min="0" step="60" placeholder="1800">
+    </div>
+    <div class="settings-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="sentinel-auto-claim" style="width:16px;height:16px">
+        <span>发现新活动自动全池抢领</span>
+      </label>
+      <div class="hint">开启后，哨兵探测到新活动时，自动以单并发顺序串行（带随机抖动延时保护验证码池）为全池可用账号领券，抢领战报将合并推送至 Bark。</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+      <button onclick="testBark()" class="dialog-btn">测试推送</button>
+      <button onclick="saveSettings()" class="dialog-btn dialog-btn-primary">保存</button>
+    </div>
+  </div>
+
+  <div class="settings-card">
     <div class="section-title" style="margin-bottom:12px">使用说明</div>
     <div class="hint" style="line-height:1.9">
       · 在「账号池」粘贴 Coding Plan JWT 或 API Key 即可加入轮询。<br>
@@ -76,6 +106,10 @@ async function load(){
     document.getElementById('gateway-key').value=d.gateway_key_masked||'';
     document.getElementById('quota-interval').value=d.quota_refresh_interval??60;
     document.getElementById('account-concurrency').value=d.account_concurrency??2;
+    document.getElementById('bark-key').value=d.bark_device_key_masked||'';
+    document.getElementById('bark-server').value=d.bark_server_url||'https://api.day.app';
+    document.getElementById('sentinel-interval').value=d.sentinel_interval??1800;
+    document.getElementById('sentinel-auto-claim').checked=d.sentinel_auto_claim!==false;
     const hint=document.getElementById('admin-key-default-hint');
     if(hint) hint.style.display=d.admin_key_is_default?'block':'none';
   }catch(e){showToast('加载失败: '+e.message,'error');}
@@ -85,17 +119,45 @@ function _isSecretMask(v){
   return v.includes('…') || v === '••••';
 }
 
+async function testBark(){
+  const bark_key=document.getElementById('bark-key').value.trim();
+  const bark_server=document.getElementById('bark-server').value.trim();
+  showToast('正在发送测试通知...','info');
+  try{
+    const payload={};
+    if(bark_key && !_isSecretMask(bark_key)) payload.device_key=bark_key;
+    if(bark_server) payload.server_url=bark_server;
+    const res=await api('POST','/settings/bark/test',payload);
+    showToast(res.message||'测试推送成功','success');
+  }catch(e){showToast('测试推送失败: '+e.message,'error');}
+}
+
 async function saveSettings(){
   const admin_key=document.getElementById('admin-key').value.trim();
   const gateway_key=document.getElementById('gateway-key').value.trim();
   const quota_refresh_interval=parseInt(document.getElementById('quota-interval').value,10);
   const account_concurrency=parseInt(document.getElementById('account-concurrency').value,10);
+  const bark_key=document.getElementById('bark-key').value.trim();
+  const bark_server=document.getElementById('bark-server').value.trim();
+  const sentinel_interval=parseInt(document.getElementById('sentinel-interval').value,10);
+  const sentinel_auto_claim=document.getElementById('sentinel-auto-claim').checked;
+
   if(!admin_key)return showToast('后台密码不能为空','error');
   if(isNaN(quota_refresh_interval)||quota_refresh_interval<0)return showToast('刷新间隔必须是非负整数','error');
   if(isNaN(account_concurrency)||account_concurrency<0)return showToast('账号并发必须是非负整数（0 = 不限）','error');
-  const payload={quota_refresh_interval,account_concurrency};
+  if(isNaN(sentinel_interval)||sentinel_interval<0)return showToast('巡检间隔必须是非负整数','error');
+
+  const payload={
+    quota_refresh_interval,
+    account_concurrency,
+    sentinel_interval,
+    sentinel_auto_claim,
+  };
   if(!_isSecretMask(admin_key)) payload.admin_key=admin_key;
   if(!_isSecretMask(gateway_key)) payload.gateway_key=gateway_key;
+  if(!_isSecretMask(bark_key)) payload.bark_device_key=bark_key;
+  if(bark_server) payload.bark_server_url=bark_server;
+
   try{
     await api('PUT','/settings',payload);
     if(payload.admin_key) await adminKey.set(payload.admin_key);

@@ -85,6 +85,15 @@ COOLING_SECONDS = _int("ZCODE_COOLING_SECONDS", 300)
 # 单账号并发上限（0 = 不限）。默认 2；运行期可在后台设置改（meta 表即时生效）
 ACCOUNT_CONCURRENCY = _int("ZCODE_ACCOUNT_CONCURRENCY", 2)
 
+# ── 活动监控与 Bark 推送 ─────────────────────────────────────────────────────
+# Bark 服务器地址与设备 Key，默认值通过环境变量指定，之后以数据库（meta 表）为准
+BARK_SERVER_URL = os.getenv("ZCODE_BARK_SERVER_URL", "https://api.day.app")
+BARK_DEVICE_KEY = os.getenv("ZCODE_BARK_DEVICE_KEY", "")
+# 哨兵巡检活动间隔（秒），默认 1800（30 分钟），0 表示关闭自动巡检
+SENTINEL_INTERVAL = _int("ZCODE_SENTINEL_INTERVAL", 1800)
+# 发现新活动时是否自动为全池有效 JWT 账号顺序抢领（1=是，0=否）
+SENTINEL_AUTO_CLAIM = _int("ZCODE_SENTINEL_AUTO_CLAIM", 1)
+
 # ── 上游端点 ─────────────────────────────────────────────────────────────────
 # 上游端点：默认值统一收口在 constants.py，环境变量仅作覆盖
 UPSTREAM = {

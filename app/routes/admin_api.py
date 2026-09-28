@@ -287,7 +287,7 @@ async def login_poll(flow_id: str):
     # 会话先摘除再入池：并发/重复 poll 不会再进入兑换链。
     _login_flows.pop(flow_id, None)
 
-    # JWT 先入池并立刻 ready；兑换 API Key / 额度刷新改后台，避免卡住前端下一轮 poll。
+    # JWT 先入池并立刻 ready；额度刷新改后台，避免卡住前端下一轮 poll。
     zcode_jwt = data.get("token")
     access_token = (data.get("zai") or {}).get("access_token")
     label = entry.get("label") or "oauth-login"
@@ -310,7 +310,7 @@ async def login_poll(flow_id: str):
     if account.mode == "jwt":
         _schedule_auto_claim(account)  # 授权完成即激活+自动领取，入池即吃满活动
     _schedule_install(account)  # 按账号安装序（幂等；apiKey 账号同样安装）
-    _schedule_login_followup(account, flow, access_token if zcode_jwt else None)
+    _schedule_login_followup(account)
     logs.info("oauth", f"授权成功入池 {account.name} ({account.id}) mode={account.mode}")
     return {"status": "ready", "account": account.public_view()}
 
@@ -320,25 +320,13 @@ _auto_claim_tasks: set[asyncio.Task] = set()  # 强引用防 GC
 _login_followup_tasks: set[asyncio.Task] = set()
 
 
-def _schedule_login_followup(account, flow, access_token: str | None) -> None:
-    """ready 后后台兑换 API Key 并刷新额度；失败只打日志，不影响已入池的 JWT。"""
+def _schedule_login_followup(account, flow=None, access_token: str | None = None) -> None:
+    """ready 后后台刷新 JWT 账号额度；失败只打日志，不影响已入池的 JWT。
+
+    注：免费赠送池模式下不再兑换 0 余额的 zcode-api-key，消除无效 api.z.ai 回退干扰。
+    """
 
     async def _job():
-        live = store.find("zai", account.id)
-        if live is None:
-            return
-        if access_token:
-            try:
-                api_key = await asyncio.wait_for(
-                    flow.exchange_api_key(access_token), timeout=LOGIN_EXCHANGE_TIMEOUT
-                )
-                live = store.find("zai", account.id)
-                if live is None:
-                    return
-                live.api_key = api_key
-                store.update_account(live)
-            except Exception as err:  # noqa: BLE001 - 兑换失败不影响 JWT 已入池
-                logs.warn("oauth", f"账号 {account.name} 兑换 API Key 失败: {err}")
         live = store.find("zai", account.id)
         if live is None:
             return
@@ -558,6 +546,7 @@ async def get_settings():
 
     admin_key = store.admin_key()
     gateway_key = store.gateway_key()
+    bark_key = store.bark_device_key()
     return {
         "admin_key_set": bool(admin_key),
         "admin_key_masked": _mask_secret(admin_key),
@@ -566,6 +555,11 @@ async def get_settings():
         "gateway_key_masked": _mask_secret(gateway_key),
         "quota_refresh_interval": store.quota_refresh_interval(),
         "account_concurrency": store.account_concurrency(),
+        "bark_server_url": store.bark_server_url(),
+        "bark_device_key_set": bool(bark_key),
+        "bark_device_key_masked": _mask_secret(bark_key),
+        "sentinel_interval": store.sentinel_interval(),
+        "sentinel_auto_claim": store.sentinel_auto_claim(),
     }
 
 
@@ -597,7 +591,64 @@ async def update_settings(payload: dict = Body(...)):
         except (TypeError, ValueError):
             raise HTTPException(400, "账号并发必须是非负整数（0 = 不限）") from None
         store.set_setting("account_concurrency", str(concurrency))
+    if "bark_server_url" in payload:
+        url = (payload["bark_server_url"] or "").strip().rstrip("/")
+        store.set_setting("bark_server_url", url or "https://api.day.app")
+    if "bark_device_key" in payload:
+        key = (payload["bark_device_key"] or "").strip()
+        if "…" in key or key == "••••":
+            pass  # 前端回填掩码，不修改
+        else:
+            from ..notify import normalize_bark_config
+            norm_server, norm_key = normalize_bark_config(key, store.bark_server_url())
+            if "://" in key:
+                store.set_setting("bark_server_url", norm_server)
+            store.set_setting("bark_device_key", norm_key)
+    if "sentinel_interval" in payload:
+        try:
+            interval = max(0, int(payload["sentinel_interval"]))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "活动巡检间隔必须是非负整数") from None
+        store.set_setting("sentinel_interval", str(interval))
+    if "sentinel_auto_claim" in payload:
+        flag = "1" if payload["sentinel_auto_claim"] else "0"
+        store.set_setting("sentinel_auto_claim", flag)
     return {"ok": True}
+
+
+@router.post("/settings/bark/test")
+async def test_bark(payload: dict = Body(default=None)):
+    """测试 Bark 消息推送连通性。"""
+    from ..notify import normalize_bark_config, send_bark_notification
+
+    payload = payload or {}
+    input_key = (payload.get("device_key") or "").strip()
+    input_server = (payload.get("server_url") or "").strip().rstrip("/")
+
+    # 若入参为掩码或空，回退使用 store 中持久化的配置
+    if not input_key or "…" in input_key or input_key == "••••":
+        device_key = store.bark_device_key()
+    else:
+        norm_server, norm_key = normalize_bark_config(input_key, input_server or store.bark_server_url())
+        device_key = norm_key
+        if not input_server:
+            input_server = norm_server
+
+    server_url = (input_server or store.bark_server_url()).rstrip("/")
+
+    if not device_key:
+        raise HTTPException(400, "Bark 设备 Key 不能为空或未配置")
+
+    ok, msg = await send_bark_notification(
+        device_key=device_key,
+        server_url=server_url,
+        title="🔔 ZCode2API 连通性测试",
+        body="恭喜！Bark 消息推送配置成功，活动监控将在此处实时送达。",
+        group="ZCode监控",
+    )
+    if not ok:
+        raise HTTPException(502, f"推送失败: {msg}")
+    return {"ok": True, "message": msg}
 
 
 # ── 导入 / 导出 ─────────────────────────────────────────────────────────────

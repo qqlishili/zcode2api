@@ -81,6 +81,25 @@ class Store:
                 f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('account_concurrency', ?)",
                 (str(settings.ACCOUNT_CONCURRENCY),),
             )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('bark_server_url', ?)",
+                (settings.BARK_SERVER_URL,),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('bark_device_key', ?)",
+                (settings.BARK_DEVICE_KEY,),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_interval', ?)",
+                (str(settings.SENTINEL_INTERVAL),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_auto_claim', ?)",
+                (str(settings.SENTINEL_AUTO_CLAIM),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_seen_plans', '[]')"
+            )
             conn.commit()
 
     def _load(self) -> None:
@@ -91,6 +110,11 @@ class Store:
             self._settings.setdefault("gateway_key", "")
             self._settings.setdefault("quota_refresh_interval", str(settings.QUOTA_REFRESH_INTERVAL))
             self._settings.setdefault("account_concurrency", str(settings.ACCOUNT_CONCURRENCY))
+            self._settings.setdefault("bark_server_url", settings.BARK_SERVER_URL)
+            self._settings.setdefault("bark_device_key", settings.BARK_DEVICE_KEY)
+            self._settings.setdefault("sentinel_interval", str(settings.SENTINEL_INTERVAL))
+            self._settings.setdefault("sentinel_auto_claim", str(settings.SENTINEL_AUTO_CLAIM))
+            self._settings.setdefault("sentinel_seen_plans", "[]")
 
             self._accounts = {p: [] for p in PROVIDERS}
             rows = conn.execute(
@@ -166,6 +190,38 @@ class Store:
             return max(0, int(self.get_setting("account_concurrency", settings.ACCOUNT_CONCURRENCY)))
         except (TypeError, ValueError):
             return settings.ACCOUNT_CONCURRENCY
+
+    def bark_server_url(self) -> str:
+        return str(self.get_setting("bark_server_url", settings.BARK_SERVER_URL) or "https://api.day.app").strip()
+
+    def bark_device_key(self) -> str:
+        return str(self.get_setting("bark_device_key", settings.BARK_DEVICE_KEY) or "").strip()
+
+    def sentinel_interval(self) -> int:
+        try:
+            return max(0, int(self.get_setting("sentinel_interval", settings.SENTINEL_INTERVAL)))
+        except (TypeError, ValueError):
+            return settings.SENTINEL_INTERVAL
+
+    def sentinel_auto_claim(self) -> bool:
+        v = str(self.get_setting("sentinel_auto_claim", str(settings.SENTINEL_AUTO_CLAIM))).strip().lower()
+        return v not in ("0", "false", "off", "no")
+
+    def get_seen_plan_ids(self) -> set[str]:
+        raw = self.get_setting("sentinel_seen_plans", "[]")
+        try:
+            items = json.loads(raw)
+            if isinstance(items, list):
+                return {str(item) for item in items if item}
+        except Exception:
+            pass
+        return set()
+
+    def add_seen_plan_ids(self, plan_ids: list[str] | set[str]) -> None:
+        with self._lock:
+            current = self.get_seen_plan_ids()
+            current.update(str(p) for p in plan_ids if p)
+            self.set_setting("sentinel_seen_plans", json.dumps(sorted(list(current)), ensure_ascii=False))
 
     # ── 账号读取 ─────────────────────────────────────────────────────────────
     def list_accounts(self, provider: str | None = None) -> list[Account]:
@@ -255,20 +311,33 @@ class Store:
             return True
 
     # ── 轮询选择 ─────────────────────────────────────────────────────────────
-    def select(self, provider: str, skip_ids: set[str] | None = None) -> Account | None:
-        """按 round-robin 选择下一个可用账号。用完 / 失效的自动跳过。"""
+    def select(
+        self,
+        provider: str,
+        skip_ids: set[str] | None = None,
+        model: str | None = None,
+    ) -> Account | None:
+        """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量的自动跳过。
+
+        若指定了 model 且池内存在显式持有该模型正余量的账号（或尚未拉取配额的冷启动新号），
+        优先在该子集中轮询（例如请求 GLM-5.3 时精准路由给持有 GLM-5.3 额度的账号）。
+        """
         skip_ids = skip_ids or set()
         now = time.time()
         with self._lock:
             pool = [
                 a for a in self._accounts.get(provider, [])
-                if a.is_selectable(now) and a.id not in skip_ids
+                if a.is_selectable(now) and a.id not in skip_ids and a.has_model_quota(model)
             ]
             if not pool:
                 return None
-            idx = self._rotation.get(provider, 0) % len(pool)
-            account = pool[idx]
-            self._rotation[provider] = (idx + 1) % len(pool)
+            if model:
+                preferred = [a for a in pool if a.explicitly_supports_model(model)]
+                if preferred:
+                    pool = preferred
+            cursor = self._rotation.get(provider, 0)
+            account = pool[cursor % len(pool)]
+            self._rotation[provider] = (cursor + 1) % 1_000_000
             return account
 
     # ── 导入 / 导出 ─────────────────────────────────────────────────────────
