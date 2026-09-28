@@ -504,3 +504,54 @@ select.input option{background:var(--panel);color:var(--ink)}
   color:#0d1117;
   font-weight:700;
 }
+
+/* 批量操作全局进度条（Antigravity 沉浸式风格） */
+.batch-progress-wrap{
+  margin-bottom:18px;
+  padding:11px 16px;
+  border-radius:10px;
+  background:var(--panel);
+  border:1px solid var(--hairline);
+  box-shadow:0 4px 16px rgba(0,0,0,.2);
+  animation:adminFadeIn .2s ease forwards;
+}
+.batch-progress-info{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:8px;
+  font-size:12px;
+}
+.batch-progress-text{
+  font-weight:600;
+  color:var(--ink);
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.batch-progress-text svg{
+  color:var(--amber);
+  flex-shrink:0;
+}
+.batch-progress-count{
+  font-family:var(--mono);
+  font-size:12px;
+  color:var(--amber);
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.batch-progress-track{
+  height:5px;
+  border-radius:999px;
+  background:var(--panel-2);
+  overflow:hidden;
+  position:relative;
+  border:1px solid rgba(255,255,255,.04);
+}
+.batch-progress-fill{
+  height:100%;
+  border-radius:999px;
+  background:linear-gradient(90deg,var(--amber) 0%,var(--mint) 100%);
+  box-shadow:0 0 10px rgba(98,195,112,.4);
+  transition:width .25s ease-out;
+}

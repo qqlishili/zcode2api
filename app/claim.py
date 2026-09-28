@@ -286,14 +286,34 @@ async def preview_plans(account: Account) -> list[dict]:
     return plans
 
 
+def account_held_plan_ids(account: Account) -> set[str]:
+    """提取账号当前已持有/生效的套餐 plan_id 集合（小写去空格）。"""
+    held = set()
+    for pl in getattr(account, "plans", []) or []:
+        if isinstance(pl, dict):
+            pid = str(pl.get("plan_id") or pl.get("planId") or "").strip().lower()
+            if pid:
+                held.add(pid)
+    for slot in getattr(account, "plan_slots", []) or []:
+        if isinstance(slot, dict):
+            pid = str(slot.get("pid") or "").strip().lower()
+            if pid and pid != "default":
+                held.add(pid)
+    return held
+
+
 async def _auto_pick_plan(account: Account, plan_id: str | None) -> tuple[str, str, list]:
-    """plan_id 为空时 preview 自动选优先级最高套餐。返回 (plan_id, plan_name, grants)。"""
+    """plan_id 为空时 preview 自动选优先级最高的未领套餐。返回 (plan_id, plan_name, grants)。"""
     if plan_id:
         return plan_id, "", []
     plans = await preview_plans(account)
     if not plans:
         raise ClaimError("没有待领取的套餐")
-    best = plans[0]
+    held = account_held_plan_ids(account)
+    unclaimed = [p for p in plans if str(p.get("plan_id") or "").strip().lower() not in held]
+    if not unclaimed:
+        raise ClaimError("该账号已领取过当前所有可用活动套餐")
+    best = unclaimed[0]
     return best["plan_id"], best["name"] or best["plan_id"], best["grants"]
 
 

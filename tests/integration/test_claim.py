@@ -587,3 +587,39 @@ class TestAutoClaimOnPoolEntry:
         res = await client.post("/admin/api/accounts/nonexistent/fingerprint/rotate",
                                 headers={"Authorization": "Bearer zcode"})
         assert res.status_code == 404
+
+    async def test_claim_auto_picks_skips_already_held_plan(self, claim_env, fresh_app):
+        """一键领取（plan_id 为空）：当账号已持有该套餐时，自动跳过且不消耗打码。"""
+        client, mock, stub, acc = claim_env
+        # 给账号注入已持有的套餐
+        live = fresh_app.find("zai", acc.id)
+        live.plans = [{"plan_id": "mock-claim-plan", "name": "Mock Daily Plan", "status": "active"}]
+        fresh_app.update_account(live)
+
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id]},
+                                headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is True
+        assert outcome["skipped"] is True
+        assert "已自动跳过" in outcome["message"]
+        # 打码求解次数为 0，因为在选择阶段就已短路跳过！
+        assert stub.solve_count == 0
+
+    async def test_claim_explicit_plan_id_skips_already_held(self, claim_env, fresh_app):
+        """指定 plan_id 时：若本地已持有，直接跳过并不调打码。"""
+        client, mock, stub, acc = claim_env
+        live = fresh_app.find("zai", acc.id)
+        live.plans = [{"plan_id": "my-held-plan", "name": "Held Plan", "status": "active"}]
+        fresh_app.update_account(live)
+
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id], "plan_id": "my-held-plan"},
+                                headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is True
+        assert outcome["skipped"] is True
+        assert "已持有该套餐" in outcome["message"]
+        assert stub.solve_count == 0

@@ -43,6 +43,20 @@
     </div>
   </div>
 
+  <!-- 批量操作全局进度条（Antigravity 沉浸式风格） -->
+  <div class="batch-progress-wrap" id="batch-progress-wrap" style="display:none">
+    <div class="batch-progress-info">
+      <span class="batch-progress-text">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
+        <span id="batch-progress-msg">正在处理…</span>
+      </span>
+      <span class="batch-progress-count" id="batch-progress-count">0 / 0 (0%)</span>
+    </div>
+    <div class="batch-progress-track">
+      <div class="batch-progress-fill" id="batch-progress-fill" style="width:0%"></div>
+    </div>
+  </div>
+
   <div class="section-head"><div class="section-title">账户概览</div></div>
   <div class="stat-grid">
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">账户总数</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 19a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4"/><circle cx="12" cy="8" r="4"/></svg></span></div><div class="stat-num" id="s-total">0</div></div>
@@ -680,25 +694,66 @@ async function refreshAll(){
     showToast(`请等待刷新冷却（${left}秒）后重试`, 'info');
     return;
   }
-  const btn = document.getElementById('btn-refresh-all');
-  refreshAllRunning = true;
-  if(btn){
-    btn.disabled = true;
-    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新中…`;
+  const targets = allAccounts.filter(a => a.mode === 'jwt' && a.enabled !== false && a.status !== 'disabled');
+  if(!targets.length){
+    showToast('暂无有效的 JWT 账号可刷新', 'info');
+    return;
   }
-  showToast('正在一体化刷新额度与待领活动…', 'info');
 
-  try{
-    const d = await api('POST', '/accounts/refresh', { all: true, include_claimable: true });
-    await load(true);
-    showToast(`刷新完成：成功 ${d.summary.ok}，失败 ${d.summary.fail}，已同步探测待领活动`, 'success');
-  }catch(e){
-    showToast('刷新失败: ' + e.message, 'error');
-  }finally{
-    refreshAllRunning = false;
-    refreshAllCooldownUntil = Date.now() + 60000;
-    startRefreshAllTicker();
+  const btn = document.getElementById('btn-refresh-all');
+  const progWrap = document.getElementById('batch-progress-wrap');
+  const progMsg = document.getElementById('batch-progress-msg');
+  const progCount = document.getElementById('batch-progress-count');
+  const progFill = document.getElementById('batch-progress-fill');
+
+  refreshAllRunning = true;
+  if(btn) btn.disabled = true;
+  if(progWrap){
+    progWrap.style.display = 'block';
+    progMsg.textContent = '准备刷新全部账号额度与活动…';
+    progCount.textContent = `0 / ${targets.length} (0%)`;
+    progFill.style.width = '0%';
   }
+  showToast('开始一体化刷新额度与待领活动…', 'info');
+
+  let okCount = 0, failCount = 0;
+  const total = targets.length;
+
+  for(let i = 0; i < total; i++){
+    const acc = targets[i];
+    refreshing.add(acc.id);
+    renderList();
+    if(btn){
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新中 (${i + 1}/${total})…`;
+    }
+    const pct = Math.round((i / total) * 100);
+    if(progMsg) progMsg.textContent = `正在刷新「${acc.name}」额度与待领活动…`;
+    if(progCount) progCount.textContent = `${i} / ${total} (${pct}%)`;
+    if(progFill) progFill.style.width = `${pct}%`;
+
+    try{
+      const res = await api('POST', `/accounts/${acc.id}/refresh`);
+      if(res && res.ok) okCount++;
+      else failCount++;
+    }catch(e){
+      failCount++;
+    }finally{
+      refreshing.delete(acc.id);
+      await load(true);
+    }
+  }
+
+  if(progMsg) progMsg.textContent = `刷新完成：成功 ${okCount}，失败 ${failCount}`;
+  if(progCount) progCount.textContent = `${total} / ${total} (100%)`;
+  if(progFill) progFill.style.width = '100%';
+  setTimeout(() => {
+    if(progWrap) progWrap.style.display = 'none';
+  }, 1000);
+
+  refreshAllRunning = false;
+  refreshAllCooldownUntil = Date.now() + 60000;
+  startRefreshAllTicker();
+  showToast(`全部刷新完成：成功 ${okCount}，失败 ${failCount}`, okCount ? 'success' : 'error');
 }
 
 function startRefreshAllTicker(){
@@ -723,31 +778,148 @@ function startRefreshAllTicker(){
 }
 
 /* ── 额度领取 ── */
+function getHeldPlanIds(a){
+  const held = new Set();
+  (a.plans || []).forEach(p => {
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    if(pid) held.add(pid);
+  });
+  (a.plan_slots || []).forEach(s => {
+    const pid = String(s.pid || '').toLowerCase().trim();
+    if(pid && pid !== 'default') held.add(pid);
+  });
+  return held;
+}
+
+function hasUnclaimedActivity(a){
+  // 检查账号是否有尚未领取的待领活动
+  const claimable = a.claimable_plans || [];
+  if(!claimable.length) return false;
+  const held = getHeldPlanIds(a);
+  return claimable.some(p => {
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    return pid && !held.has(pid);
+  });
+}
+
 function claimToast(o){
-  if(o.ok)showToast(`「${o.account_name}」已领取「${o.plan_name||o.plan_id}」`,'success');
-  else showToast(`「${o.account_name}」领取失败：${o.message||'未知错误'}`,'error');
+  if(o.skipped) showToast(`「${o.account_name}」${o.message || '已领取过该活动，已跳过'}`, 'info');
+  else if(o.ok) showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
+  else showToast(`「${o.account_name}」领取失败：${o.message || '未知错误'}`, 'error');
 }
+
 async function claimOne(id){
-  if(claiming.has(id))return;
-  claiming.add(id);renderList();
+  if(claiming.has(id)) return;
+  const acc = allAccounts.find(a => a.id === id);
+  if(acc && !hasUnclaimedActivity(acc)){
+    const hasPlans = (acc.claimable_plans || []).length > 0;
+    if(hasPlans){
+      showToast(`「${acc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      return;
+    }
+  }
+  claiming.add(id);
+  renderList();
   try{
-    const d=await api('POST','/claim',{account_ids:[id]});
-    d.outcomes.forEach(claimToast);
-  }catch(e){showToast('领取失败: '+e.message,'error');}
-  finally{claiming.delete(id);await load();}
+    const d = await api('POST', '/claim', { account_ids: [id] });
+    (d.outcomes || []).forEach(claimToast);
+  }catch(e){
+    showToast('领取失败: ' + e.message, 'error');
+  }finally{
+    claiming.delete(id);
+    await load();
+  }
 }
+
+let claimAllRunning = false;
 async function claimAll(){
-  const btn=document.getElementById('btn-claim-all');
-  if(btn.disabled)return;
-  btn.disabled=true;
-  showToast('正在逐账号领取赠送额度…','info');
-  try{
-    const d=await api('POST','/claim',{});
-    d.outcomes.forEach(claimToast);
-    if(!d.outcomes.length)showToast('没有可领取的 JWT 账号','info');
-    else showToast(`领取完成：成功 ${d.summary.ok}，失败 ${d.summary.fail}`,d.summary.ok?'success':'error');
-  }catch(e){showToast('领取失败: '+e.message,'error');}
-  finally{btn.disabled=false;await load();}
+  if(claimAllRunning) return;
+  const btn = document.getElementById('btn-claim-all');
+  if(btn && btn.disabled) return;
+
+  const jwtAccounts = allAccounts.filter(a => a.mode === 'jwt' && a.enabled !== false && a.status !== 'disabled');
+  if(!jwtAccounts.length){
+    showToast('暂无有效的 JWT 账号', 'info');
+    return;
+  }
+
+  // 核心：判断账户是否已经领取过这个活动，如果已领就跳过，只领取还没领取的账户
+  const pendingAccounts = [];
+  const alreadyClaimedAccounts = [];
+
+  jwtAccounts.forEach(a => {
+    if(hasUnclaimedActivity(a)){
+      pendingAccounts.push(a);
+    } else {
+      alreadyClaimedAccounts.push(a);
+    }
+  });
+
+  if(!pendingAccounts.length){
+    showToast(`所有账号（共 ${jwtAccounts.length} 个）均已领取过活动或无可领活动，已自动跳过`, 'info');
+    return;
+  }
+
+  const progWrap = document.getElementById('batch-progress-wrap');
+  const progMsg = document.getElementById('batch-progress-msg');
+  const progCount = document.getElementById('batch-progress-count');
+  const progFill = document.getElementById('batch-progress-fill');
+
+  claimAllRunning = true;
+  if(btn) btn.disabled = true;
+  if(progWrap){
+    progWrap.style.display = 'block';
+    progMsg.textContent = `准备为 ${pendingAccounts.length} 个未领账号领取活动（已跳过 ${alreadyClaimedAccounts.length} 个已领账号）…`;
+    progCount.textContent = `0 / ${pendingAccounts.length} (0%)`;
+    progFill.style.width = '0%';
+  }
+  showToast(`开始为 ${pendingAccounts.length} 个未领取账号领取活动（已跳过 ${alreadyClaimedAccounts.length} 个已领账号）…`, 'info');
+
+  let okCount = 0, failCount = 0, skipCount = alreadyClaimedAccounts.length;
+  const total = pendingAccounts.length;
+
+  for(let i = 0; i < total; i++){
+    const acc = pendingAccounts[i];
+    claiming.add(acc.id);
+    renderList();
+    if(btn){
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 领取中 (${i + 1}/${total})…`;
+    }
+    const pct = Math.round((i / total) * 100);
+    if(progMsg) progMsg.textContent = `正在为「${acc.name}」求解验证码并领取活动…`;
+    if(progCount) progCount.textContent = `${i} / ${total} (${pct}%)`;
+    if(progFill) progFill.style.width = `${pct}%`;
+
+    try{
+      const d = await api('POST', '/claim', { account_ids: [acc.id] });
+      (d.outcomes || []).forEach(o => {
+        claimToast(o);
+        if(o.skipped) skipCount++;
+        else if(o.ok) okCount++;
+        else failCount++;
+      });
+    }catch(e){
+      failCount++;
+      showToast(`「${acc.name}」领取异常: ` + e.message, 'error');
+    }finally{
+      claiming.delete(acc.id);
+      await load(true);
+    }
+  }
+
+  if(progMsg) progMsg.textContent = `一键领取完成：成功 ${okCount}，已跳过 ${skipCount}，失败 ${failCount}`;
+  if(progCount) progCount.textContent = `${total} / ${total} (100%)`;
+  if(progFill) progFill.style.width = '100%';
+  setTimeout(() => {
+    if(progWrap) progWrap.style.display = 'none';
+  }, 1000);
+
+  claimAllRunning = false;
+  if(btn){
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg> 一键领取`;
+  }
+  showToast(`一键领取完成：成功 ${okCount}，已跳过 ${skipCount}，失败 ${failCount}`, failCount === 0 ? 'success' : 'error');
 }
 
 /* ── 手动领取：浏览器内过阿里滑块 → verifyParam 提交 hub 转发 ── */

@@ -14,6 +14,7 @@ from ..captcha import CaptchaSolveError
 from ..claim import (
     AUTH_EXPIRED_MESSAGE,
     ClaimError,
+    account_held_plan_ids,
     auto_claim_all_plans,
     billing_block_reason,
     claim_with_captcha,
@@ -486,9 +487,32 @@ async def claim(payload: dict = Body(default=None)):
     for acc in candidates:
         if not acc.allows_billing():
             continue
+        held = account_held_plan_ids(acc)
+        if plan_id and plan_id.strip().lower() in held:
+            outcomes.append({
+                "account_id": acc.id,
+                "account_name": acc.name,
+                "ok": True,
+                "skipped": True,
+                "plan_id": plan_id,
+                "message": "已持有该套餐，已自动跳过",
+            })
+            continue
+
         try:
             result = await do_claim(acc, plan_id)
         except ClaimError as err:
+            err_msg = str(err)
+            if not plan_id and ("已领取过" in err_msg or "已经领取过" in err_msg):
+                logs.info("claim", f"账号 {acc.name} 已领取过该活动，自动跳过")
+                outcomes.append({
+                    "account_id": acc.id,
+                    "account_name": acc.name,
+                    "ok": True,
+                    "skipped": True,
+                    "message": "活动套餐已领取过，已自动跳过",
+                })
+                continue
             logs.warn("claim", f"账号 {acc.name} 领取失败: {err}")
             outcomes.append({"account_id": acc.id, "account_name": acc.name,
                              "ok": False, "message": str(err)})
