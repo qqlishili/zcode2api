@@ -630,7 +630,7 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
         self, fresh_app, monkeypatch
     ):
         from app.routes import gateway as gateway_module
-        from app.routes.gateway import _NEXT_ACCOUNT, _Upstream, _try_account
+        from app.routes.gateway import _NEXT_ACCOUNT, _try_account, _Upstream
 
         acc1 = fresh_app.add_account("zai", "acc-200-exhaust", "h1.eyJzdWIiOiIxIn0.sig")
         acc2 = fresh_app.add_account("zai", "acc-3008-conc", "h2.eyJzdWIiOiIyIn0.sig")

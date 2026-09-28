@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.responses_compat import (
     ResponsesStreamConverter,
@@ -306,14 +309,11 @@ class TestResponsesStreamConverter:
 
 
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
-
 @pytest.mark.asyncio
 async def test_responses_stream_normal_flow_and_cancelled_after_finished():
     """测试网关流式：终态交付后循环主动退出且资源释放，监控记录 200。"""
-    from app.routes.gateway import _responses_stream_response, _Upstream
     from app import reqlog
+    from app.routes.gateway import _responses_stream_response, _Upstream
 
     class MockResp:
         status_code = 200
@@ -326,8 +326,8 @@ async def test_responses_stream_normal_flow_and_cancelled_after_finished():
                 "data: {\"type\": \"message_stop\"}",
                 "data: {\"type\": \"ping\"}",  # 证明主动 break，不会读取此行
             ]
-            for l in lines:
-                yield l
+            for line in lines:
+                yield line
 
     mock_resp = MockResp()
     mock_cm = AsyncMock()
@@ -351,9 +351,10 @@ async def test_responses_stream_normal_flow_and_cancelled_after_finished():
 @pytest.mark.asyncio
 async def test_responses_stream_cancelled_after_finished_records_200():
     """测试网关流式：在 conv.is_finished 为 True 时抛出 CancelledError，仍记录 200 成功。"""
-    from app.routes.gateway import _responses_stream_response, _Upstream
-    from app import reqlog
     import asyncio
+
+    from app import reqlog
+    from app.routes.gateway import _responses_stream_response, _Upstream
 
     class MockResp:
         status_code = 200
@@ -365,8 +366,8 @@ async def test_responses_stream_cancelled_after_finished_records_200():
                 "data: {\"type\": \"content_block_stop\", \"index\": 0}",
                 "data: {\"type\": \"message_stop\"}",
             ]
-            for l in lines:
-                yield l
+            for line in lines:
+                yield line
 
     mock_resp = MockResp()
     mock_cm = AsyncMock()
@@ -395,9 +396,10 @@ async def test_responses_stream_cancelled_after_finished_records_200():
 @pytest.mark.asyncio
 async def test_responses_stream_cancelled_before_finished_records_499():
     """测试网关流式：在 conv.is_finished 为 False 时断开，如实记录 499 客户端断开。"""
-    from app.routes.gateway import _responses_stream_response, _Upstream
-    from app import reqlog
     import asyncio
+
+    from app import reqlog
+    from app.routes.gateway import _responses_stream_response, _Upstream
 
     class MockResp:
         status_code = 200
@@ -406,8 +408,8 @@ async def test_responses_stream_cancelled_before_finished_records_499():
                 "data: {\"type\": \"message_start\", \"message\": {\"id\": \"msg_t3\", \"usage\": {\"input_tokens\": 12}}}",
                 "data: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"text\", \"text\": \"\"}}",
             ]
-            for l in lines:
-                yield l
+            for line in lines:
+                yield line
 
     mock_resp = MockResp()
     mock_cm = AsyncMock()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
 
 from app.notify import is_valid_bark_key, normalize_bark_config, send_bark_notification
 

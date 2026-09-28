@@ -24,8 +24,8 @@ from ..auth_admin import verify_gateway_key
 from ..captcha import captcha_manager
 from ..models import Account, Status
 from ..openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
-from ..responses_compat import ResponsesStreamConverter, anthropic_to_responses, responses_to_anthropic
 from ..quota import fetch_quota
+from ..responses_compat import ResponsesStreamConverter, anthropic_to_responses, responses_to_anthropic
 from ..store import store
 
 _sleep = asyncio.sleep  # 模块级引用：测试可 patch 此名而免污染全局 asyncio

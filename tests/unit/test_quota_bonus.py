@@ -10,6 +10,7 @@ _bonus_active 为纯函数，直接覆盖各时间/period 形态。
 from __future__ import annotations
 
 import time
+
 import httpx
 import pytest
 
@@ -54,6 +55,7 @@ class TestBonusActive:
     async def test_exhausted_balance_marks_exhausted_even_with_active_one_time_plan(self, fresh_app, monkeypatch):
         """上游 balance 已并入 3 亿赠送包后，若 remaining == 0，即使 one_time 套餐未到期也必须标为 EXHAUSTED。"""
         import httpx
+
         from app import quota
         from app.models import Status
 
@@ -119,6 +121,7 @@ class TestBonusActive:
     ):
         """新账号虽自带 300 万 GLM-5.3 额度，但主免费池 GLM-5.3-Flash 耗尽时必须判为 EXHAUSTED 且不得误恢复。"""
         import httpx
+
         from app import quota
         from app.models import Status
 
