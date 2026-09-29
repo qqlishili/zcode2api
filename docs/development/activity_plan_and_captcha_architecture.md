@@ -83,3 +83,34 @@
 3. **刷新联动与隔离**：单账号刷新自动感知最新活动；preview 异常或超时不影响主额度更新。
 4. **验证可用**：在真实浏览器中通过滑块成功兑换 `zcode-v3-start-plan-trust-0928`。
 5. **单测覆盖**：335 项既有单测 100% 保持绿灯，新增多套餐解析单元测试。
+
+---
+
+## 4. 架构加固与对抗防线（v2.5.16 演进）
+
+### 4.1 彻底切断自动呼起与提交死循环链
+- **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
+- **治理方案**：
+  1. `claimToast` 坚决收敛为只读展示（`showToast`），抹去任何自激触发弹窗的隐藏路径；
+  2. 自动提交钩子增加环境与状态守卫：仅当 `modal.classList.contains('open')` 且 `!claimSubmitting` 且验证凭据有效时延迟触发；
+  3. 引入提交并发锁 `claimSubmitting`，并在 `closeClaimModal`、`finally` 与异常链路中严格重置锁状态。
+
+### 4.2 已持有活动感知与三道门禁纵深拦截
+- **现象归因**：历史探测到的 `claimable_plans` 未同账号已持有的 `plans` / `plan_slots` 做差集剔除，导致已领成功的账号在前端仍渲染黄色待领条，且重复提交触发上游报错。
+- **治理方案**：
+  1. **视图层过滤**：`claimStripHtml(a)` 中通过 `held = getHeldPlanIds(a)` 对 `claimable_plans` 做全量归一化过滤，已持有活动完全不渲染，待领条彻底收起；
+  2. **入口门禁**：`openClaimModal` 检测账号是否已持有目标套餐，已持有则立即 Toast 提示「账号名」已持有该活动套餐，无需重复领取，直接阻断弹窗与 SDK 初始化；
+  3. **切换门禁**：下拉框切至已持有账号时，容器降级展示友好提示并阻断验证码实例化；
+  4. **提交门禁**：`submitManualClaim` 最终兜底校验目标套餐持有状态，已持有则关闭弹窗并提示。
+
+### 4.3 Node 端求解器硬件脱敏（对抗 3012 虚拟机识别）
+- **现象归因**：`captcha_node/solver.js` 原硬编码了 `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)...))` 软渲染器与单像素 1x1 图片，触发阿里云对 CI/虚拟机特征的强风控拦截（3012）。
+- **治理方案**：
+  1. 升级为真实独立显卡：`ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)` 与 `Google Inc. (NVIDIA)`；
+  2. 桌面硬件环境对齐：`platform: "Win32"`，屏幕工作区 1920×1040（扣除 40px 任务栏）；
+  3. 真实 Canvas 指纹：使用具备真实 RGBA 噪点特征的 32×32 图块替代单像素图。
+
+### 4.4 模态框生命周期与实例清理
+- 模态框遮罩点击统一收敛至 `closeClaimModal()`；
+- 关闭时主动清空容器 DOM（`box.innerHTML=''`）拔除阿里 SDK 节点，解绑 `window.AliyunCaptchaConfig` 全局句柄，防止多轮验证码实例化闭包泄漏。
+
