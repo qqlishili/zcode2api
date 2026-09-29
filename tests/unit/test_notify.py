@@ -90,6 +90,75 @@ async def test_send_bark_notification_http_error(monkeypatch):
         device_key="abcdef123456",
         title="测试标题",
         body="测试内容",
+        retries=0,
     )
     assert ok is False
     assert "网络错误" in msg
+
+
+@pytest.mark.asyncio
+async def test_send_bark_notification_retry_recovers_from_timeout(monkeypatch):
+    """验证首次请求超时（如连接 APNs 抖动）时自动退避重试并在第二次成功。"""
+    import asyncio
+
+    from app.notify import notify_claim_outcomes
+    from app.store import store
+
+    attempts = 0
+
+    class MockResponse:
+        status_code = 200
+        text = '{"code": 200, "message": "success"}'
+
+        def json(self):
+            return {"code": 200, "message": "success"}
+
+    async def mock_post(self, endpoint, json=None):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.TimeoutException("Read timed out")
+        return MockResponse()
+
+    async def _noop(sec):
+        return None
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    ok, msg = await send_bark_notification(
+        device_key="abcdef123456",
+        title="测试重试",
+        body="内容",
+        retries=2,
+    )
+    assert ok is True
+    assert attempts == 2
+
+    # 同时验证 notify_claim_outcomes 仅推送非 skipped 的成功项
+    store.set_setting("bark_device_key", "abcdef123456")
+    sent_payloads = []
+
+    async def mock_post_capture(self, endpoint, json=None):
+        sent_payloads.append(json)
+        return MockResponse()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post_capture)
+    ok2, _ = await notify_claim_outcomes(
+        [
+            {"account_name": "已领号", "ok": True, "skipped": True},
+            {
+                "account_name": "新领号",
+                "ok": True,
+                "plan_name": "ZCode Trust Build",
+                "grants": [{"name": "GLM-5.3-Flash", "units": 100000000}],
+            },
+        ],
+        source="一键领取",
+    )
+    assert ok2 is True
+    assert len(sent_payloads) == 1
+    assert "1项" in sent_payloads[0]["title"]
+    assert "新领号" in sent_payloads[0]["body"]
+    assert "已领号" not in sent_payloads[0]["body"]
+

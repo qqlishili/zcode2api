@@ -239,3 +239,46 @@ async def test_sentinel_catchup_unclaimed_accounts_and_cooldown(monkeypatch):
     assert call_log == ["acc_missed"]
     assert res2["catchup_reports"] == []
 
+
+@pytest.mark.asyncio
+async def test_sentinel_bark_failure_retains_unseen_until_delivered(monkeypatch):
+    """验证当发现新活动但 Bark 推送超时失败时，不提前写入 seen_ids，下一轮巡检成功补推后再落库。"""
+    acc = Account.create("zai", "acc1", "t1")
+    acc.mode = "jwt"
+    acc.jwt_token = "ey...jwt1"
+    acc.status = Status.ACTIVE
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc])
+
+    async def mock_preview(a):
+        return [{"plan_id": "plan_0930", "name": "Trust Build", "priority": 10, "grants": []}]
+
+    async def mock_claim_all(a):
+        a.plans = [{"plan_id": "plan_0930", "name": "Trust Build"}]
+        return [{"ok": True, "plan_id": "plan_0930", "plan_name": "Trust Build"}]
+
+    bark_attempt = 0
+
+    async def mock_bark(**kw):
+        nonlocal bark_attempt
+        bark_attempt += 1
+        if bark_attempt == 1:
+            return False, "推送请求超时"
+        return True, "推送成功"
+
+    monkeypatch.setattr("app.sentinel.preview_plans", mock_preview)
+    monkeypatch.setattr("app.sentinel.auto_claim_all_plans", mock_claim_all)
+    monkeypatch.setattr("app.sentinel.send_bark_notification", mock_bark)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    s = Sentinel()
+    # 第 1 轮：Bark 推送失败 -> plan_0930 不写入 seen_ids
+    await s.check_once()
+    assert "plan_0930" not in store.get_seen_plan_ids()
+
+    # 第 2 轮：Bark 补推成功 -> plan_0930 写入 seen_ids
+    await s.check_once()
+    assert "plan_0930" in store.get_seen_plan_ids()
+    assert bark_attempt == 2
+
+

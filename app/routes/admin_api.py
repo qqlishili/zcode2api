@@ -396,6 +396,12 @@ def _schedule_auto_claim(account) -> None:
                 return
             if outcomes:
                 await refresh_accounts([live])  # 领到额度立即反映到 UI
+                from ..notify import schedule_claim_notification
+
+                schedule_claim_notification(
+                    [{"account_name": live.name, **o} for o in outcomes],
+                    source="入池自动领取",
+                )
         except Exception as err:  # noqa: BLE001 - 兜底：绝不冒泡
             logs.warn("claim", f"账号 {account.name} 自动领取任务异常: {err}")
 
@@ -541,6 +547,9 @@ async def claim(payload: dict = Body(default=None)):
         await refresh_accounts([acc])
         outcomes.append({"account_id": acc.id, "account_name": acc.name,
                          "ok": True, **result})
+    from ..notify import schedule_claim_notification
+
+    schedule_claim_notification(outcomes, source="一键领取")
     ok = sum(1 for o in outcomes if o["ok"])
     return {"outcomes": outcomes, "summary": {"ok": ok, "fail": len(outcomes) - ok}}
 
@@ -588,9 +597,11 @@ async def claim_manual(payload: dict = Body(...)):
                               "ok": False, "message": str(err)}],
                 "summary": {"ok": 0, "fail": 1}}
     await fetch_quota(acc, include_claimable=True)
-    return {"outcomes": [{"account_id": acc.id, "account_name": acc.name,
-                          "ok": True, **result}],
-            "summary": {"ok": 1, "fail": 0}}
+    outcomes = [{"account_id": acc.id, "account_name": acc.name, "ok": True, **result}]
+    from ..notify import schedule_claim_notification
+
+    schedule_claim_notification(outcomes, source="手动领取")
+    return {"outcomes": outcomes, "summary": {"ok": 1, "fail": 0}}
 
 
 # ── 设置 ─────────────────────────────────────────────────────────────────────

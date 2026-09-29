@@ -21,11 +21,13 @@ from .claim import (
     preview_plans,
 )
 from .models import Status
-from .notify import send_bark_notification
+from .notify import notify_claim_outcomes, send_bark_notification
 from .store import store
 
 # 补领失败冷却时间（6小时），防止个别账号因 3012 风控或条件不符在每轮巡检重复撞击上游
 _CATCHUP_COOLDOWN_SEC = 6 * 3600
+# 新活动 Bark 推送连续失败最大保留轮数（超出后兜底落库，防永久错误配置死循环）
+_MAX_NOTIFY_FAIL_ROUNDS = 3
 
 
 class Sentinel:
@@ -36,6 +38,8 @@ class Sentinel:
         self._running: bool = False
         # 记录 (account_id, plan_id) -> cooldown_until 时间戳
         self._catchup_cooldown: dict[tuple[str, str], float] = {}
+        # 记录 plan_id -> Bark 推送连续失败轮数（未达上限前不写入 seen_ids，确保跨轮补推）
+        self._notify_fail_counts: dict[str, int] = {}
 
     def start(self) -> None:
         """启动后台巡检任务。"""
@@ -123,6 +127,7 @@ class Sentinel:
         if not new_plans:
             # 存量未领账号自动补领闭环：若开启自动抢领，检查池内是否有漏领当期有效活动的账号（如此前处于 EXHAUSTED 或网络抖动漏领）
             catchup_reports: list[dict] = []
+            catchup_ok_outcomes: list[dict] = []
             if store.sentinel_auto_claim():
                 now_ts = time.time()
                 active_pids = {
@@ -148,9 +153,11 @@ class Sentinel:
                     try:
                         await asyncio.sleep(random.uniform(0.6, 1.5))
                         outcomes = await auto_claim_all_plans(acc)
-                        ok_count = sum(1 for o in outcomes if o.get("ok"))
-                        if ok_count:
-                            catchup_reports.append({"name": acc.name, "result": f"补领成功{ok_count}项"})
+                        ok_items = [o for o in outcomes if o.get("ok")]
+                        if ok_items:
+                            catchup_reports.append({"name": acc.name, "result": f"补领成功{len(ok_items)}项"})
+                            for item in ok_items:
+                                catchup_ok_outcomes.append({"account_name": acc.name, **item})
                         else:
                             # 补领未成功则记入冷却，避免每轮巡检重复撞击上游风控
                             for pid in pending_pids:
@@ -163,6 +170,8 @@ class Sentinel:
 
             if catchup_reports:
                 logs.ok("sentinel", f"巡检完成，已为 {len(catchup_reports)} 个漏领账号执行自动补领: {catchup_reports}")
+                if catchup_ok_outcomes:
+                    await notify_claim_outcomes(catchup_ok_outcomes, source="哨兵自动补领")
             else:
                 logs.info("sentinel", f"巡检完成，当前共 {len(plans)} 个上游套餐，无新活动")
             return {"ok": True, "new_plans_count": 0, "plans_count": len(plans), "catchup_reports": catchup_reports}
@@ -171,6 +180,7 @@ class Sentinel:
 
         # 4. 单并发顺序串行 + 抖动执行全池自动抢领（包含 ACTIVE 与 EXHAUSTED 账号，严格保护验证码预解池与 Node Solver）
         claim_reports: list[dict] = []
+        new_pids_lower = {str(p.get("plan_id") or "").strip().lower() for p in new_plans if p.get("plan_id")}
         if store.sentinel_auto_claim():
             all_jwt = [
                 a for a in store.list_accounts("zai")
@@ -185,7 +195,12 @@ class Sentinel:
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     outcomes = await auto_claim_all_plans(acc)
                     ok_count = sum(1 for o in outcomes if o.get("ok"))
-                    res_str = f"成功领{ok_count}项" if ok_count else "无新配额"
+                    if ok_count:
+                        res_str = f"成功领{ok_count}项"
+                    elif new_pids_lower & account_held_plan_ids(acc):
+                        res_str = "已持有(成功)"
+                    else:
+                        res_str = "无新配额"
                     claim_reports.append({"name": acc.name, "result": res_str})
                 except Exception as err:
                     claim_reports.append({"name": acc.name, "result": f"失败({err})"})
@@ -201,17 +216,18 @@ class Sentinel:
         if claim_reports:
             success_cnt = sum(1 for r in claim_reports if "成功" in r["result"])
             body_lines.append(f"\n📊 全池抢领战报 ({success_cnt}/{len(claim_reports)} 成功):")
-            for r in claim_reports[:5]:  # 最多展示前 5 个账号明细防超长
+            for r in claim_reports[:6]:  # 最多展示前 6 个账号明细防超长
                 body_lines.append(f"  · {r['name']}: {r['result']}")
-            if len(claim_reports) > 5:
-                body_lines.append(f"  · 其余 {len(claim_reports) - 5} 个账号已处理完毕")
+            if len(claim_reports) > 6:
+                body_lines.append(f"  · 其余 {len(claim_reports) - 6} 个账号已处理完毕")
 
         notify_title = f"🎉 发现 ZCode 新活动 ({len(new_plans)}项)"
         notify_body = "\n".join(body_lines)
 
-        # 6. 时序安全投递与状态落库（投递完成后再将 plan_id 提交持久化落库）
+        # 6. 时序安全投递与状态落库（仅当 Bark 推送成功或未配置 Bark 或连续失败达上限时才将 plan_id 写入 seen_ids，防单次网络抖动丢通知）
         bark_key = store.bark_device_key()
         bark_server = store.bark_server_url()
+        commit_ids: list[str] = []
         if bark_key:
             ok, msg = await send_bark_notification(
                 device_key=bark_key,
@@ -222,11 +238,25 @@ class Sentinel:
             )
             if ok:
                 logs.ok("sentinel", "新活动通知已成功送达 Bark 客户端")
+                for p in new_plans:
+                    pid = p["plan_id"]
+                    self._notify_fail_counts.pop(pid, None)
+                    commit_ids.append(pid)
             else:
                 logs.warn("sentinel", f"新活动 Bark 推送失败: {msg}")
+                for p in new_plans:
+                    pid = p["plan_id"]
+                    fails = self._notify_fail_counts.get(pid, 0) + 1
+                    self._notify_fail_counts[pid] = fails
+                    if fails >= _MAX_NOTIFY_FAIL_ROUNDS:
+                        logs.warn("sentinel", f"活动 {pid} 连续 {fails} 轮 Bark 推送失败，兜底标记为已见")
+                        self._notify_fail_counts.pop(pid, None)
+                        commit_ids.append(pid)
+        else:
+            commit_ids = [p["plan_id"] for p in new_plans]
 
-        # 提交持久化已见集合
-        store.add_seen_plan_ids([p["plan_id"] for p in new_plans])
+        if commit_ids:
+            store.add_seen_plan_ids(commit_ids)
 
         return {
             "ok": True,
@@ -236,3 +266,4 @@ class Sentinel:
 
 
 sentinel = Sentinel()
+

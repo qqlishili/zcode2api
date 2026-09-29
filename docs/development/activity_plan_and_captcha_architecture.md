@@ -86,7 +86,7 @@
 
 ---
 
-## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.17 演进）
+## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.18 演进）
 
 ### 4.1 彻底切断自动呼起与提交死循环链
 - **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
@@ -124,5 +124,15 @@
   2. **存量漏领自动补领闭环（Catch-up）**：在每轮巡检 `not new_plans` 分支中，比对池内活跃活动（`pool_active_plans`）及账号 `claimable_plans` 与 `account_held_plan_ids`，对漏领账号自动执行补领；
   3. **二阶防风控冷却避让**：补领失败的账号记录 6 小时冷却（`_catchup_cooldown`），杜绝因 3012 拦截在每 30 分钟巡检中死循环撞击上游；
   4. **领后闭环刷新**：`auto_claim_all_plans` 前置差集剔除已持有套餐，并在领取成功或命中 1003 已领时自动触发 `await fetch_quota(account)`，使 `EXHAUSTED` 账号领完即刻满血恢复 `ACTIVE`。
+
+### 4.6 Bark 推送可靠投递与全链路领取战报闭环（v2.5.18）
+- **现象归因**：
+  1. **单次 8s 短超时 + 失败仍落库导致“发现新活动”丢单**：`api.day.app/push` 后端需同步连接 Apple APNs 下发推送，跨洋链路在凌晨整点偶发耗时超过 8s；原实现无退避重试，且在 `send_bark_notification` 返回 `ok=False` 时依然无条件将 `new_plans` 写入 `sentinel_seen_plans`，导致单次网络抖动即永久丧失该活动推送；
+  2. **领取成功路径缺失 Bark 推送**：原架构仅在 Sentinel 首次发现 `new_plans` 时调用 Bark，而在“哨兵存量漏领自动补领（Catch-up）”、“新号入池自动领取”、“后台一键领取”与“浏览器滑块手动领取”成功时均无任何 Bark 通知。
+- **治理方案**：
+  1. **传输层瞬态退避重试（`app/notify.py`）**：默认超时提升至 `12.0s`，内置 2 次指数退避重试（仅针对超时/网络异常/5xx 重试；遇 4xx 立即熔断防触发 Bark 官方 IP 封禁）；
+  2. **确认送达后落库（`app/sentinel.py`）**：仅当 Bark 推送成功（或未配置 Bark / 连续 3 轮巡检失败兜底）时才将 `plan_id` 写入 `sentinel_seen_plans`，且重推轮次自动将已领账号识别为“已持有(成功)”；
+  3. **全链路领取成功战报归一化（`notify_claim_outcomes` / `schedule_claim_notification`）**：统一提取非 `skipped` 的真实新领成功项，覆盖哨兵自动补领、入池自动领取、后台一键领取与手动滑块领取四大场景，Web 接口采用后台强引用 Task 异步非阻塞投递。
+
 
 
