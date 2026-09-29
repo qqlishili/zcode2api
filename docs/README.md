@@ -16,7 +16,7 @@
 | [05-upstream-protocols.md](development/05-upstream-protocols.md) | 上游协议参考：OAuth/对话/计费/领取/验证码/风控 | 开发 |
 | [06-dev-guide.md](development/06-dev-guide.md) | 环境搭建、编码规范、测试运行、构建与部署（含 tebi 约定） | 开发 |
 | [07-roadmap.md](development/07-roadmap.md) | 四阶段路线图、里程碑与依赖关系 | 全体 |
-| [activity_plan_and_captcha_architecture.md](development/activity_plan_and_captcha_architecture.md) | 多活动套餐归一化展示、待领活动感知与双轨验证优化设计方案（含 v2.5.16 架构加固与对抗防线） | 开发/架构 |
+| [activity_plan_and_captcha_architecture.md](development/activity_plan_and_captcha_architecture.md) | 多活动套餐归一化展示、待领活动感知与双轨验证优化设计方案（含 v2.5.17 哨兵自愈闭环与架构加固） | 开发/架构 |
 | **测试文档** ||
 | [01-test-strategy.md](testing/01-test-strategy.md) | 测试策略总纲、分层、Mock 上游方案、覆盖门禁 | 全体 |
 | [02-unit-tests.md](testing/02-unit-tests.md) | 分模块单元测试用例清单（给定 ID，可执行） | 开发 |

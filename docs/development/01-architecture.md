@@ -1,6 +1,6 @@
 # 01 — 总体架构
 
-状态：与 2.5.16 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
+状态：与 2.5.17 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
 
 ## 1. 系统定位
 
@@ -143,7 +143,8 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
        │    └─ 401 → 标 INVALID
        └─ 领取成功 → 刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
-前台界面与服务端协同保障（v2.5.16）：
+前台界面与服务端协同保障（v2.5.17）：
+- 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`，跳过已持有套餐，并在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态；
 - 前端视图层差集过滤已持有套餐（claimStripHtml），入口/切换/提交三道门禁拦截已持账号；
 - 彻底阻断 Toast 自激呼起弹窗死循环，无感验证通过后受控单次自动提交；
 - 服务端求解器硬件指纹脱敏（RTX 3060 D3D11 + Win32），剥离虚拟机特征对抗 3012 风控。
@@ -153,15 +154,16 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
 
 ```
 Sentinel 后台巡检循环（默认 1800 秒，单例持有强引用防 GC）：
-  ├─ 动态挑选 1 个活跃健康 JWT 账号作为探针（单轮上限 3 次，遇 401 标记失效并轮换下一位，防死锁）
+  ├─ 动态挑选 1 个可计费（allows_billing，含 ACTIVE 与 EXHAUSTED）JWT 账号作为探针（单轮上限 3 次，遇 401 标记失效并轮换下一位，防死锁）
   ├─ 调用 preview_plans（无验证码、只读零开销）
-  ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans），无新增则休眠
-  └─ 发现全新 plan_id：
-       ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 0.6~1.5s 离散随机抖动延时，
-       │  为全池可用 JWT 账号触发 auto_claim_all_plans（严格避开验证码池与 Solver 拥堵）
-       ├─ 汇总活动详情与全池抢领战报，格式化构建消息
-       ├─ POST JSON 投递 Bark（POST https://api.day.app/push，超时 8s，全量异常捕获）
-       └─ 时序安全落库：投递完成后将新 plan_id 持久化写入 sentinel_seen_plans（防静默丢单）
+  ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans）：
+  │    ├─ 无全新 plan_id：执行存量漏领自动补领闭环（Catch-up）——对比当期活动/账号待领列表与已持有套餐，为漏领账号（尤其是 EXHAUSTED 耗尽账号）自动补领，失败账号进入 6 小时冷却避让防死循环撞击 3012
+  │    └─ 发现全新 plan_id：
+  │         ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 0.6~1.5s 离散随机抖动延时，
+  │         │  为全池可计费（allows_billing）JWT 账号触发 auto_claim_all_plans（严格避开验证码池与 Solver 拥堵）
+  │         ├─ 汇总活动详情与全池抢领战报，格式化构建消息
+  │         ├─ POST JSON 投递 Bark（POST https://api.day.app/push，超时 8s，全量异常捕获）
+  │         └─ 时序安全落库：投递完成后将新 plan_id 持久化写入 sentinel_seen_plans（防静默丢单）
 ```
 
 ### 4.6 凭证进入池内的路径

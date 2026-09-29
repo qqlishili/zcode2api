@@ -86,7 +86,7 @@
 
 ---
 
-## 4. 架构加固与对抗防线（v2.5.16 演进）
+## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.17 演进）
 
 ### 4.1 彻底切断自动呼起与提交死循环链
 - **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
@@ -113,4 +113,16 @@
 ### 4.4 模态框生命周期与实例清理
 - 模态框遮罩点击统一收敛至 `closeClaimModal()`；
 - 关闭时主动清空容器 DOM（`box.innerHTML=''`）拔除阿里 SDK 节点，解绑 `window.AliyunCaptchaConfig` 全局句柄，防止多轮验证码实例化闭包泄漏。
+
+### 4.5 哨兵自动抢领状态归一化与漏领自愈闭环（v2.5.17）
+- **现象归因**：
+  1. `Sentinel` 原先硬编码 `a.status == Status.ACTIVE`，导致昨日额度耗尽处于 `Status.EXHAUSTED` 的账号（最急需领取免费活动包恢复战斗力的账号）在新活动发布时被直接跳过；
+  2. `Sentinel` 原先采用单次边沿触发（`plan_id not in seen_ids`），一旦某账号因 `EXHAUSTED` 或网络抖动在首次边沿漏领，后续巡检因 `not new_plans` 直接退出，无法自动补领；
+  3. `auto_claim_all_plans` 原先未前置过滤 `account_held_plan_ids` 且领取后未联动调用 `fetch_quota`，导致已领账号重复打码报 1003、新领账号无法立即恢复 `ACTIVE` 状态。
+- **治理方案**：
+  1. **状态判定归一化**：将探针候选与自动抢领目标统一收敛为 `a.allows_billing()`（同时覆盖 `ACTIVE` 与 `EXHAUSTED`）；
+  2. **存量漏领自动补领闭环（Catch-up）**：在每轮巡检 `not new_plans` 分支中，比对池内活跃活动（`pool_active_plans`）及账号 `claimable_plans` 与 `account_held_plan_ids`，对漏领账号自动执行补领；
+  3. **二阶防风控冷却避让**：补领失败的账号记录 6 小时冷却（`_catchup_cooldown`），杜绝因 3012 拦截在每 30 分钟巡检中死循环撞击上游；
+  4. **领后闭环刷新**：`auto_claim_all_plans` 前置差集剔除已持有套餐，并在领取成功或命中 1003 已领时自动触发 `await fetch_quota(account)`，使 `EXHAUSTED` 账号领完即刻满血恢复 `ACTIVE`。
+
 

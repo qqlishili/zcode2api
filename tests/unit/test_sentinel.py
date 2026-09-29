@@ -149,3 +149,93 @@ async def test_sentinel_probe_max_retries_exhausted(monkeypatch):
     assert res["reason"] == "probe_exhausted"
     # 严格确保探针尝试次数不超过 3 次有界限制
     assert probe_count == 3
+
+
+async def _noop(val=None):
+    return val
+
+
+@pytest.mark.asyncio
+async def test_sentinel_claims_for_exhausted_accounts(monkeypatch):
+    """验证处于 EXHAUSTED（额度用完）状态的账号在新活动发现时同样被纳入自动抢领。"""
+    acc_active = Account.create("zai", "acc_active", "t1")
+    acc_active.mode = "jwt"
+    acc_active.jwt_token = "ey...jwt1"
+    acc_active.status = Status.ACTIVE
+
+    acc_exhausted = Account.create("zai", "acc_exhausted", "t2")
+    acc_exhausted.mode = "jwt"
+    acc_exhausted.jwt_token = "ey...jwt2"
+    acc_exhausted.status = Status.EXHAUSTED
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc_active, acc_exhausted])
+
+    async def mock_preview(acc):
+        return [{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "Trust Build", "priority": 10, "grants": []}]
+
+    claimed = []
+
+    async def mock_claim_all(acc):
+        claimed.append(acc.name)
+        return [{"ok": True, "plan_id": "zcode-v3-start-plan-trust-0930"}]
+
+    async def mock_bark(**kw):
+        return True, "ok"
+
+    monkeypatch.setattr("app.sentinel.preview_plans", mock_preview)
+    monkeypatch.setattr("app.sentinel.auto_claim_all_plans", mock_claim_all)
+    monkeypatch.setattr("app.sentinel.send_bark_notification", mock_bark)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    s = Sentinel()
+    res = await s.check_once()
+    assert res["ok"] is True
+    assert claimed == ["acc_active", "acc_exhausted"]
+
+
+@pytest.mark.asyncio
+async def test_sentinel_catchup_unclaimed_accounts_and_cooldown(monkeypatch):
+    """当活动已在 seen_ids 中时，自动为池内尚未持有该活动的 EXHAUSTED/ACTIVE 漏领账号补领，失败后进入冷却防死循环。"""
+    acc_held = Account.create("zai", "acc_held", "t1")
+    acc_held.mode = "jwt"
+    acc_held.jwt_token = "ey...jwt1"
+    acc_held.status = Status.ACTIVE
+    acc_held.plans = [{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "Trust Build"}]
+
+    acc_missed = Account.create("zai", "acc_missed", "t2")
+    acc_missed.mode = "jwt"
+    acc_missed.jwt_token = "ey...jwt2"
+    acc_missed.status = Status.EXHAUSTED
+    acc_missed.plans = []
+    acc_missed.claimable_plans = [{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "Trust Build"}]
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc_held, acc_missed])
+    store.add_seen_plan_ids(["zcode-v3-start-plan-trust-0930"])
+
+    async def mock_preview(acc):
+        return [{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "Trust Build", "priority": 10, "grants": []}]
+
+    monkeypatch.setattr("app.sentinel.preview_plans", mock_preview)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    call_log = []
+
+    async def mock_claim_fail(acc):
+        call_log.append(acc.name)
+        return [{"ok": False, "plan_id": "zcode-v3-start-plan-trust-0930", "message": "3012 风控"}]
+
+    monkeypatch.setattr("app.sentinel.auto_claim_all_plans", mock_claim_fail)
+
+    s = Sentinel()
+    # 第一轮：acc_held 已持有跳过，acc_missed 触发自动补领，因失败被记入冷却
+    res1 = await s.check_once()
+    assert res1["ok"] is True
+    assert call_log == ["acc_missed"]
+    assert len(res1["catchup_reports"]) == 1
+
+    # 第二轮：acc_missed 处于 6 小时冷却期内，不再重复撞击上游
+    res2 = await s.check_once()
+    assert res2["ok"] is True
+    assert call_log == ["acc_missed"]
+    assert res2["catchup_reports"] == []
+

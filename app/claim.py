@@ -246,19 +246,41 @@ async def auto_claim_all_plans(account: Account) -> list[dict]:
         logs.info("claim", f"账号 {account.name} 上游无投放套餐，跳过领取")
         return outcomes
 
-    for plan in plans:
+    held = account_held_plan_ids(account)
+    unclaimed = [
+        p for p in plans
+        if str(p.get("plan_id") or "").strip().lower() not in held
+    ]
+    if not unclaimed:
+        logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
+        return outcomes
+
+    need_refresh = False
+    for plan in unclaimed:
         try:
             result = await claim(account, plan["plan_id"], report_activation=False)
             outcomes.append({"account_id": account.id, "account_name": account.name,
                              "ok": True, **result})
+            need_refresh = True
             logs.ok("claim", f"账号 {account.name} 自动领取成功: "
                              f"{result.get('plan_name') or plan['plan_id']}")
         except ClaimError as err:
+            msg = str(err)
             outcomes.append({"account_id": account.id, "account_name": account.name,
-                             "ok": False, "plan_id": plan["plan_id"], "message": str(err)})
+                             "ok": False, "plan_id": plan["plan_id"], "message": msg})
+            if "已经领取过" in msg:
+                need_refresh = True
             logs.warn("claim", f"账号 {account.name} 自动领取 {plan['plan_id']} 失败: {err}")
         except Exception as err:  # noqa: BLE001
             logs.warn("claim", f"账号 {account.name} 自动领取异常: {err}")
+
+    if need_refresh:
+        try:
+            from .quota import fetch_quota
+            await fetch_quota(account)
+        except Exception as q_err:  # noqa: BLE001
+            logs.warn("claim", f"账号 {account.name} 自动领取后刷新额度跳过: {q_err}")
+
     return outcomes
 
 

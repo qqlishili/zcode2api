@@ -13,10 +13,19 @@ import random
 from typing import Any
 
 from . import logs
-from .claim import auto_claim_all_plans, preview_plans
+from .claim import (
+    account_held_plan_ids,
+    auto_claim_all_plans,
+    is_base_plan_id,
+    pool_active_plans,
+    preview_plans,
+)
 from .models import Status
 from .notify import send_bark_notification
 from .store import store
+
+# 补领失败冷却时间（6小时），防止个别账号因 3012 风控或条件不符在每轮巡检重复撞击上游
+_CATCHUP_COOLDOWN_SEC = 6 * 3600
 
 
 class Sentinel:
@@ -25,6 +34,8 @@ class Sentinel:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._running: bool = False
+        # 记录 (account_id, plan_id) -> cooldown_until 时间戳
+        self._catchup_cooldown: dict[tuple[str, str], float] = {}
 
     def start(self) -> None:
         """启动后台巡检任务。"""
@@ -77,13 +88,16 @@ class Sentinel:
 
     async def check_once(self) -> dict[str, Any]:
         """执行单次活动巡检与差量闭环处理，返回探测与抢领结果摘要。"""
-        # 1. 筛选候选健康 JWT 账号
+        import time
+
+        # 1. 筛选候选可计费 JWT 账号（含 ACTIVE 与 EXHAUSTED，优先 ACTIVE 作为探针）
         candidates = [
             a for a in store.list_accounts("zai")
-            if a.mode == "jwt" and a.jwt_token and a.status == Status.ACTIVE and not a.is_claim_blocked()
+            if a.allows_billing() and not a.is_claim_blocked()
         ]
+        candidates.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
         if not candidates:
-            logs.info("sentinel", "未找到健康的活跃 JWT 账号用于活动探测，跳过本次巡检")
+            logs.info("sentinel", "未找到可用的 JWT 账号用于活动探测，跳过本次巡检")
             return {"ok": False, "reason": "no_active_sentinel"}
 
         # 2. 单轮探针（上限 min(3, len(candidates)) 次，遇 401 标记失效并轮换下一位，防死锁）
@@ -107,17 +121,60 @@ class Sentinel:
         new_plans = [p for p in plans if p.get("plan_id") and p["plan_id"] not in seen_ids]
 
         if not new_plans:
-            logs.info("sentinel", f"巡检完成，当前共 {len(plans)} 个上游套餐，无新活动")
-            return {"ok": True, "new_plans_count": 0, "plans_count": len(plans)}
+            # 存量未领账号自动补领闭环：若开启自动抢领，检查池内是否有漏领当期有效活动的账号（如此前处于 EXHAUSTED 或网络抖动漏领）
+            catchup_reports: list[dict] = []
+            if store.sentinel_auto_claim():
+                now_ts = time.time()
+                active_pids = {
+                    str(p.get("plan_id") or "").strip().lower()
+                    for p in pool_active_plans(now_ts)
+                    if p.get("plan_id") and not is_base_plan_id(str(p.get("plan_id")))
+                }
+                for acc in candidates:
+                    held = account_held_plan_ids(acc)
+                    acc_claimable = {
+                        str(p.get("plan_id") or p.get("planId") or "").strip().lower()
+                        for p in (getattr(acc, "claimable_plans", None) or [])
+                        if isinstance(p, dict) and p.get("plan_id") and not is_base_plan_id(str(p.get("plan_id")))
+                    }
+                    target_pids = (active_pids | acc_claimable) - held
+                    # 过滤掉处于补领失败冷却期内的套餐
+                    pending_pids = [
+                        pid for pid in target_pids
+                        if self._catchup_cooldown.get((acc.id, pid), 0) <= now_ts
+                    ]
+                    if not pending_pids:
+                        continue
+                    try:
+                        await asyncio.sleep(random.uniform(0.6, 1.5))
+                        outcomes = await auto_claim_all_plans(acc)
+                        ok_count = sum(1 for o in outcomes if o.get("ok"))
+                        if ok_count:
+                            catchup_reports.append({"name": acc.name, "result": f"补领成功{ok_count}项"})
+                        else:
+                            # 补领未成功则记入冷却，避免每轮巡检重复撞击上游风控
+                            for pid in pending_pids:
+                                self._catchup_cooldown[(acc.id, pid)] = time.time() + _CATCHUP_COOLDOWN_SEC
+                            catchup_reports.append({"name": acc.name, "result": "补领未果(已避让)"})
+                    except Exception as err:
+                        for pid in pending_pids:
+                            self._catchup_cooldown[(acc.id, pid)] = time.time() + _CATCHUP_COOLDOWN_SEC
+                        catchup_reports.append({"name": acc.name, "result": f"补领失败({err})"})
+
+            if catchup_reports:
+                logs.ok("sentinel", f"巡检完成，已为 {len(catchup_reports)} 个漏领账号执行自动补领: {catchup_reports}")
+            else:
+                logs.info("sentinel", f"巡检完成，当前共 {len(plans)} 个上游套餐，无新活动")
+            return {"ok": True, "new_plans_count": 0, "plans_count": len(plans), "catchup_reports": catchup_reports}
 
         logs.ok("sentinel", f"🎉 发现 {len(new_plans)} 个全新活动套餐: {[p.get('name') or p['plan_id'] for p in new_plans]}")
 
-        # 4. 单并发顺序串行 + 抖动执行全池自动抢领（严格保护验证码预解池与 Node Solver）
+        # 4. 单并发顺序串行 + 抖动执行全池自动抢领（包含 ACTIVE 与 EXHAUSTED 账号，严格保护验证码预解池与 Node Solver）
         claim_reports: list[dict] = []
         if store.sentinel_auto_claim():
             all_jwt = [
                 a for a in store.list_accounts("zai")
-                if a.mode == "jwt" and a.jwt_token and a.status == Status.ACTIVE
+                if a.allows_billing()
             ]
             for acc in all_jwt:
                 if acc.is_claim_blocked():
