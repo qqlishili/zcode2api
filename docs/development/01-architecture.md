@@ -1,6 +1,6 @@
 # 01 — 总体架构
 
-状态：与 2.5.12 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
+状态：与 2.5.16 实现对齐（无 pool.py / gateway 子包 / bundle.py / zclient.py / `/v1/responses`）。
 
 ## 1. 系统定位
 
@@ -143,6 +143,10 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
        │    └─ 401 → 标 INVALID
        └─ 领取成功 → 刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
+前台界面与服务端协同保障（v2.5.16）：
+- 前端视图层差集过滤已持有套餐（claimStripHtml），入口/切换/提交三道门禁拦截已持账号；
+- 彻底阻断 Toast 自激呼起弹窗死循环，无感验证通过后受控单次自动提交；
+- 服务端求解器硬件指纹脱敏（RTX 3060 D3D11 + Win32），剥离虚拟机特征对抗 3012 风控。
 ```
 
 ### 4.5 Bark 活动监控与智能领券哨兵（Sentinel）
