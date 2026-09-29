@@ -219,7 +219,7 @@ async def claim_refresh_one(account_id: str):
     if blocked:
         return {"ok": False, "message": blocked, "plans": acc.claimable_plans, "account": acc.public_view()}
     try:
-        from ..claim import preview_plans, report_activation_events
+        from ..claim import account_held_plan_ids, preview_plans, report_activation_events
 
         try:
             await asyncio.wait_for(report_activation_events(acc), timeout=5.0)
@@ -227,9 +227,15 @@ async def claim_refresh_one(account_id: str):
             logs.warn("claim", f"账号 {acc.name} 激活上报跳过: {act_err}")
 
         plans = await asyncio.wait_for(preview_plans(acc), timeout=8.0)
-        acc.claimable_plans = plans
+        held_ids = account_held_plan_ids(acc)
+        unclaimed = [
+            p for p in plans
+            if isinstance(p, dict)
+            and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_ids
+        ]
+        acc.claimable_plans = unclaimed
         store.update_account(acc)
-        return {"ok": True, "plans": plans, "account": acc.public_view()}
+        return {"ok": True, "plans": unclaimed, "account": acc.public_view()}
     except Exception as err:
         logs.warn("claim", f"账号 {acc.name} 探测活动失败: {err}")
         return {"ok": False, "message": str(err), "plans": acc.claimable_plans, "account": acc.public_view()}

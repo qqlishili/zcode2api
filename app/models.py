@@ -208,9 +208,25 @@ class Account:
         return None
 
     def public_view(self) -> dict:
-        """返回给前端的视图（脱敏 token）。"""
+        """返回给前端的视图（脱敏 token，并归一化剔除已持有套餐后的待领列表）。"""
         secret = self.secret or ""
         masked = secret if len(secret) <= 16 else f"{secret[:8]}…{secret[-6:]}"
+        held: set[str] = set()
+        for pl in self.plans or []:
+            if isinstance(pl, dict):
+                pid = str(pl.get("plan_id") or pl.get("planId") or "").strip().lower()
+                if pid:
+                    held.add(pid)
+        for slot in self.plan_slots or []:
+            if isinstance(slot, dict):
+                pid = str(slot.get("pid") or "").strip().lower()
+                if pid and pid != "default":
+                    held.add(pid)
+        unclaimed = [
+            p for p in (self.claimable_plans or [])
+            if isinstance(p, dict)
+            and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held
+        ]
         return {
             "id": self.id,
             "name": self.name,
@@ -223,8 +239,8 @@ class Account:
             "plan": self.plan,
             "plans": self.plans,
             "plan_slots": self.plan_slots,
-            "claimable_plans": self.claimable_plans,
-            "claim_badge": bool(self.claimable_plans),
+            "claimable_plans": unclaimed,
+            "claim_badge": bool(unclaimed),
             "use_count": self.use_count,
             "fail_count": self.fail_count,
             "risk_strikes": self.risk_strikes,

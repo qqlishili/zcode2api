@@ -449,9 +449,21 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
 
             claim_plans = await asyncio.wait_for(preview_plans(account), timeout=8.0)
             account.claimable_plans = claim_plans
-            result["claimable"] = claim_plans
         except Exception as claim_err:
             logs.info("quota", f"账号 {account.name} 待领活动探测跳过/异常: {claim_err}")
+
+    # 归一化收口：将账号已持有的套餐从待领列表（claimable_plans）中剔除，确保落库数据干净无冗余
+    if account.claimable_plans:
+        from .claim import account_held_plan_ids
+
+        held_ids = account_held_plan_ids(account)
+        account.claimable_plans = [
+            p for p in account.claimable_plans
+            if isinstance(p, dict)
+            and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_ids
+        ]
+    if include_claimable:
+        result["claimable"] = account.claimable_plans
 
     store.update_account(account)
     return result or {"error": "无法获取额度数据"}
@@ -497,7 +509,8 @@ class QuotaMonitor:
                         if a.mode == "jwt" and a.allows_billing()
                     ]
                     if accounts:
-                        await refresh_accounts(accounts)
+                        # 后台高频轮询仅刷新核心额度，不触发激活上报与 preview（由 Sentinel 低频巡检负责）
+                        await refresh_accounts(accounts, include_claimable=False)
                 except Exception as err:  # noqa: BLE001 - 后台任务需吞掉异常继续运行
                     logs.err("quota", f"后台刷新出错: {err}")
             # interval<=0 视为关闭：仍周期性回看设置，便于随时启用

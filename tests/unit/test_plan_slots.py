@@ -218,3 +218,17 @@ class TestAccountModelPlanSlots:
         acc = Account(provider="zai", id="test-acct", name="测试账号", mode="jwt")
         pv = acc.public_view()
         assert pv["claim_badge"] is False
+
+    def test_public_view_filters_already_held_claimable_plans(self):
+        acc = Account(
+            provider="zai",
+            id="test-acct",
+            name="已领账号",
+            mode="jwt",
+            plans=[{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "ZCode Trust Build"}],
+            claimable_plans=[{"plan_id": "zcode-v3-start-plan-trust-0930", "name": "ZCode Trust Build"}],
+        )
+        pv = acc.public_view()
+        assert pv["claimable_plans"] == []
+        assert pv["claim_badge"] is False
+
