@@ -12,6 +12,13 @@ function renderAdminHeader(){
   ].map(([href,label])=>
     `<a href="${href}" class="admin-nav-link${href===active?' active':''}">${label}</a>`
   ).join('');
+  // 优先取服务端注入的真实版本号，覆盖并校准 sessionStorage 中的旧版本缓存
+  const serverVer=(mount.dataset.version||'').trim();
+  if(serverVer&&!serverVer.includes('{{')){
+    _cachedVersion=serverVer;
+    try{sessionStorage.setItem('zcode_hub_version',_cachedVersion);}catch(e){}
+  }
+
   mount.innerHTML=`
     <header class="admin-header">
       <div class="admin-header-inner">
@@ -28,17 +35,18 @@ function renderAdminHeader(){
       </div>
     </header>`;
 
-  // 异步获取最新版本号并缓存，不阻塞页面关键渲染路径
-  if(!_cachedVersion){
-    fetch('/meta').then(r=>r.ok?r.json():null).then(d=>{
-      if(d&&d.version){
-        _cachedVersion='v'+d.version;
-        sessionStorage.setItem('zcode_hub_version',_cachedVersion);
+  // 始终异步向 /meta 校准最新版本，发现更新立即热刷新，杜绝 sessionStorage 锁死旧版本
+  fetch('/meta?t='+Date.now()).then(r=>r.ok?r.json():null).then(d=>{
+    if(d&&d.version){
+      const latest='v'+d.version;
+      if(latest!==_cachedVersion){
+        _cachedVersion=latest;
+        try{sessionStorage.setItem('zcode_hub_version',_cachedVersion);}catch(e){}
         const el=document.getElementById('header-version');
         if(el){el.textContent=_cachedVersion;el.style.display='';}
       }
-    }).catch(()=>{});
-  }
+    }
+  }).catch(()=>{});
 
   initNavPrefetch();
 }
