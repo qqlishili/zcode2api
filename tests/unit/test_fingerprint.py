@@ -162,6 +162,33 @@ class TestHostProfile:
         import uuid as _uuid
         _uuid.UUID(p.device_mid)  # 不抛即合法
 
+    def test_host_os_version_windows_marketing_release_normalized(self, monkeypatch):
+        """Win11 + Py≥3.12 的 release()="11"（marketing 版）必须归一成内核形态。
+
+        归一走 sys.getwindowsversion 的 major.minor.build（10.0.xxxxx，
+        与官方客户端 Windows 档案同形），否则过不了 _RELEASE_SHAPE 形态门。
+        """
+        from app import hostinfo
+        monkeypatch.setattr(hostinfo.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(hostinfo.platform, "release", lambda: "11")
+        monkeypatch.setattr(hostinfo, "_windows_kernel_version", lambda: "10.0.22000")
+        assert hostinfo._host_os_version() == "10.0.22000"
+
+    def test_host_os_version_windows_kernel_missing_falls_back(self, monkeypatch):
+        """sys.getwindowsversion 不可用时回落 release()（采集不因归一失败阻断）。"""
+        from app import hostinfo
+        monkeypatch.setattr(hostinfo.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(hostinfo.platform, "release", lambda: "10")
+        monkeypatch.setattr(hostinfo, "_windows_kernel_version", lambda: None)
+        assert hostinfo._host_os_version() == "10"
+
+    def test_host_os_version_non_windows_uses_release(self, monkeypatch):
+        """非 Windows 宿主照常走 platform.release()（内核/Darwin 版本天然合规）。"""
+        from app import hostinfo
+        monkeypatch.setattr(hostinfo.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(hostinfo.platform, "release", lambda: "5.15.0-91-generic")
+        assert hostinfo._host_os_version() == "5.15.0-91-generic"
+
     def test_host_profile_rejects_bad_shape(self):
         from app import fingerprint
 

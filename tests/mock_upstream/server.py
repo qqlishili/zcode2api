@@ -363,6 +363,19 @@ def build_app() -> FastAPI:
         if scenario == "claim_daily_limit":
             return Response(json.dumps({"code": 1005, "msg": "今日领取名额已用完"}),
                             media_type="application/json")
+        if scenario == "claim_quota_full":
+            # 1005 名额用完：data.plan.ends_at（秒）→ next_at 语义
+            return Response(json.dumps({
+                "code": 1005, "msg": "quota full",
+                "data": {"plan": {"plan_id": payload["plan_id"], "ends_at": 1787900000}},
+            }), media_type="application/json")
+        if scenario == "claim_with_server_time":
+            # 3.11.2 领取语义：成功载荷携带 server_time + plan 窗口（秒）
+            return Response(json.dumps({
+                "code": 0,
+                "data": {"plan_id": payload["plan_id"], "server_time": 1787800000,
+                         "plan": {"starts_at": 1787918400, "ends_at": 1788138000}},
+            }), media_type="application/json")
         return Response(json.dumps({"code": 0, "data": {"plan_id": payload["plan_id"]}}),
                         media_type="application/json")
 
@@ -371,9 +384,13 @@ def build_app() -> FastAPI:
         body = await request.body()
         _record("POST", request.url.path, {k.lower(): v for k, v in request.headers.items()}, body)
         n = app.state.oauth_init_count = getattr(app.state, "oauth_init_count", 0) + 1
-        return Response(json.dumps({
-            "data": {"flow_id": f"mock-flow-{n}", "authorize_url": "https://mock.example/authorize"}
-        }), media_type="application/json")
+        data = {"flow_id": f"mock-flow-{n}", "authorize_url": "https://mock.example/authorize"}
+        # 测试协议：app.state.oauth_server_poll_token 设置时模拟官方新协议
+        # （init 响应下发 poll_token，后续 poll 必须采用该值；缺省走旧协议）
+        server_token = getattr(app.state, "oauth_server_poll_token", None)
+        if server_token:
+            data["poll_token"] = server_token
+        return Response(json.dumps({"code": 0, "data": data}), media_type="application/json")
 
     @app.get("/api/v1/oauth/cli/poll/{flow_id}")
     async def oauth_poll(flow_id: str, request: Request) -> Response:
@@ -381,8 +398,13 @@ def build_app() -> FastAPI:
         # 测试协议：app.state.oauth_state = "ready" | "failed" | "pending"
         #（默认 pending；ready 时附带可兑换的 mock 凭证组）
         # app.state.oauth_poll_status：非 200 时模拟官方 poll HTTP 错误（默认 200）
+        # app.state.oauth_poll_body_code：poll HTTP 4xx 时响应体承载的业务码（3004 = 会话过期）
         poll_http = int(getattr(app.state, "oauth_poll_status", 200) or 200)
         if poll_http != 200:
+            body_code = getattr(app.state, "oauth_poll_body_code", None)
+            if body_code is not None:
+                return Response(json.dumps({"code": int(body_code), "msg": "poll denied"}),
+                                status_code=poll_http, media_type="application/json")
             return Response(
                 json.dumps({"error": {"message": "poll denied"}}),
                 status_code=poll_http,

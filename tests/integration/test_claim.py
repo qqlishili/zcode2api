@@ -693,3 +693,32 @@ class TestAutoClaimOnPoolEntry:
         assert outcomes[0]["plan_name"] == "ZCode Trust Build"
 
 
+@pytest.mark.integration
+class TestClaimUpstreamSemantics:
+    """3.11.2 领取语义对齐（zcode-switch claim.rs）：server_time 随成功载荷
+    下发；1005 附带名额恢复时间 next_at（data.plan.ends_at 秒 → 毫秒）。"""
+
+    async def test_claim_success_includes_server_time_and_plan_window(self, claim_env):
+        client, mock, _stub, acc = claim_env
+        mock.state.claim_scenario = "claim_with_server_time"
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id]},
+                                headers={"Authorization": "Bearer zcode"})
+        assert res.status_code == 200
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is True
+        assert outcome["server_time"] == 1_787_800_000_000
+        assert outcome["starts_at"] == 1_787_918_400_000
+        assert outcome["ends_at"] == 1_788_138_000_000
+
+    async def test_claim_1005_carries_next_at(self, claim_env):
+        client, mock, _stub, acc = claim_env
+        mock.state.claim_scenario = "claim_quota_full"
+        res = await client.post("/admin/api/claim",
+                                json={"account_ids": [acc.id]},
+                                headers={"Authorization": "Bearer zcode"})
+        outcome = res.json()["outcomes"][0]
+        assert outcome["ok"] is False
+        assert outcome["code"] == 1005
+        assert outcome["next_at"] == 1_787_900_000_000
+        assert "名额已用完" in outcome["message"]

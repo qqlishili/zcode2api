@@ -306,6 +306,15 @@ async def login_poll(flow_id: str):
         logs.warn("oauth", f"poll {flow_id} 上游 HTTP {code}")
         if 400 <= code < 500:
             _login_flows.pop(flow_id, None)
+            # 3004（官方 poll 4xx 承载的会话过期）：明确映射 expired 让前端提示
+            # 重新生成链接，不再归为 failed（zcode-switch poll 3004 语义同形）
+            try:
+                body_code = (err.response.json() or {}).get("code")
+            except ValueError:
+                body_code = None
+            if body_code == 3004:
+                logs.info("oauth", f"授权会话过期 flow_id={flow_id}（上游 3004）")
+                return {"status": "expired", "message": "授权会话已过期，请重新生成授权链接"}
             return {"status": "failed", "message": f"上游拒绝轮询（HTTP {code}）"}
         return {"status": "pending"}
     except Exception as err:  # noqa: BLE001 - 单次网络抖动按 pending 处理
@@ -536,8 +545,13 @@ async def claim(payload: dict = Body(default=None)):
                 })
                 continue
             logs.warn("claim", f"账号 {acc.name} 领取失败: {err}")
-            outcomes.append({"account_id": acc.id, "account_name": acc.name,
-                             "ok": False, "message": str(err)})
+            outcome = {"account_id": acc.id, "account_name": acc.name,
+                       "ok": False, "message": str(err)}
+            if err.code != -1:
+                outcome["code"] = err.code
+            if err.next_at:
+                outcome["next_at"] = err.next_at
+            outcomes.append(outcome)
             continue
         except CaptchaSolveError as err:
             # 验证码求解失败（get_verify_param）：明确业务回执而非裸 500

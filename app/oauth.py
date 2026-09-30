@@ -20,6 +20,10 @@ class ZaiAuthFlow:
     - init 仅带 Authorization: Bearer <pollToken> 与 Content-Type: application/json
     - poll 仅带 Authorization: Bearer <pollToken>
     不携带额外伪装头，避免上游服务端对 OAuth 会话产生异常的设备/上下文绑定限制。
+
+    2026-09 起官方协议跟进（zcode-switch oauth.rs 同形）：init 响应 data.poll_token
+    由服务端下发，后续 poll 必须采用该值；仅当服务端未返回时回落自造 token
+    （保留旧协议兼容）。
     """
 
     def __init__(self, api_base: str | None = None, exchange_origin: str | None = None) -> None:
@@ -38,10 +42,17 @@ class ZaiAuthFlow:
                 json={"provider": "zai"},
             )
         res.raise_for_status()
-        data = res.json().get("data") or {}
+        body = res.json()
+        code = body.get("code")
+        if code is not None and code != 0:
+            raise RuntimeError(f"OAuth init 被上游拒绝（code={code}）")
+        data = body.get("data") or {}
         flow_id, authorize_url = data.get("flow_id"), data.get("authorize_url")
         if not flow_id or not authorize_url:
             raise RuntimeError("返回的 OAuth 流程数据不完整")
+        server_poll_token = (data.get("poll_token") or "").strip()
+        if server_poll_token:
+            self.poll_token = server_poll_token
         return flow_id, authorize_url
 
     async def poll(self, flow_id: str) -> dict:

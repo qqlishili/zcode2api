@@ -33,6 +33,8 @@ _MAX_NOTIFY_FAIL_ROUNDS = 3
 class Sentinel:
     """活动巡检与智能抢领单例调度器。"""
 
+    STOP_GRACE_SECONDS = 5.0
+
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._running: bool = False
@@ -49,13 +51,13 @@ class Sentinel:
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
-        """优雅停止后台巡检任务。"""
+        """优雅停止后台巡检任务（带 STOP_GRACE_SECONDS 截止保护，防求解长尾卡住停服）。"""
         self._running = False
         if self._task:
             self._task.cancel()
             try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._task, timeout=self.STOP_GRACE_SECONDS)
+            except (TimeoutError, asyncio.CancelledError, Exception):
                 pass
             self._task = None
 

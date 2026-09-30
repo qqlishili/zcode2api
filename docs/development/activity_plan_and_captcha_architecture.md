@@ -86,7 +86,7 @@
 
 ---
 
-## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.19 演进）
+## 4. 架构加固与对抗防线（v2.5.16 ~ v2.6.1 演进）
 
 ### 4.1 彻底切断自动呼起与提交死循环链
 - **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
@@ -157,3 +157,13 @@
   3. **Audio 逐采样点确定性白噪微扰**：`OfflineAudioContext.startRendering` 按采样点索引 `i` 注入 `1e-7` 量级 `splitMix32` 微噪，`AnalyserNode` 同步填充确定性频谱/时域数据；
   4. **WebGL 全量硬件常量与 84 种桌面组合**：扩充至 12 套桌面 SKU × 7 个 Chrome 版本（`128~134`），补齐 `3379/34076/34024/3386/36347` 等 WebGL 硬件能力常量，彻底移除 `"Intel Inc."` 字符串兜底；
   5. **完整 Client Hints / 亚像素排版 / 媒体与语音设备自洽**：`sec-ch-ua` 与 `userAgentData` 补齐 `"Google Chrome"` 品牌、`toJSON()` 及 `getHighEntropyValues(hints)` 过滤；`measureText` 与 `getBoundingClientRect` 注入 `fp.rectJitter` 亚像素微偏置；`mediaDevices.enumerateDevices` 与 `speechSynthesis.getVoices` 返回与当前 OS 平台匹配的设备及系统语音列表。
+
+### 4.9 上游 OAuth 2026-09 协议、Claim 3.11.2 语义与 Win32 内核版本归一（v2.6.1）
+- **现象归因**：
+  1. **OAuth CLI 2026-09 协议演进**：上游 `POST /oauth/cli/init` 新增在 `data.poll_token` 下发服务端签名的轮询令牌（若继续使用客户端自造 `poll_token` 会被新网关拒绝），且轮询超时在 HTTP 4xx body 中返回 `code == 3004`；
+  2. **Claim 3.11.2 结构化回执与 `1005` 精确窗口**：上游在 `POST /billing/claim` 返回 `code == 1005`（本时段名额已领完）时，于 `data.plan.ends_at`（秒级时间戳）给出下一场开放时间；成功响应附带 `starts_at` / `ends_at` / `server_time`；
+  3. **Windows 宿主 `platform.release()` 单段值被拒**：Windows 下 `platform.release()` 返回 `"10"` 或 `"11"`，不满足三段式内核版本正则，若放宽正则会导致非规范字符串混入设备指纹。
+- **治理方案**：
+  1. **OAuth 协议对齐（`app/oauth.py`、`app/routes/admin_api.py`）**：`ZaiAuthFlow.init()` 校验 `code != 0` 抛错，并优先采用 `data.poll_token`（未下发时回退本地随机 token）；`login_poll` 识别 `code == 3004` 返回 `status: "expired"`；
+  2. **结构化 `ClaimError` 与精确 `next_at` 避让（`app/claim.py`、`accounts.html`）**：`ClaimError(message, *, code=-1, next_at=None)` 携带业务码与 `next_at`（毫秒），`_mark_claim_blocked` 优先采用 `next_at + 5~60s` 离散抖动（缺失时回退北京时间次日 00:05 兜底），成功回执透传 `starts_at`/`ends_at`/`server_time`，前端 Toast 展示恢复倒计时；
+  3. **Windows 内核版本归一与哨兵优雅停服（`app/hostinfo.py`、`app/fingerprint.py`、`app/sentinel.py`）**：新增 `_windows_kernel_version()` 通过 `sys.getwindowsversion()` 合成 `"10.0.xxxxx"`，恢复 `fingerprint.py` 严格三段式 `_RELEASE_SHAPE` 校验门；`Sentinel.stop()` 引入 `STOP_GRACE_SECONDS = 5.0` 优雅停机超时保护。

@@ -38,9 +38,10 @@ AI:      zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages   (Plan 通道, Bear
 1. POST zcode.z.ai/api/v1/oauth/cli/init
    Headers: Authorization: Bearer <本地随机 poll_token>, Content-Type: application/json
    Body:    {"provider": "zai"}
-   → data.{flow_id, authorize_url}
+   → data.{flow_id, authorize_url, poll_token?}
+     （2026-09 新协议：优先采用服务端下发的 data.poll_token，未下发时回落本地自造；code != 0 判 init 失败）
 2. 浏览器打开 authorize_url（chat.z.ai/api/oauth/authorize?client_id=client_P8X5CMWmlaRO9gyO-KSqtg&...）
-3. GET zcode.z.ai/api/v1/oauth/cli/poll/{flow_id}   (Bearer poll_token，轮询至授权完成)
+3. GET zcode.z.ai/api/v1/oauth/cli/poll/{flow_id}   (Bearer poll_token，轮询至授权完成；HTTP 4xx 且 code==3004 判流程过期 expired)
    → data.accessToken（含过期时间）+ zcodejwttoken（视返回结构）
 4. POST api.z.ai/api/auth/z/login  {"token": "<access_token>"}  → 业务 JWT
 5. GET  chat.z.ai/api/oauth/userinfo (Bearer access_token)      → user_id
@@ -109,8 +110,8 @@ GET  billing/preview   → data.previews[]: ClaimPlan{plan_id,name,description,p
                           查询参数: app_version 必带；platform 参数 preview 容忍、client/configs 拒绝（3001）
 POST billing/claim     → 头: Bearer JWT + 验证码头 + X-Device-Mid + X-ZCode-App-Version + X-Platform
                           （实测缺版本/平台头即使验证码有效也 3007 —— asar claimManualPlan 头形态）; body: {plan_id}
-                          成功 → starts_at/ends_at 生效窗口
-                          失败码: already_claimed / quota_exhausted → 按服务端 next window 退避
+                          成功 → starts_at/ends_at/server_time 生效窗口与服务端时间戳（秒）
+                          失败码: 1003 already_claimed / 1005 quota_exhausted（data.plan.ends_at 给出下一场秒级时间戳）→ 按服务端 next window 退避
 前置: identity.appVersion ≥ 活动要求的最低客户端版本（否则 ineligible）
 ```
 

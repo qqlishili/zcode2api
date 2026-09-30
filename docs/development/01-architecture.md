@@ -137,18 +137,19 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
   └─ 未避让 → GET billing/preview（Bearer JWT + 每账号 X-Device-Mid）
        ├─ 无可领套餐 → 结束
        ├─ 有可领 → 取验证码 verifyParam → POST billing/claim
-       │    ├─ 1005 名额用完 → 标记 claim_blocked_until（北京时间次日 00:05 + 0~300s Jitter 离散避让）
+       │    ├─ 1005 名额用完 → 标记 claim_blocked_until（优先采用上游 data.plan.ends_at * 1000 + 5~60s Jitter，未返回时回退北京时间次日 00:05 + 0~300s Jitter 离散避让）
        │    ├─ 1003 已领取 / 1002 结束 → 记失败文案
        │    ├─ 3007 验证码失败 → 换码重试一次
        │    └─ 401 → 标 INVALID
-       └─ 领取成功 → 刷新额度
+       └─ 领取成功 → 透传 starts_at / ends_at / server_time（秒→毫秒）并刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
-前台界面与服务端协同保障（v2.5.18）：
-- 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`，跳过已持有套餐，并在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态；
+前台界面与服务端协同保障（v2.5.18 ~ v2.6.1）：
+- 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`（及 `skip_plan_ids`），跳过已持有套餐，并在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态；
+- `ClaimError` 结构化携带上游 `code` 与 `next_at`（1005 时提取 `data.plan.ends_at * 1000`），前端 `claimToast` 自动展示预计恢复倒计时；
 - 全链路领取成功（哨兵自动补领、入池自动领取、后台一键领取、浏览器滑块手动领取）统一接入 `notify_claim_outcomes` / `schedule_claim_notification` 异步推送 Bark 战报；
 - 前端视图层差集过滤已持有套餐（claimStripHtml），入口/切换/提交三道门禁拦截已持账号；
 - 彻底阻断 Toast 自激呼起弹窗死循环，无感验证通过后受控单次自动提交；
-- 服务端求解器硬件指纹脱敏（RTX 3060 D3D11 + Win32），剥离虚拟机特征对抗 3012 风控。
+- 服务端求解器采用 `SplitMix32` 会话种子驱动多维深度混淆（Canvas 轨迹非零光栅、Audio 逐采样微噪、84 种桌面组合），且 `hostinfo` 支持 Windows 10/11 三段式内核版本（`10.0.xxxxx`）归一。
 ```
 
 ### 4.5 Bark 活动监控与智能领券哨兵（Sentinel）

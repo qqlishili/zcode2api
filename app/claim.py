@@ -43,7 +43,16 @@ def calculate_claim_blocked_until(now: float | None = None) -> float:
 
 
 class ClaimError(Exception):
-    """业务失败（含上游 code 语义），message 面向用户。"""
+    """业务失败（含上游 code 语义），message 面向用户。
+
+    next_at 仅 1005（名额用完）携带：上游 data.plan.ends_at（秒 → 毫秒），
+    即名额恢复时间（zcode-switch claim.rs claim_error 同形）。
+    """
+
+    def __init__(self, message: str, *, code: int = -1, next_at: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.next_at = next_at
 
 
 AUTH_EXPIRED_MESSAGE = "凭证失效，请重新授权"
@@ -79,12 +88,16 @@ def billing_block_reason(account: Account, *, action: str = "领取") -> str | N
     return None
 
 
-def _mark_claim_blocked(account: Account) -> None:
-    """标记 1005 名额用完避让期并持久化。"""
+def _mark_claim_blocked(account: Account, next_at: int | None = None) -> None:
+    """标记 1005 名额用完避让期并持久化（优先采用上游下发 next_at + 离散抖动，未下发回退次日 00:05）。"""
     from .store import store
 
     live = store.find(account.provider, account.id)
-    blocked = calculate_claim_blocked_until()
+    now_ts = time.time()
+    if next_at and (next_at / 1000.0) > now_ts:
+        blocked = (next_at / 1000.0) + random.uniform(5, 60)
+    else:
+        blocked = calculate_claim_blocked_until(now_ts)
     if live is not None:
         live.claim_blocked_until = blocked
         store.update_account(live)
@@ -110,6 +123,17 @@ def _fail_message(code: int, body: dict) -> str:
     base = _CLAIM_FAIL.get(code, "领取失败")
     server = body.get("msg") or body.get("message") or ""
     return f"{base}（{server}）" if server else base
+
+
+def _fail_error(code: int, body: dict) -> ClaimError:
+    """业务码 → ClaimError；1005 附带名额恢复时间（data.plan.ends_at 秒 → 毫秒）。"""
+    message = _fail_message(code, body)
+    next_at = None
+    if code == 1005:
+        ends = ((body.get("data") or {}).get("plan") or {}).get("ends_at")
+        if isinstance(ends, (int, float)) and ends > 0:
+            next_at = int(ends * 1000)
+    return ClaimError(message, code=code, next_at=next_at)
 
 
 def _business_code(body: dict) -> int:
@@ -213,11 +237,12 @@ async def report_activation_events(account: Account) -> str | None:
     return None
 
 
-async def auto_claim_all_plans(account: Account) -> list[dict]:
-    """新账号入池自动领取：激活上报 + 逐个领取全部可领套餐。
+async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | None = None) -> list[dict]:
+    """新账号入池或哨兵自动领取：激活上报 + 逐个领取全部可领套餐。
 
     入池链路的 fire-and-forget 收尾：任何失败只记日志/返回 outcome，绝不抛出
     （入池流程不受影响）。重复执行安全（上游 1003 已领取过幂等）。
+    skip_plan_ids：本轮显式跳过领取的套餐 id；preview 仍照常执行。
     """
     if not (account.mode == "jwt" and account.jwt_token):
         return []
@@ -255,8 +280,13 @@ async def auto_claim_all_plans(account: Account) -> list[dict]:
         logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
         return outcomes
 
+    skip = skip_plan_ids or set()
+    skipped = 0
     need_refresh = False
     for plan in unclaimed:
+        if plan["plan_id"] in skip:
+            skipped += 1
+            continue
         try:
             result = await claim(account, plan["plan_id"], report_activation=False)
             outcomes.append({"account_id": account.id, "account_name": account.name,
@@ -266,13 +296,23 @@ async def auto_claim_all_plans(account: Account) -> list[dict]:
                              f"{result.get('plan_name') or plan['plan_id']}")
         except ClaimError as err:
             msg = str(err)
-            outcomes.append({"account_id": account.id, "account_name": account.name,
-                             "ok": False, "plan_id": plan["plan_id"], "message": msg})
+            outcome = {"account_id": account.id, "account_name": account.name,
+                       "ok": False, "plan_id": plan["plan_id"], "message": msg}
+            if err.code != -1:
+                outcome["code"] = err.code
+            if err.next_at:
+                outcome["next_at"] = err.next_at
+            outcomes.append(outcome)
             if "已经领取过" in msg:
                 need_refresh = True
             logs.warn("claim", f"账号 {account.name} 自动领取 {plan['plan_id']} 失败: {err}")
         except Exception as err:  # noqa: BLE001
             logs.warn("claim", f"账号 {account.name} 自动领取异常: {err}")
+            outcomes.append({"account_id": account.id, "account_name": account.name,
+                             "ok": False, "plan_id": plan["plan_id"], "message": str(err)})
+
+    if skipped:
+        logs.info("claim", f"账号 {account.name} {skipped} 个套餐名额等待期，本轮跳过领取")
 
     if need_refresh:
         try:
@@ -366,7 +406,7 @@ async def preview_plans(account: Account) -> list[dict]:
             raw_plans = (body.get("data") or {}).get("plans") or []
             upstream_plans = [parsed for parsed in (parse_plan(p) for p in raw_plans) if parsed]
         elif code > 0:
-            raise ClaimError(_fail_message(code, body))
+            raise _fail_error(code, body)
     except ClaimError:
         raise
     except Exception as err:
@@ -419,7 +459,7 @@ async def _auto_pick_plan(account: Account, plan_id: str | None) -> tuple[str, s
     unclaimed = [p for p in plans if str(p.get("plan_id") or "").strip().lower() not in held]
     if not unclaimed:
         if plans:
-            raise ClaimError("该账号已领取过当前所有可用活动套餐")
+            raise ClaimError("该账号已领取过当前所有可用活动套餐", code=1003)
         raise ClaimError("当前暂无可领取的活动套餐")
     best = unclaimed[0]
     return best["plan_id"], best["name"] or best["plan_id"], best["grants"]
@@ -450,13 +490,36 @@ async def _post_claim(account: Account, headers: dict, plan_id: str) -> dict:
     )
     code = _business_code(body)
     if code != 0:
+        err = _fail_error(code, body)
         if code == 1005:
-            _mark_claim_blocked(account)
+            _mark_claim_blocked(account, err.next_at)
             blocked_ts = account.claim_blocked_until or time.time()
             dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
-            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}")
-        raise ClaimError(_fail_message(code, body))
+            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}", code=1005, next_at=err.next_at)
+        raise err
     return body
+
+
+def _claim_outcome(body: dict, plan_id: str, plan_name: str, grants: list) -> dict:
+    """领取成功返回集；server_time/starts_at/ends_at 为上游秒值 → 毫秒
+    （zcode-switch 3.11.2 领取语义：服务端时钟随成功载荷下发，供前端
+    区分本机时钟漂移）。缺失字段保持 None，不造数。"""
+    data = body.get("data") or {}
+    plan = data.get("plan") or {}
+
+    def _ms(key: str) -> int | None:
+        val = plan.get(key)
+        return int(val * 1000) if isinstance(val, (int, float)) and val > 0 else None
+
+    server_time = data.get("server_time")
+    return {
+        "plan_id": plan_id,
+        "plan_name": plan_name,
+        "grants": grants,
+        "starts_at": _ms("starts_at"),
+        "ends_at": _ms("ends_at"),
+        "server_time": int(server_time * 1000) if isinstance(server_time, (int, float)) and server_time > 0 else None,
+    }
 
 
 async def claim_with_captcha(
@@ -483,14 +546,15 @@ async def claim_with_captcha(
     except Exception as act_err:
         logs.warn("claim", f"账号 {account.name} 领取前激活上报跳过: {act_err}")
     headers = _claim_headers(account, verify_param.strip(), region)
-    await _post_claim(account, headers, plan_id)
-    return {"plan_id": plan_id, "plan_name": plan_name, "grants": grants}
+    body = await _post_claim(account, headers, plan_id)
+    return _claim_outcome(body, plan_id, plan_name, grants)
 
 
 async def claim(account: Account, plan_id: str | None = None, *, report_activation: bool = True) -> dict:
     """领取套餐。plan_id 缺省时自动选优先级最高的可领套餐。
 
-    返回 {"plan_id", "plan_name", "grants"}；3007（验证码失败）自动换码重试一次。
+    返回 {"plan_id", "plan_name", "grants", "starts_at", "ends_at", "server_time"}；
+    3007（验证码失败）自动换码重试一次。
     """
     if not (account.mode == "jwt" and account.jwt_token):
         raise ClaimError("仅 Coding Plan (JWT) 账号支持领取")
@@ -516,16 +580,17 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
         )
         code = _business_code(body)
         if code == 0:
-            return {"plan_id": plan_id, "plan_name": plan_name, "grants": grants}
+            return _claim_outcome(body, plan_id, plan_name, grants)
+        err = _fail_error(code, body)
         if code == 1005:
-            _mark_claim_blocked(account)
+            _mark_claim_blocked(account, err.next_at)
             blocked_ts = account.claim_blocked_until or time.time()
             dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
-            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}")
+            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}", code=1005, next_at=err.next_at)
         if code == 3007 and attempt == 1:
             logs.warn("claim", f"账号 {account.name} 验证码被拒，换码重试")
             captcha_manager.invalidate()
-            last_err = ClaimError(_fail_message(code, body))
+            last_err = err
             continue
-        raise ClaimError(_fail_message(code, body))
+        raise err
     raise last_err or ClaimError("领取失败")

@@ -860,7 +860,10 @@ function claimToast(o){
   } else if(o.ok) {
     showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
   } else {
-    const msg = o.message || '';
+    let msg = o.message || '';
+    if(o.next_at && o.next_at > Date.now()){
+      msg += '（名额约 ' + fmtDur((o.next_at - Date.now()) / 1000) + ' 后恢复）';
+    }
     if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过') || msg.includes('已持有')){
       showToast(`「${o.account_name}」${msg}`, 'info');
     } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){

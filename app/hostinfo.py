@@ -7,7 +7,9 @@ host_profile / 运维对照，禁止再当作多账号共用的上游身份。
 采集项 ↔ DeviceProfile 字段：
   platform    platform.system()   → darwin / win32 / linux（官方 process.platform 语义）
   arch        platform.machine()  → arm64 / x64（官方 process.arch 语义）
-  os_version  platform.release()  → os.release() 同源，官方 X-Os-Version 直接用它
+  os_version  _host_os_version() → os.release() 同源，官方 X-Os-Version 直接用它
+              （Windows 上 release() 只给 marketing 版 "10"/"11"，归一为
+               sys.getwindowsversion 的内核形态 "10.0.xxxxx"）
   timezone    /etc/localtime → IANA 名：符号链接反解；实体文件则与
               /usr/share/zoneinfo 字节比对；都失败退 UTC
   language    $LANG（zh_CN.UTF-8 → zh-CN；缺失退 en-US）
@@ -25,6 +27,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import sys
 from pathlib import Path
 
 # 服务器无显示器时的兜底分辨率（官方桌面端激活事件必有 screen_resolution）
@@ -110,6 +113,34 @@ def _normalize_platform(system: str) -> str:
         (system or "").lower(), "linux")
 
 
+def _windows_kernel_version() -> str | None:
+    """Windows 内核形态 os_version（"10.0.22000"）。非 Windows 返回 None。
+
+    platform.release() 在 Windows 只给 marketing 版本号（"10"/"11"；
+    Python ≥3.12 在 Win11 上返回 "11"），通不过 fingerprint._RELEASE_SHAPE
+    的 X.Y 内核形态门；sys.getwindowsversion 的 major.minor.build 与官方
+    客户端 Windows 档案（10.0.xxxxx）同形。
+    """
+    try:
+        wv = sys.getwindowsversion()
+    except AttributeError:
+        return None
+    return f"{wv.major}.{wv.minor}.{wv.build}"
+
+
+def _host_os_version() -> str:
+    """os_version（os.release() 同源语义，供 X-Os-Version）。
+
+    Windows 走内核 build 形态；其余平台 platform.release()（Linux 内核 /
+    darwin Darwin 版本天然符合形态门）。
+    """
+    if platform.system().lower() == "windows":
+        kernel = _windows_kernel_version()
+        if kernel:
+            return kernel
+    return platform.release() or "0.0"
+
+
 def host_profile_cls():
     """延迟导入 DeviceProfile（避免与 fingerprint 循环依赖）。"""
     from .fingerprint import DeviceProfile
@@ -122,7 +153,7 @@ def collect_host_profile():
     return DeviceProfile(
         platform=_normalize_platform(platform.system()),
         arch=_normalize_arch(platform.machine()),
-        os_version=platform.release() or "0.0",
+        os_version=_host_os_version(),
         language=_resolve_language(),
         timezone=_resolve_timezone(),
         screen=FALLBACK_SCREEN,
