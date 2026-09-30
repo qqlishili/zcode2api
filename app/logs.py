@@ -12,45 +12,45 @@ _W = "\033[37m"
 
 
 def ok(module: str, msg: str):
-    print(f"  {_G}[+]{_R} {_DIM}{module}{_R} {msg}")
+    print(f"  {_G}[+]{_R} {_DIM}{module}{_R} {msg}", flush=True)
 
 
 def step(module: str, msg: str):
-    print(f"  {_C}[>]{_R} {_DIM}{module}{_R} {msg}")
+    print(f"  {_C}[>]{_R} {_DIM}{module}{_R} {msg}", flush=True)
 
 
 def info(module: str, msg: str):
-    print(f"  {_DIM}[-] {module} {msg}{_R}")
+    print(f"  {_DIM}[-] {module} {msg}{_R}", flush=True)
 
 
 def warn(module: str, msg: str):
-    print(f"  {_Y}[~]{_R} {_DIM}{module}{_R} {msg}")
+    print(f"  {_Y}[~]{_R} {_DIM}{module}{_R} {msg}", flush=True)
 
 
 def err(module: str, msg: str):
-    print(f"  {_RED}[!]{_R} {_DIM}{module}{_R} {msg}")
+    print(f"  {_RED}[!]{_R} {_DIM}{module}{_R} {msg}", flush=True)
 
 
 def header(module: str, msg: str):
-    print(f"  {_B}{_MAG}{module}{_R} {msg}")
+    print(f"  {_B}{_MAG}{module}{_R} {msg}", flush=True)
 
 
 def req(req_id: str, model: str, stream: bool, last_msg: str):
     """请求日志 — 一行显示关键信息"""
     s = "stream" if stream else "sync"
     msg_preview = last_msg[:40] + ("..." if len(last_msg) > 40 else "")
-    print(f"  {_C}>>>{_R} {_DIM}{req_id}{_R}  {_W}{model}{_R}  {_DIM}{s}{_R}  {_DIM}\"{msg_preview}\"{_R}")
+    print(f"  {_C}>>>{_R} {_DIM}{req_id}{_R}  {_W}{model}{_R}  {_DIM}{s}{_R}  {_DIM}\"{msg_preview}\"{_R}", flush=True)
 
 
 def req_ok(req_id: str, tokens: int = 0):
     """请求完成"""
     t = f"  {_DIM}{tokens}tok{_R}" if tokens else ""
-    print(f"  {_G}<<<{_R} {_DIM}{req_id}{_R}{t}")
+    print(f"  {_G}<<<{_R} {_DIM}{req_id}{_R}{t}", flush=True)
 
 
 def req_err(req_id: str, msg: str):
     """请求错误 — 只显示 req_id + 简短原因，不泄露上游"""
-    print(f"  {_RED}<!>{_R} {_DIM}{req_id}{_R}  {msg}")
+    print(f"  {_RED}<!>{_R} {_DIM}{req_id}{_R}  {msg}", flush=True)
 
 
 def banner(lines: list[str]):
@@ -59,7 +59,7 @@ def banner(lines: list[str]):
     strip_ansi = re.compile(r"\033\[[0-9;]*m")
     w = max(len(strip_ansi.sub("", line)) for line in lines) + 4
     border = f"{_DIM}{'=' * w}{_R}"
-    print(f"\n{border}")
+    print(f"\n{border}", flush=True)
     for line in lines:
-        print(f"  {line}")
-    print(f"{border}\n")
+        print(f"  {line}", flush=True)
+    print(f"{border}\n", flush=True)

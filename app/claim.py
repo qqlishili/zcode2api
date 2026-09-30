@@ -321,6 +321,27 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
         except Exception as q_err:  # noqa: BLE001
             logs.warn("claim", f"账号 {account.name} 自动领取后刷新额度跳过: {q_err}")
 
+    from .store import store
+
+    live = store.find(account.provider, account.id)
+    target_acc = live if live is not None else account
+    claimed_ok_ids = {
+        str(o.get("plan_id") or "").strip().lower()
+        for o in outcomes
+        if o.get("ok") or "已经领取过" in str(o.get("message") or "")
+    }
+    held_now = account_held_plan_ids(target_acc) | claimed_ok_ids
+    remaining_claimable = [
+        p for p in unclaimed
+        if isinstance(p, dict)
+        and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_now
+    ]
+    if target_acc.claimable_plans != remaining_claimable:
+        target_acc.claimable_plans = remaining_claimable
+        account.claimable_plans = remaining_claimable
+        if live is not None:
+            store.update_account(live)
+
     return outcomes
 
 

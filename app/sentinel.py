@@ -10,15 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
+from datetime import datetime, timedelta
 from typing import Any
 
 from . import logs
 from .claim import (
+    _TZ_BEIJING,
     account_held_plan_ids,
     auto_claim_all_plans,
     is_base_plan_id,
     pool_active_plans,
     preview_plans,
+    report_activation_events,
 )
 from .models import Status
 from .notify import notify_claim_outcomes, send_bark_notification
@@ -28,6 +32,12 @@ from .store import store
 _CATCHUP_COOLDOWN_SEC = 6 * 3600
 # 新活动 Bark 推送连续失败最大保留轮数（超出后兜底落库，防永久错误配置死循环）
 _MAX_NOTIFY_FAIL_ROUNDS = 3
+# 跨北京时间零点破冰窗口（00:00:15 ~ 00:01:00）与零点后 10 分钟内未见新活动的快速复查间隔（90 ~ 150 秒）
+_MIDNIGHT_WAKE_MIN_SEC = 15.0
+_MIDNIGHT_WAKE_MAX_SEC = 60.0
+_MIDNIGHT_GRACE_MINUTES = 10
+_MIDNIGHT_RETRY_MIN_SEC = 90.0
+_MIDNIGHT_RETRY_MAX_SEC = 150.0
 
 
 class Sentinel:
@@ -61,6 +71,54 @@ class Sentinel:
                 pass
             self._task = None
 
+    def _next_sleep_seconds(
+        self,
+        interval: int,
+        last_result: dict[str, Any] | None = None,
+        now: float | None = None,
+    ) -> float:
+        """计算下一轮巡检睡眠秒数：常规 ±10% 抖动 + 跨北京时间 00:00 零点破冰对齐 + 00:00~00:10 快速复查 + 1005 解封唤醒。"""
+        if interval <= 0:
+            return 30.0
+        now_ts = now if now is not None else time.time()
+        wait = float(interval) * random.uniform(0.9, 1.1)
+
+        dt = datetime.fromtimestamp(now_ts, tz=_TZ_BEIJING)
+        next_midnight = (dt + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        sec_to_midnight = (next_midnight - dt).total_seconds()
+
+        # 1. 跨零点破冰截断：若本轮睡眠将跨越北京时间 00:00:00，截断至 00:00:15 ~ 00:01:00 准时唤醒抢领新日活动
+        if 0 < sec_to_midnight < wait:
+            wait = sec_to_midnight + random.uniform(_MIDNIGHT_WAKE_MIN_SEC, _MIDNIGHT_WAKE_MAX_SEC)
+
+        # 2. 凌晨 00:00 ~ 00:10 黄金窗口快速兜底：若刚过零点上游稍晚几分钟上架，且尚未探测到今日新活动，每 90~150s 快速复查
+        if dt.hour == 0 and dt.minute < _MIDNIGHT_GRACE_MINUTES:
+            mmdd = dt.strftime("%m%d")
+            has_new = bool((last_result or {}).get("new_plans"))
+            seen_today = any(
+                str(pid).strip().lower().endswith(mmdd)
+                for pid in store.get_seen_plan_ids()
+            )
+            if not has_new and not seen_today:
+                wait = min(wait, random.uniform(_MIDNIGHT_RETRY_MIN_SEC, _MIDNIGHT_RETRY_MAX_SEC))
+
+        # 3. 1005 名额避让解封对齐：若池内存在即将解封（如 00:05+jitter 或 next_at）的账号，对齐解封时间点唤醒补领
+        unblock_deltas = [
+            a.claim_blocked_until - now_ts
+            for a in store.list_accounts("zai")
+            if a.allows_billing()
+            and a.claim_blocked_until
+            and a.claim_blocked_until > now_ts
+        ]
+        if unblock_deltas:
+            earliest_delta = min(unblock_deltas)
+            if earliest_delta < wait:
+                wait = min(wait, earliest_delta + random.uniform(5.0, 20.0))
+
+        return max(5.0, wait)
+
     async def _loop(self) -> None:
         """周期巡检主循环。"""
         logs.info("sentinel", "活动哨兵调度器已启动")
@@ -80,21 +138,28 @@ class Sentinel:
                     break
                 continue
 
+            last_result: dict[str, Any] | None = None
             try:
-                await self.check_once()
+                last_result = await self.check_once()
             except asyncio.CancelledError:
                 break
             except Exception as err:
                 logs.err("sentinel", f"活动巡检异常: {err}")
 
+            wait_sec = self._next_sleep_seconds(interval, last_result=last_result)
             try:
-                await asyncio.sleep(interval)
+                await asyncio.sleep(wait_sec)
             except asyncio.CancelledError:
                 break
 
     async def check_once(self) -> dict[str, Any]:
         """执行单次活动巡检与差量闭环处理，返回探测与抢领结果摘要。"""
-        import time
+        now_ts = time.time()
+        # 顺手清理已到期的补领冷却记录
+        if self._catchup_cooldown:
+            expired_keys = [k for k, ts in self._catchup_cooldown.items() if ts <= now_ts]
+            for k in expired_keys:
+                self._catchup_cooldown.pop(k, None)
 
         # 1. 筛选候选可计费 JWT 账号（含 ACTIVE 与 EXHAUSTED，同优先级随机打散轮转分摊探针压力，优先 ACTIVE）
         candidates = [
@@ -107,12 +172,16 @@ class Sentinel:
             logs.info("sentinel", "未找到可用的 JWT 账号用于活动探测，跳过本次巡检")
             return {"ok": False, "reason": "no_active_sentinel"}
 
-        # 2. 单轮探针（上限 min(3, len(candidates)) 次，遇 401 标记失效并轮换下一位，防死锁）
+        # 2. 单轮探针（上限 min(3, len(candidates)) 次，前置当日激活事件上报触发跨日投放资格，遇 401 标记失效并轮换下一位）
         plans = None
         sentinel_acc = None
         max_probe = min(3, len(candidates))
         for candidate in candidates[:max_probe]:
             try:
+                try:
+                    await asyncio.wait_for(report_activation_events(candidate), timeout=5.0)
+                except Exception as act_err:
+                    logs.info("sentinel", f"探针账号 {candidate.name} 前置激活上报跳过: {act_err}")
                 plans = await preview_plans(candidate)
                 sentinel_acc = candidate
                 break
@@ -200,10 +269,18 @@ class Sentinel:
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     outcomes = await auto_claim_all_plans(acc)
                     ok_count = sum(1 for o in outcomes if o.get("ok"))
+                    fail_items = [o for o in outcomes if not o.get("ok")]
                     if ok_count:
                         res_str = f"成功领{ok_count}项"
                     elif new_pids_lower & account_held_plan_ids(acc):
                         res_str = "已持有(成功)"
+                    elif fail_items:
+                        first_msg = str(fail_items[0].get("message") or "领取失败").split("（")[0]
+                        res_str = f"失败({first_msg})"
+                        for item in fail_items:
+                            pid_fail = str(item.get("plan_id") or "").strip().lower()
+                            if pid_fail:
+                                self._catchup_cooldown[(acc.id, pid_fail)] = time.time() + _CATCHUP_COOLDOWN_SEC
                     else:
                         res_str = "无新配额"
                     claim_reports.append({"name": acc.name, "result": res_str})

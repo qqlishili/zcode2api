@@ -338,3 +338,87 @@ def test_solver_js_polymorphic_self_consistent_fingerprint():
     assert '"Google Chrome"' in content
     assert "defaultDevices" in content
     assert "defaultVoices" in content
+
+
+def test_sentinel_midnight_rollover_and_grace_window_wakeup(monkeypatch):
+    """验证跨北京时间 00:00 零点破冰截断、00:00~00:10 窗口快速复查以及 1005 解封对齐唤醒。"""
+    from datetime import datetime
+
+    from app.claim import _TZ_BEIJING
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [])
+    s = Sentinel()
+
+    # 1. 23:45:00 CST（距零点 900s），interval=1800s -> 截断至 915 ~ 960s（00:00:15 ~ 00:01:00 唤醒）
+    ts_2345 = datetime(2026, 9, 30, 23, 45, 0, tzinfo=_TZ_BEIJING).timestamp()
+    w_rollover = s._next_sleep_seconds(1800, now=ts_2345)
+    assert 915.0 <= w_rollover <= 960.0
+
+    # 2. 00:01:00 CST，今日 1001 活动尚未出现 -> 快速复查间隔收敛至 90 ~ 150s
+    ts_0001 = datetime(2026, 10, 1, 0, 1, 0, tzinfo=_TZ_BEIJING).timestamp()
+    w_grace = s._next_sleep_seconds(1800, last_result={"new_plans_count": 0}, now=ts_0001)
+    assert 90.0 <= w_grace <= 150.0
+
+    # 3. 00:02:30 CST，今日活动 zcode-v3-start-plan-trust-1001 已入 seen_ids -> 恢复常规 1800s ± 10%
+    store.add_seen_plan_ids(["zcode-v3-start-plan-trust-1001"])
+    ts_0002 = datetime(2026, 10, 1, 0, 2, 30, tzinfo=_TZ_BEIJING).timestamp()
+    w_normal = s._next_sleep_seconds(1800, last_result={"new_plans_count": 0}, now=ts_0002)
+    assert 1620.0 <= w_normal <= 1980.0
+
+    # 4. 池内存在 1005 避让账号将于 180s 后（如 00:05:30）解封 -> 唤醒时间对齐至 185 ~ 200s
+    acc = Account.create("zai", "blocked_acc", "t1")
+    acc.mode = "jwt"
+    acc.jwt_token = "ey...jwt1"
+    acc.status = Status.ACTIVE
+    acc.claim_blocked_until = ts_0002 + 180.0
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc])
+    w_unblock = s._next_sleep_seconds(1800, last_result={"new_plans_count": 0}, now=ts_0002)
+    assert 185.0 <= w_unblock <= 200.0
+
+
+@pytest.mark.asyncio
+async def test_sentinel_probe_reports_activation_and_records_fail_cooldown(monkeypatch):
+    """验证探针前置上报日活事件，且新活动抢领遇 3012 失败时准确展示失败原因并写入冷却。"""
+    acc = Account.create("zai", "acc_dom", "t1")
+    acc.mode = "jwt"
+    acc.jwt_token = "ey...jwt1"
+    acc.status = Status.EXHAUSTED
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc])
+
+    events_order: list[str] = []
+
+    async def mock_act(a):
+        events_order.append(f"act:{a.name}")
+        return None
+
+    async def mock_preview(a):
+        events_order.append(f"preview:{a.name}")
+        return [{"plan_id": "zcode-v3-start-plan-trust-1001", "name": "ZCode Trust Build", "priority": 110, "grants": []}]
+
+    async def mock_claim_all(a):
+        return [{
+            "ok": False,
+            "plan_id": "zcode-v3-start-plan-trust-1001",
+            "code": 3012,
+            "message": "机房环境被上游风控拦截(3012)，请使用浏览器滑块手动领取（request has been blocked）",
+        }]
+
+    async def mock_bark(**kw):
+        return True, "ok"
+
+    monkeypatch.setattr("app.sentinel.report_activation_events", mock_act)
+    monkeypatch.setattr("app.sentinel.preview_plans", mock_preview)
+    monkeypatch.setattr("app.sentinel.auto_claim_all_plans", mock_claim_all)
+    monkeypatch.setattr("app.sentinel.send_bark_notification", mock_bark)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    s = Sentinel()
+    res = await s.check_once()
+    assert res["ok"] is True
+    assert events_order == ["act:acc_dom", "preview:acc_dom"]
+    assert res["claim_reports"] == [{
+        "name": "acc_dom",
+        "result": "失败(机房环境被上游风控拦截(3012)，请使用浏览器滑块手动领取)",
+    }]
+    assert (acc.id, "zcode-v3-start-plan-trust-1001") in s._catchup_cooldown
+

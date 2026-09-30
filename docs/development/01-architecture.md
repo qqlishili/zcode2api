@@ -143,8 +143,8 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
        │    └─ 401 → 标 INVALID
        └─ 领取成功 → 透传 starts_at / ends_at / server_time（秒→毫秒）并刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
-前台界面与服务端协同保障（v2.5.18 ~ v2.6.2）：
-- 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`（及 `skip_plan_ids`），跳过已持有套餐，并在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态；
+前台界面与服务端协同保障（v2.5.18 ~ v2.6.3）：
+- 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`（及 `skip_plan_ids`），跳过已持有套餐，在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态，并将因 3012/1005 未能领完的候选套餐同步持久化至 `account.claimable_plans`（管理面板立即可见滑块手动补领入口）；
 - `ClaimError` 结构化携带上游 `code` 与 `next_at`（1005 时提取 `data.plan.ends_at * 1000`），前端 `claimToast` 自动展示预计恢复倒计时；
 - 全链路领取成功（哨兵自动补领、入池自动领取、后台一键领取、浏览器滑块手动领取）统一接入 `notify_claim_outcomes` / `schedule_claim_notification` 异步推送 Bark 战报；
 - 前端视图层差集过滤已持有套餐（claimStripHtml），入口/切换/提交三道门禁拦截已持账号；
@@ -155,15 +155,19 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
 ### 4.5 Bark 活动监控与智能领券哨兵（Sentinel）
 
 ```
-Sentinel 后台巡检循环（默认 1800 秒，单例持有强引用防 GC）：
+Sentinel 后台巡检循环（默认 1800 秒 ± 10% 抖动，具备北京时间 00:00 跨零点破冰感知，单例持有强引用防 GC）：
+  ├─ 调度时钟（_next_sleep_seconds）：
+  │    ├─ 跨北京时间 00:00:00 零点自动截断睡眠至 00:00:15 ~ 00:01:00 准时唤醒破冰，消除最多 30 分钟的跨日盲等；
+  │    ├─ 凌晨 00:00 ~ 00:10 黄金窗口内若上游尚未上架今日新活动，自动收敛为 90 ~ 150 秒快速兜底复查，发现后立即恢复常规间隔；
+  │    └─ 池内存在 1005 避让账号（claim_blocked_until）时，自动对齐最早解封时间 + 5~20s 唤醒补领。
   ├─ 动态挑选 1 个可计费（allows_billing，含 ACTIVE 与 EXHAUSTED）JWT 账号作为探针（单轮上限 3 次，遇 401 标记失效并轮换下一位，防死锁）
-  ├─ 调用 preview_plans（无验证码、只读零开销）
+  ├─ 探针前置上报当日激活事件（report_activation_events，5s 超时隔离）以解锁跨日活动投放资格，随后调用 preview_plans（无验证码、只读零开销）
   ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans，探针候选在同优先级账号间随机打散轮转分摊压力）：
   │    ├─ 无全新 plan_id：执行存量漏领自动补领闭环（Catch-up）——对比当期活动/账号待领列表与已持有套餐，为漏领账号（尤其是 EXHAUSTED 耗尽账号）自动补领并异步推送 Bark 补领成功战报，失败账号进入 6 小时冷却避让防死循环撞击 3012
   │    └─ 发现全新 plan_id：
   │         ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 同优先级随机打散 + 0.6~1.5s 离散随机抖动延时，
-  │         │  为全池可计费（allows_billing）JWT 账号触发 auto_claim_all_plans（严格避开验证码池与 Solver 拥堵）
-  │         ├─ 汇总活动详情与全池抢领战报（含已持有账号识别），格式化构建消息
+  │         │  为全池可计费（allows_billing）JWT 账号触发 auto_claim_all_plans（失败项准确记录原因并直接记入 6 小时冷却）
+  │         ├─ 汇总活动详情与全池抢领战报（含已持有账号与失败原因识别），格式化构建消息
   │         ├─ POST JSON 投递 Bark（POST https://api.day.app/push，超时 12s + 2 次瞬态退避重试，4xx 立即熔断防封 IP）
   │         └─ 时序安全落库：仅当 Bark 投递确认成功（或未配置 Bark / 连续 3 轮失败兜底）后，才将新 plan_id 持久化写入 sentinel_seen_plans（彻底根除单次 APNs 超时导致的静默丢单）
 ```

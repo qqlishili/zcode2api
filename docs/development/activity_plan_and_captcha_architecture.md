@@ -176,3 +176,14 @@
   1. **额度监控去抖与错峰平滑（`app/quota.py`）**：`QuotaMonitor.check_once()` 自动跳过近期已刷账号（`< min(0.8 * interval, BILLING_REFRESH_MIN_INTERVAL)`），随机打散待刷账号顺序，并以 `max_concurrency=2, stagger_sec=0.4`（`0.3~0.5s` 离散间隔）错峰平滑请求，周期等待附加 `±10%` Jitter，`stop()` 接入 5s 超时保护；
   2. **预解池连解微间隔（`app/captcha.py`）**：`_refill_batch` 在单批多枚连解（`solved > 0`）之间注入 `0.4~1.0s` 随机微抖动；
   3. **批量入池串行错峰锁（`app/routes/admin_api.py`）**：`_schedule_install` 与 `_schedule_auto_claim` 内置串行锁与连续任务间随机退避（`0.3~0.8s` 与 `0.6~1.5s`），单号入池 0ms 立即执行，批量入池自动削峰排队。
+
+### 4.11 哨兵跨零点准时破冰、凌晨黄金窗口快速复查与探针日活前置（v2.6.3）
+- **现象归因**：
+  1. **纯相对时长 `sleep(1800)` 导致跨零点盲等**：上游每日活动套餐（如 `zcode-v3-start-plan-trust-MMDD`）与每日名额重置均锚定在北京时间 `00:00:00` 切换，而 `Sentinel._loop` 原先仅按进程启动相对时间盲睡 `1800s`，导致跨零点后可能滞后最多 30 分钟才发起首轮活动探测；
+  2. **哨兵探针缺失前置日活上报与失败待领同步**：`Sentinel.check_once()` 裸调 `preview_plans` 而未像 `fetch_quota` / `auto_claim_all_plans` 那样前置调用 `report_activation_events`；且当个别账号因 `3012` 风控在自动抢领中失败时，既未将发现的未领套餐同步落库至 `account.claimable_plans`（导致前端不显示手动滑块入口），又在战报中误标为 `"无新配额"`；
+  3. **`systemd` 管道块缓冲导致日志时间戳滞后**：`app/logs.py` 的 `print` 未开启 `flush=True`，导致 `journalctl` 中日志时间戳比实际执行时间滞后数十分钟。
+- **治理方案**：
+  1. **跨零点破冰与黄金窗口调度（`app/sentinel.py`）**：新增 `Sentinel._next_sleep_seconds()`，常规周期附加 `±10%` 抖动；若睡眠跨越北京时间 `00:00:00`，自动截断至 `00:00:15 ~ 00:01:00` 准时唤醒；在 `00:00 ~ 00:10` 窗口内若尚未探测到当日新活动，按 `90 ~ 150s` 快速复查（发现后立即恢复常规 `1800s`）；若池内存在 `1005` 避让账号（`claim_blocked_until`），自动对齐最早解封时间 `+ 5~20s` 唤醒补领；
+  2. **探针日活前置与失败待领持久化（`app/sentinel.py`、`app/claim.py`）**：哨兵探针在 `preview_plans` 前以 5s 超时前置调用 `report_activation_events`；新活动抢领失败时准确输出失败原因并直接记入 `_catchup_cooldown`；`auto_claim_all_plans` 结束时将未领完的套餐同步写入 `account.claimable_plans`；
+  3. **日志实时刷盘（`app/logs.py`）**：全量 `print` 开启 `flush=True`，消除 `systemd/journald` 块缓冲延迟。
+
