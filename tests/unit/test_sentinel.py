@@ -314,22 +314,27 @@ async def test_sentinel_rotates_probe_across_active_accounts(monkeypatch):
 
 
 def test_solver_js_polymorphic_self_consistent_fingerprint():
-    """验证 captcha_node/solver.js 已彻底移除跨层 Linux 硬编码矛盾，且具备多态桌面 SKU 与动态 Canvas PNG 生成。"""
+    """验证 captcha_node/solver.js 已彻底移除跨层 Linux/Intel 硬编码矛盾，且具备种子驱动的多维深度混淆特征。"""
     from pathlib import Path
 
     solver_path = Path(__file__).resolve().parents[2] / "captcha_node" / "solver.js"
     content = solver_path.read_text(encoding="utf-8")
 
-    # 1. 不再存在任何 sec-ch-ua-platform 或 userAgentData 的 "Linux" 硬编码
+    # 1. 不再存在任何 sec-ch-ua-platform / userAgentData 的 "Linux" 硬编码或 WebGL 兜底 "Intel Inc."
     assert '"sec-ch-ua-platform", \'"Linux"\'' not in content
     assert '"sec-ch-ua-platform": \'"Linux"\'' not in content
     assert 'platform: "Linux"' not in content
+    assert 'return "Intel Inc."' not in content
 
-    # 2. 统一引用 fp.chPlatform / fp.platformVersion / fp.arch 并内置动态 Canvas PNG 与多态 DESKTOP_SKUS
+    # 2. 统一引用 fp.seed / splitMix32 确定性微扰，覆盖 Canvas 2D getImageData / Audio / ClientRects / MediaDevices / Voices / Google Chrome Brand
+    assert "function splitMix32(" in content
+    assert "function seedHex64(" in content
     assert "fp.chPlatform" in content
     assert "fp.platformVersion" in content
     assert "fp.arch" in content
-    assert "generateCanvasPngDataUrl" in content
+    assert "fp.rectJitter" in content
+    assert "generateCanvasPngDataUrl(seed)" in content
     assert "DESKTOP_SKUS" in content
-
-
+    assert '"Google Chrome"' in content
+    assert "defaultDevices" in content
+    assert "defaultVoices" in content

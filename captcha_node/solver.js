@@ -55,7 +55,25 @@ if (proxyUrl) {
   }
 }
 
-// ── 动态 Canvas PNG 生成器（每次求解注入随机微噪点，杜绝全池 verifyParam 共享静态 Canvas 哈希）──
+// ── 确定性伪随机散列（SplitMix32：保证同进程内多次采样幂等、跨进程完全唯一）──
+function splitMix32(x) {
+  let z = (x + 0x9e3779b9) | 0;
+  z = Math.imul(z ^ (z >>> 16), 0x85ebca6b);
+  z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35);
+  return (z ^ (z >>> 16)) >>> 0;
+}
+
+function seedHex64(seed, salt) {
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += splitMix32(seed ^ Math.imul(salt + i + 1, 0x27d4eb2d))
+      .toString(16)
+      .padStart(8, "0");
+  }
+  return out;
+}
+
+// ── 动态 Canvas PNG 生成器（基于会话 seed 注入确定性微噪点，兼顾跨进程唯一与同进程幂等）──
 const _CRC32_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -86,7 +104,7 @@ function makePngChunk(typeStr, dataBuf) {
   return Buffer.concat([lenBuf, typeBuf, dataBuf, crcBuf]);
 }
 
-function generateCanvasPngDataUrl() {
+function generateCanvasPngDataUrl(seed) {
   const width = 32;
   const height = 32;
   const ihdr = Buffer.alloc(13);
@@ -98,16 +116,15 @@ function generateCanvasPngDataUrl() {
   ihdr[11] = 0;
   ihdr[12] = 0;
 
-  const noise = crypto.randomBytes(64);
   const raw = Buffer.alloc(height * (1 + width * 4));
   let offset = 0;
   for (let y = 0; y < height; y++) {
     raw[offset++] = 0; // filter type 0 (None)
     for (let x = 0; x < width; x++) {
-      const n = noise[(y * width + x) & 63];
-      raw[offset++] = ((x * 7 + y * 3 + (n & 0x07)) & 0xff);
-      raw[offset++] = ((x * 5 + y * 11 + ((n >> 3) & 0x07)) & 0xff);
-      raw[offset++] = ((128 + x * 2 - y * 2 + ((n >> 6) & 0x03)) & 0xff);
+      const h = splitMix32(seed ^ Math.imul(y * width + x + 1, 0x1b873593));
+      raw[offset++] = (x * 7 + y * 3 + (h & 0x07)) & 0xff;
+      raw[offset++] = (x * 5 + y * 11 + ((h >>> 3) & 0x07)) & 0xff;
+      raw[offset++] = (128 + x * 2 - y * 2 + ((h >>> 6) & 0x03)) & 0xff;
       raw[offset++] = 255;
     }
   }
@@ -122,13 +139,15 @@ function generateCanvasPngDataUrl() {
   return "data:image/png;base64," + pngBuf.toString("base64");
 }
 
-// ── 多态自洽桌面指纹池（消除跨层 Win32/Linux 矛盾与单机静态指纹群聚特征）────────
+// ── 多态自洽桌面指纹池（参考主流指纹浏览器跨层对齐设计：OS/GPU/Screen/ClientHints/Media/Voices 全闭环）──
 const CHROME_VERSIONS = [
-  { major: "127", full: "127.0.6533.120" },
   { major: "128", full: "128.0.6613.138" },
   { major: "129", full: "129.0.6668.101" },
   { major: "130", full: "130.0.6723.117" },
   { major: "131", full: "131.0.6778.109" },
+  { major: "132", full: "132.0.6834.110" },
+  { major: "133", full: "133.0.6943.98" },
+  { major: "134", full: "134.0.6998.89" },
 ];
 
 const DESKTOP_SKUS = [
@@ -155,6 +174,18 @@ const DESKTOP_SKUS = [
     screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1 },
     webglUnmaskedVendor: "Google Inc. (NVIDIA)",
     webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1.25 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
   },
   {
     uaOsToken: "Windows NT 10.0; Win64; x64",
@@ -191,6 +222,18 @@ const DESKTOP_SKUS = [
     screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
     webglUnmaskedVendor: "Google Inc. (AMD)",
     webglUnmaskedRenderer: "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (AMD)",
+    webglUnmaskedRenderer: "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
   },
   {
     uaOsToken: "Windows NT 10.0; Win64; x64",
@@ -240,14 +283,29 @@ const DESKTOP_SKUS = [
     webglUnmaskedVendor: "Google Inc. (Apple)",
     webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
   },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.2.0",
+    arch: "arm",
+    hardwareConcurrency: 10,
+    deviceMemory: 8,
+    screen: { w: 1512, h: 982, aw: 1512, ah: 950, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)",
+  },
 ];
 
 function generateFingerprint() {
+  const seed = crypto.randomInt(1, 0x7fffffff);
   const ver = CHROME_VERSIONS[crypto.randomInt(0, CHROME_VERSIONS.length)];
   const sku = DESKTOP_SKUS[crypto.randomInt(0, DESKTOP_SKUS.length)];
   const userAgent = `Mozilla/5.0 (${sku.uaOsToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${ver.major}.0.0.0 Safari/537.36`;
-  const audioJitter = (crypto.randomInt(1, 999) - 500) * 1e-7;
+  const audioJitter = ((splitMix32(seed ^ 0x13579bdf) & 0x3ff) - 512) * 1e-7;
+  const rectJitter = (((splitMix32(seed ^ 0x2468ace0) & 0xff) - 128) || 1) * 1e-4;
   return {
+    seed,
     userAgent,
     uaMajor: ver.major,
     uaFull: ver.full,
@@ -260,8 +318,9 @@ function generateFingerprint() {
     screen: sku.screen,
     webglUnmaskedVendor: sku.webglUnmaskedVendor,
     webglUnmaskedRenderer: sku.webglUnmaskedRenderer,
-    canvasImage: generateCanvasPngDataUrl(),
+    canvasImage: generateCanvasPngDataUrl(seed),
     audioJitter,
+    rectJitter,
   };
 }
 const fp = generateFingerprint();
@@ -374,7 +433,10 @@ function patchPeBundle(buf, url) {
 function injectRequestHeaders(request) {
   const h = request.headers;
   try {
-    h.set("sec-ch-ua", '"Chromium";v="' + fp.uaMajor + '", "Not)A;Brand";v="24"');
+    h.set(
+      "sec-ch-ua",
+      `"Chromium";v="${fp.uaMajor}", "Google Chrome";v="${fp.uaMajor}", "Not-A.Brand";v="99"`
+    );
     h.set("sec-ch-ua-mobile", "?0");
     h.set("sec-ch-ua-platform", '"' + fp.chPlatform + '"');
     h.set("user-agent", fp.userAgent);
@@ -1060,13 +1122,39 @@ function applyPolyfills(w) {
   }
 
   if (!w.speechSynthesis) {
+    const defaultVoices =
+      fp.platform === "MacIntel"
+        ? [
+            { voiceURI: "Samantha", name: "Samantha", lang: "en-US", localService: true, default: true },
+            { voiceURI: "Alex", name: "Alex", lang: "en-US", localService: true, default: false },
+          ]
+        : [
+            {
+              voiceURI: "Microsoft David - English (United States)",
+              name: "Microsoft David - English (United States)",
+              lang: "en-US",
+              localService: true,
+              default: true,
+            },
+            {
+              voiceURI: "Microsoft Zira - English (United States)",
+              name: "Microsoft Zira - English (United States)",
+              lang: "en-US",
+              localService: true,
+              default: false,
+            },
+          ];
     const SpeechSynthesis = function () {};
     SpeechSynthesis.prototype = {
+      pending: false,
+      speaking: false,
+      paused: false,
+      onvoiceschanged: null,
       speak() {},
       cancel() {},
       pause() {},
       resume() {},
-      getVoices: () => [],
+      getVoices: () => defaultVoices,
     };
     w.SpeechSynthesis = SpeechSynthesis;
     w.speechSynthesis = Object.create(w.SpeechSynthesis.prototype);
@@ -1118,11 +1206,28 @@ function applyPolyfills(w) {
         if (p === 35724) return "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)";
         if (p === 0x9245) return fp.webglUnmaskedVendor;
         if (p === 0x9246) return fp.webglUnmaskedRenderer;
-        return "Intel Inc.";
+        if (p === 3379 || p === 34076 || p === 34024) return 16384;
+        if (p === 34921 || p === 34930 || p === 35660 || p === 34047) return 16;
+        if (p === 35661) return 32;
+        if (p === 36347) return 4096;
+        if (p === 36348) return 30;
+        if (p === 36349) return 1024;
+        if (p === 3410 || p === 3411 || p === 3412 || p === 3413 || p === 3415) return 8;
+        if (p === 3414) return 24;
+        if (p === 3386) return new Int32Array([32767, 32767]);
+        if (p === 33901) return new Float32Array([1, 1024]);
+        if (p === 33902) return new Float32Array([1, 1]);
+        return 0;
       },
       getExtension(name) {
         if (name === "WEBGL_debug_renderer_info") {
           return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
+        }
+        if (name === "EXT_texture_filter_anisotropic") {
+          return {
+            TEXTURE_MAX_ANISOTROPY_EXT: 0x84fe,
+            MAX_TEXTURE_MAX_ANISOTROPY_EXT: 0x84ff,
+          };
         }
         return null;
       },
@@ -1159,16 +1264,64 @@ function applyPolyfills(w) {
   }
 
   function make2DStub(canvas) {
+    let drawState = fp.seed >>> 0;
+    const bumpDraw = (tag, arg) => {
+      let s = tag;
+      if (arg !== undefined && arg !== null) {
+        const str = String(arg);
+        for (let i = 0; i < str.length; i++) {
+          s = Math.imul(s ^ str.charCodeAt(i), 0x01000193);
+        }
+      }
+      drawState = splitMix32(drawState ^ s);
+    };
     return {
       canvas,
-      fillRect() {},
-      clearRect() {},
-      getImageData: (_x, _y, w2 = 1, h2 = 1) => new w.ImageData(w2, h2),
+      fillRect(x = 0, y = 0, rw = 0, rh = 0) {
+        bumpDraw(0x101, `${x},${y},${rw},${rh}`);
+      },
+      clearRect() {
+        drawState = fp.seed >>> 0;
+      },
+      getImageData(sx = 0, sy = 0, sw = 1, sh = 1) {
+        const safeW = Math.max(1, Math.min(2048, Number(sw) | 0 || 1));
+        const safeH = Math.max(1, Math.min(2048, Number(sh) | 0 || 1));
+        const img = new w.ImageData(safeW, safeH);
+        const data = img.data;
+        if (data && data.length >= safeW * safeH * 4) {
+          for (let py = 0; py < safeH; py++) {
+            for (let px = 0; px < safeW; px++) {
+              const idx = (py * safeW + px) * 4;
+              const coordHash = splitMix32(
+                drawState ^ Math.imul((sx + px + 1) * 73856093, (sy + py + 1) * 19349663)
+              );
+              let r = ((sx + px) * 13 + (sy + py) * 7 + (coordHash & 0x1f)) & 0xff;
+              let g = ((sx + px) * 5 + (sy + py) * 17 + ((coordHash >>> 5) & 0x1f)) & 0xff;
+              let b = (96 + (sx + px) * 3 - (sy + py) * 3 + ((coordHash >>> 10) & 0x1f)) & 0xff;
+              // 稀疏确定性微扰（约 1/31 像素位点注入 ±1~3 微移，兼顾抗指纹追踪与同会话二次校验幂等）
+              if (coordHash % 31 === 0) {
+                const delta = ((coordHash >>> 16) % 3) + 1;
+                const ch = (coordHash >>> 20) % 3;
+                if (ch === 0) r = (r + delta) & 0xff;
+                else if (ch === 1) g = (g + delta) & 0xff;
+                else b = (b + delta) & 0xff;
+              }
+              data[idx] = r;
+              data[idx + 1] = g;
+              data[idx + 2] = b;
+              data[idx + 3] = 255;
+            }
+          }
+        }
+        return img;
+      },
       putImageData() {},
       createImageData: (w2 = 1, h2 = 1) => new w.ImageData(w2, h2),
       setTransform() {},
       transform() {},
-      drawImage() {},
+      drawImage() {
+        bumpDraw(0x102, "img");
+      },
       save() {},
       restore() {},
       beginPath() {},
@@ -1178,17 +1331,39 @@ function applyPolyfills(w) {
       quadraticCurveTo() {},
       closePath() {},
       clip() {},
-      stroke() {},
-      fill() {},
-      arc() {},
-      rect() {},
+      stroke() {
+        bumpDraw(0x103, this.strokeStyle);
+      },
+      fill() {
+        bumpDraw(0x104, this.fillStyle);
+      },
+      arc(x = 0, y = 0, r = 0) {
+        bumpDraw(0x105, `${x},${y},${r}`);
+      },
+      rect(x = 0, y = 0, rw = 0, rh = 0) {
+        bumpDraw(0x106, `${x},${y},${rw},${rh}`);
+      },
       ellipse() {},
       translate() {},
       scale() {},
       rotate() {},
-      fillText() {},
-      strokeText() {},
-      measureText: (t) => ({ width: String(t).length * 8 }),
+      fillText(t = "") {
+        bumpDraw(0x107, `${this.font}:${t}`);
+      },
+      strokeText(t = "") {
+        bumpDraw(0x108, `${this.font}:${t}`);
+      },
+      measureText: (t) => {
+        const str = String(t);
+        const base = str.length * 8;
+        return {
+          width: base > 0 ? base + fp.rectJitter : 0,
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: base > 0 ? base + fp.rectJitter : 0,
+          actualBoundingBoxAscent: 8 + fp.rectJitter,
+          actualBoundingBoxDescent: 2,
+        };
+      },
       createLinearGradient: () => ({ addColorStop() {} }),
       createRadialGradient: () => ({ addColorStop() {} }),
       createPattern: () => ({}),
@@ -1228,7 +1403,7 @@ function applyPolyfills(w) {
       }
     };
 
-  // ── Audio（确定性正弦渲染，指纹稳定）──
+  // ── Audio（基于会话 seed 的逐采样点确定性微噪，具备真实白噪频谱且同会话重放幂等）──
   const audioMock = class {
     constructor() {
       this.sampleRate = 44100;
@@ -1251,6 +1426,7 @@ function applyPolyfills(w) {
         ratio: { value: 12, setValueAtTime() {} },
         attack: { value: 0.003, setValueAtTime() {} },
         release: { value: 0.25, setValueAtTime() {} },
+        reduction: -12.5 + fp.audioJitter * 1e4,
         connect() {},
       };
     }
@@ -1258,13 +1434,33 @@ function applyPolyfills(w) {
       return {
         fftSize: 2048,
         frequencyBinCount: 1024,
-        getByteFrequencyData() {},
-        getByteTimeDomainData() {},
+        getByteFrequencyData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              arr[i] = (splitMix32(fp.seed ^ (i * 0x45d9f3b)) & 0x7f) + 32;
+            }
+          }
+        },
+        getFloatFrequencyData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              const h = splitMix32(fp.seed ^ (i * 0x45d9f3b));
+              arr[i] = -60 + ((h & 0x3ff) - 512) * 0.02 + fp.audioJitter;
+            }
+          }
+        },
+        getByteTimeDomainData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              arr[i] = 128 + ((splitMix32(fp.seed ^ i) & 0x07) - 4);
+            }
+          }
+        },
         connect() {},
       };
     }
     createGain() {
-      return { gain: { value: 1 }, connect() {} };
+      return { gain: { value: 1, setValueAtTime() {} }, connect() {} };
     }
     destination = {};
     resume() {
@@ -1289,14 +1485,17 @@ function applyPolyfills(w) {
         const len = this.length || 44100;
         const sr = this.sampleRate || 44100;
         const buf = new Float32Array(len);
-        const jitter = fp.audioJitter || 0;
+        const baseJitter = fp.audioJitter || 0;
         for (let i = 0; i < len; i += 1) {
           const t = i / sr;
+          const sampleNoise =
+            (((splitMix32(fp.seed ^ Math.imul(i + 1, 0x9e3779b1)) & 0x3ff) - 512) / 512) * 1e-7;
           buf[i] =
             Math.sin(2 * Math.PI * 1000 * t) * Math.exp(-t * 1.2) * 0.6 +
             Math.sin(2 * Math.PI * 3000 * t) * Math.exp(-t * 1.5) * 0.25 +
             Math.sin(2 * Math.PI * 5000 * t) * Math.exp(-t * 2.0) * 0.12 +
-            jitter;
+            baseJitter +
+            sampleNoise;
         }
         return Promise.resolve({
           numberOfChannels: 1,
@@ -1321,6 +1520,35 @@ function applyPolyfills(w) {
       check: () => true,
       addEventListener() {},
       removeEventListener() {},
+    };
+  }
+
+  // ── Element.prototype.getBoundingClientRect 亚像素微扰（模拟 GPU 排版光栅化差异）──
+  if (w.Element && w.Element.prototype && typeof w.Element.prototype.getBoundingClientRect === "function") {
+    const origGetBCR = w.Element.prototype.getBoundingClientRect;
+    w.Element.prototype.getBoundingClientRect = function (...args) {
+      const r = origGetBCR.apply(this, args) || {
+        x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0,
+      };
+      const j = fp.rectJitter || 0;
+      const wVal = r.width ? r.width + j : 0;
+      const hVal = r.height ? r.height + j : 0;
+      return {
+        x: r.x || 0,
+        y: r.y || 0,
+        width: wVal,
+        height: hVal,
+        top: r.top || 0,
+        right: (r.left || 0) + wVal,
+        bottom: (r.top || 0) + hVal,
+        left: r.left || 0,
+        toJSON() {
+          return {
+            x: this.x, y: this.y, width: this.width, height: this.height,
+            top: this.top, right: this.right, bottom: this.bottom, left: this.left,
+          };
+        },
+      };
     };
   }
 
@@ -1418,31 +1646,55 @@ function applyPolyfills(w) {
     } catch (_) {}
   }
   if (!nav.userAgentData) {
+    const uaBrands = [
+      { brand: "Chromium", version: fp.uaMajor },
+      { brand: "Google Chrome", version: fp.uaMajor },
+      { brand: "Not-A.Brand", version: "99" },
+    ];
+    const uaFullVersionList = [
+      { brand: "Chromium", version: fp.uaFull },
+      { brand: "Google Chrome", version: fp.uaFull },
+      { brand: "Not-A.Brand", version: "99.0.0.0" },
+    ];
+    const highEntropyMap = {
+      architecture: fp.arch,
+      bitness: "64",
+      brands: uaBrands,
+      formFactors: ["Desktop"],
+      fullVersionList: uaFullVersionList,
+      mobile: false,
+      model: "",
+      platform: fp.chPlatform,
+      platformVersion: fp.platformVersion,
+      uaFullVersion: fp.uaFull,
+      wow64: false,
+    };
     const UAData = function () {};
     UAData.prototype = {
-      brands: [
-        { brand: "Chromium", version: fp.uaMajor },
-        { brand: "Not)A;Brand", version: "24" },
-      ],
+      brands: uaBrands,
       mobile: false,
       platform: fp.chPlatform,
-      getHighEntropyValues: () =>
-        Promise.resolve({
-          brands: [
-            { brand: "Chromium", version: fp.uaMajor },
-            { brand: "Not)A;Brand", version: "24" },
-          ],
+      toJSON: () => ({
+        brands: uaBrands,
+        mobile: false,
+        platform: fp.chPlatform,
+      }),
+      getHighEntropyValues: (hints) => {
+        if (!Array.isArray(hints)) {
+          return Promise.resolve({ ...highEntropyMap });
+        }
+        const res = {
+          brands: uaBrands,
           mobile: false,
           platform: fp.chPlatform,
-          platformVersion: fp.platformVersion,
-          architecture: fp.arch,
-          model: "",
-          uaFullVersion: fp.uaFull,
-          fullVersionList: [
-            { brand: "Chromium", version: fp.uaFull },
-            { brand: "Not)A;Brand", version: "24.0.0.0" },
-          ],
-        }),
+        };
+        for (const h of hints) {
+          if (Object.prototype.hasOwnProperty.call(highEntropyMap, h)) {
+            res[h] = highEntropyMap[h];
+          }
+        }
+        return Promise.resolve(res);
+      },
     };
     try {
       Object.defineProperty(nav, "userAgentData", { value: makeNS(UAData.prototype), configurable: true });
@@ -1499,11 +1751,46 @@ function applyPolyfills(w) {
       });
   } catch (_) {}
   try {
-    if (!nav.mediaDevices)
+    if (!nav.mediaDevices) {
+      const audioGroupId = seedHex64(fp.seed, 10);
+      const videoGroupId = seedHex64(fp.seed, 20);
+      const defaultDevices = [
+        {
+          deviceId: "default",
+          kind: "audioinput",
+          label: "",
+          groupId: audioGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+        {
+          deviceId: seedHex64(fp.seed, 30),
+          kind: "videoinput",
+          label: "",
+          groupId: videoGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+        {
+          deviceId: "default",
+          kind: "audiooutput",
+          label: "",
+          groupId: audioGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+      ];
       Object.defineProperty(nav, "mediaDevices", {
-        value: makeNS({ enumerateDevices: () => Promise.resolve([]), getUserMedia: () => Promise.reject(new Error("NotAllowedError")) }),
+        value: makeNS({
+          enumerateDevices: () => Promise.resolve(defaultDevices),
+          getUserMedia: () => Promise.reject(new Error("NotAllowedError")),
+        }),
         configurable: true,
       });
+    }
   } catch (_) {}
 
   // ── screen / 窗口尺寸 ──

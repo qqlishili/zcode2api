@@ -144,5 +144,16 @@
   1. **同优先级随机轮转**：`Sentinel.check_once()` 在探针筛选与全池抢领前先执行 `random.shuffle` 再按 `ACTIVE` 优先稳定排序，使巡检探针与抢领顺序在池内均匀分摊；
   2. **批量领取离散抖动节流**：`POST /admin/api/claim` 在多账号连续向上游发起 `do_claim` 之间自动注入 `0.6~1.5s` 随机抖动延时，与哨兵抢领节流策略完全对齐。
 
-
-
+### 4.8 指纹浏览器级种子驱动多维深度混淆（v2.5.20）
+- **现象归因（对比主流开源指纹浏览器 `GeekezBrowser`、`RoxyBrowser`、`apify/fingerprint-suite`、`BotBrowser`、`fingerprint-chromium`）**：
+  1. **2D Canvas `getImageData` 空白像素漏洞**：原 `make2DStub` 的 `getImageData` 直接返回全 0 透明 `ImageData`，若阿里云 `pe.*` 字节码 VM 执行 `fillText` 后通过 `getImageData` 提取像素哈希而非仅调 `toDataURL`，全 0 像素会立即暴露无头空壳 DOM；且若使用非确定性随机噪点，无法通过同一会话内的“二次重绘一致性校验”；
+  2. **Audio 常数偏移一阶导数为零**：原 `OfflineAudioContext` 对所有采样点加同一个常数 `jitter`，相邻采样差分方差为 0，且 `AnalyserNode` 未填充频谱数据；
+  3. **`userAgentData` 缺失 `"Google Chrome"` 品牌与按需高熵过滤**：原 `brands` 仅含 `Chromium` 与 `Not)A;Brand`，缺少 `toJSON()`、`bitness`、`wow64`、`formFactors` 及按 `hints` 数组过滤逻辑；
+  4. **WebGL 未枚举常量泄露 `"Intel Inc."`**：原 `makeWebGLMock.getParameter` 对 `MAX_TEXTURE_SIZE (3379)` 等硬件能力参数未枚举时兜底返回 `"Intel Inc."`，在抽中 NVIDIA/AMD/Apple Silicon SKU 时造成跨层硬件矛盾；
+  5. **`mediaDevices` / `speechSynthesis` 空数组与整数字体宽度**：桌面浏览器返回空音视频设备列表、空 TTS 语音列表及无亚像素小数的 `measureText`/`getBoundingClientRect` 均属于典型沙箱特征。
+- **治理方案（Clean-Room 纯自研实现）**：
+  1. **`SplitMix32` 会话种子驱动（跨进程唯一 + 同进程重放幂等）**：每个求解子进程生成 32-bit `fp.seed`，所有 Canvas、Audio、ClientRects、MediaDevice ID 均由 `splitMix32(fp.seed ^ salt)` 确定性派生，既保证每次生成的 `verifyParam` 全局唯一，又保证同一次会话内风控脚本多次调用同一 API 返回完全一致的哈希；
+  2. **2D Canvas 轨迹感知非零光栅与稀疏微扰**：记录 `fillText`/`fillRect`/`arc`/`stroke` 等绘制状态哈希，`getImageData` 生成非零渐变基底并在约 `1/31` 稀疏像素位点注入 `±1~3` 确定性通道微移；
+  3. **Audio 逐采样点确定性白噪微扰**：`OfflineAudioContext.startRendering` 按采样点索引 `i` 注入 `1e-7` 量级 `splitMix32` 微噪，`AnalyserNode` 同步填充确定性频谱/时域数据；
+  4. **WebGL 全量硬件常量与 84 种桌面组合**：扩充至 12 套桌面 SKU × 7 个 Chrome 版本（`128~134`），补齐 `3379/34076/34024/3386/36347` 等 WebGL 硬件能力常量，彻底移除 `"Intel Inc."` 字符串兜底；
+  5. **完整 Client Hints / 亚像素排版 / 媒体与语音设备自洽**：`sec-ch-ua` 与 `userAgentData` 补齐 `"Google Chrome"` 品牌、`toJSON()` 及 `getHighEntropyValues(hints)` 过滤；`measureText` 与 `getBoundingClientRect` 注入 `fp.rectJitter` 亚像素微偏置；`mediaDevices.enumerateDevices` 与 `speechSynthesis.getVoices` 返回与当前 OS 平台匹配的设备及系统语音列表。
