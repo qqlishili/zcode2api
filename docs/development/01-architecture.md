@@ -157,10 +157,10 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
 Sentinel 后台巡检循环（默认 1800 秒，单例持有强引用防 GC）：
   ├─ 动态挑选 1 个可计费（allows_billing，含 ACTIVE 与 EXHAUSTED）JWT 账号作为探针（单轮上限 3 次，遇 401 标记失效并轮换下一位，防死锁）
   ├─ 调用 preview_plans（无验证码、只读零开销）
-  ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans）：
+  ├─ 差量比对 SQLite meta 表已见套餐（sentinel_seen_plans，探针候选在同优先级账号间随机打散轮转分摊压力）：
   │    ├─ 无全新 plan_id：执行存量漏领自动补领闭环（Catch-up）——对比当期活动/账号待领列表与已持有套餐，为漏领账号（尤其是 EXHAUSTED 耗尽账号）自动补领并异步推送 Bark 补领成功战报，失败账号进入 6 小时冷却避让防死循环撞击 3012
   │    └─ 发现全新 plan_id：
-  │         ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 0.6~1.5s 离散随机抖动延时，
+  │         ├─ sentinel_auto_claim 开启时：单并发顺序串行 + 同优先级随机打散 + 0.6~1.5s 离散随机抖动延时，
   │         │  为全池可计费（allows_billing）JWT 账号触发 auto_claim_all_plans（严格避开验证码池与 Solver 拥堵）
   │         ├─ 汇总活动详情与全池抢领战报（含已持有账号识别），格式化构建消息
   │         ├─ POST JSON 投递 Bark（POST https://api.day.app/push，超时 12s + 2 次瞬态退避重试，4xx 立即熔断防封 IP）

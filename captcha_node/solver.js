@@ -1,9 +1,9 @@
 // solver.js — 无浏览器阿里云无痕验证求解器（Node + happy-dom）。
 // 设计对齐 zapi captcha-happy.ts（设计移植，非代码拷贝）：
-//   1. 常量指纹（Chrome/127 Linux + SwiftShader WebGL + 1px canvas）
+//   1. 多态自洽桌面指纹池（Win32/MacIntel + 真实物理独显/Apple Silicon + 动态微噪点 Canvas/Audio）
 //   2. alicdn 资源磁盘+内存双缓存（~/.zcode-captcha-cdn-cache/<sha1>）
 //   3. pe.* 字节码 VM 补丁（btoa/atob 调用打 __DBT 观测钩子）
-//   4. interceptor 全量接管网络层：每请求注入 client-hint/UA/origin/referer
+//   4. interceptor 全量接管网络层：每请求注入自洽 client-hint/UA/origin/referer
 //   5. guest 侧补丁（Event.isTrusted、HTMLDocument 命名、错误静默记录）
 //   6. ~40 项浏览器 polyfill + native-toString 伪装 + 行为仿真（鼠标滑动）
 //   7. 严格 extractVerifyParam：短参数/缺 securityToken 的降级结果直接拒绝
@@ -22,6 +22,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
 const SCENE = process.argv[2] || "11xygtvd";
 const REGION = process.argv[3] || "sgp";
@@ -54,21 +55,213 @@ if (proxyUrl) {
   }
 }
 
-// ── 指纹：真实桌面环境（Windows 10 + RTX 3060 + 真实 1080P），剔除 SwiftShader 虚拟机特征 ──
+// ── 动态 Canvas PNG 生成器（每次求解注入随机微噪点，杜绝全池 verifyParam 共享静态 Canvas 哈希）──
+const _CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32Buf(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = _CRC32_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makePngChunk(typeStr, dataBuf) {
+  const typeBuf = Buffer.from(typeStr, "ascii");
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(dataBuf.length, 0);
+  const crcInput = Buffer.concat([typeBuf, dataBuf]);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32Buf(crcInput), 0);
+  return Buffer.concat([lenBuf, typeBuf, dataBuf, crcBuf]);
+}
+
+function generateCanvasPngDataUrl() {
+  const width = 32;
+  const height = 32;
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // color type RGBA
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const noise = crypto.randomBytes(64);
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  let offset = 0;
+  for (let y = 0; y < height; y++) {
+    raw[offset++] = 0; // filter type 0 (None)
+    for (let x = 0; x < width; x++) {
+      const n = noise[(y * width + x) & 63];
+      raw[offset++] = ((x * 7 + y * 3 + (n & 0x07)) & 0xff);
+      raw[offset++] = ((x * 5 + y * 11 + ((n >> 3) & 0x07)) & 0xff);
+      raw[offset++] = ((128 + x * 2 - y * 2 + ((n >> 6) & 0x03)) & 0xff);
+      raw[offset++] = 255;
+    }
+  }
+  const idat = zlib.deflateSync(raw, { level: 6 });
+  const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const pngBuf = Buffer.concat([
+    pngSig,
+    makePngChunk("IHDR", ihdr),
+    makePngChunk("IDAT", idat),
+    makePngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  return "data:image/png;base64," + pngBuf.toString("base64");
+}
+
+// ── 多态自洽桌面指纹池（消除跨层 Win32/Linux 矛盾与单机静态指纹群聚特征）────────
+const CHROME_VERSIONS = [
+  { major: "127", full: "127.0.6533.120" },
+  { major: "128", full: "128.0.6613.138" },
+  { major: "129", full: "129.0.6668.101" },
+  { major: "130", full: "130.0.6723.117" },
+  { major: "131", full: "131.0.6778.109" },
+];
+
+const DESKTOP_SKUS = [
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "10.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "10.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (AMD)",
+    webglUnmaskedRenderer: "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: { w: 1536, h: 864, aw: 1536, ah: 824, dpr: 1.25 },
+    webglUnmaskedVendor: "Google Inc. (Intel)",
+    webglUnmaskedRenderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "14.6.1",
+    arch: "arm",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: { w: 1440, h: 900, aw: 1440, ah: 875, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.1.0",
+    arch: "arm",
+    hardwareConcurrency: 10,
+    deviceMemory: 8,
+    screen: { w: 1512, h: 982, aw: 1512, ah: 950, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.1.0",
+    arch: "arm",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1728, h: 1117, aw: 1728, ah: 1085, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+  },
+];
+
 function generateFingerprint() {
-  const userAgent =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
+  const ver = CHROME_VERSIONS[crypto.randomInt(0, CHROME_VERSIONS.length)];
+  const sku = DESKTOP_SKUS[crypto.randomInt(0, DESKTOP_SKUS.length)];
+  const userAgent = `Mozilla/5.0 (${sku.uaOsToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${ver.major}.0.0.0 Safari/537.36`;
+  const audioJitter = (crypto.randomInt(1, 999) - 500) * 1e-7;
   return {
     userAgent,
-    uaMajor: "127",
-    uaFull: "127.0.0.0",
-    platform: "Win32",
-    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040 },
-    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
-    webglUnmaskedRenderer:
-      "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
-    canvasImage:
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAExJREFUWEft0kEKACAMQ9G7/537u3S2Q0RwbvMhCclM9fXqYgEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAfvAC8lAATHJmK7bAAAAAElFTkSuQmCC",
+    uaMajor: ver.major,
+    uaFull: ver.full,
+    platform: sku.platform,
+    chPlatform: sku.chPlatform,
+    platformVersion: sku.platformVersion,
+    arch: sku.arch,
+    hardwareConcurrency: sku.hardwareConcurrency,
+    deviceMemory: sku.deviceMemory,
+    screen: sku.screen,
+    webglUnmaskedVendor: sku.webglUnmaskedVendor,
+    webglUnmaskedRenderer: sku.webglUnmaskedRenderer,
+    canvasImage: generateCanvasPngDataUrl(),
+    audioJitter,
   };
 }
 const fp = generateFingerprint();
@@ -183,7 +376,7 @@ function injectRequestHeaders(request) {
   try {
     h.set("sec-ch-ua", '"Chromium";v="' + fp.uaMajor + '", "Not)A;Brand";v="24"');
     h.set("sec-ch-ua-mobile", "?0");
-    h.set("sec-ch-ua-platform", '"Linux"');
+    h.set("sec-ch-ua-platform", '"' + fp.chPlatform + '"');
     h.set("user-agent", fp.userAgent);
     h.set("accept-language", "en-US,en;q=0.9");
     h.set("referer", "https://zcode.z.ai/");
@@ -1096,12 +1289,14 @@ function applyPolyfills(w) {
         const len = this.length || 44100;
         const sr = this.sampleRate || 44100;
         const buf = new Float32Array(len);
+        const jitter = fp.audioJitter || 0;
         for (let i = 0; i < len; i += 1) {
           const t = i / sr;
           buf[i] =
             Math.sin(2 * Math.PI * 1000 * t) * Math.exp(-t * 1.2) * 0.6 +
             Math.sin(2 * Math.PI * 3000 * t) * Math.exp(-t * 1.5) * 0.25 +
-            Math.sin(2 * Math.PI * 5000 * t) * Math.exp(-t * 2.0) * 0.12;
+            Math.sin(2 * Math.PI * 5000 * t) * Math.exp(-t * 2.0) * 0.12 +
+            jitter;
         }
         return Promise.resolve({
           numberOfChannels: 1,
@@ -1178,8 +1373,8 @@ function applyPolyfills(w) {
     languages: ["en-US", "en"],
     vendor: "Google Inc.",
     webdriver: false,
-    hardwareConcurrency: 12,
-    deviceMemory: 8,
+    hardwareConcurrency: fp.hardwareConcurrency,
+    deviceMemory: fp.deviceMemory,
     maxTouchPoints: 0,
     cookieEnabled: true,
     plugins: plugins.plugins,
@@ -1230,7 +1425,7 @@ function applyPolyfills(w) {
         { brand: "Not)A;Brand", version: "24" },
       ],
       mobile: false,
-      platform: "Linux",
+      platform: fp.chPlatform,
       getHighEntropyValues: () =>
         Promise.resolve({
           brands: [
@@ -1238,9 +1433,9 @@ function applyPolyfills(w) {
             { brand: "Not)A;Brand", version: "24" },
           ],
           mobile: false,
-          platform: "Linux",
-          platformVersion: "6.5.0",
-          architecture: "x86",
+          platform: fp.chPlatform,
+          platformVersion: fp.platformVersion,
+          architecture: fp.arch,
           model: "",
           uaFullVersion: fp.uaFull,
           fullVersionList: [
@@ -1315,7 +1510,7 @@ function applyPolyfills(w) {
   const screenPatch = {
     width: fp.screen.w,
     height: fp.screen.h,
-    availWidth: fp.screen.w,
+    availWidth: fp.screen.aw,
     availHeight: fp.screen.ah,
     availLeft: 0,
     availTop: 0,
@@ -1333,7 +1528,7 @@ function applyPolyfills(w) {
   w.outerHeight = fp.screen.h - 40;
   w.innerWidth = fp.screen.w - 16;
   w.innerHeight = fp.screen.h - 120;
-  w.devicePixelRatio = 1;
+  w.devicePixelRatio = fp.screen.dpr || 1;
 }
 
 function createNavigatorPlugins(w) {
@@ -1455,7 +1650,7 @@ async function createDom(region, prefix) {
           "User-Agent": fp.userAgent,
           "sec-ch-ua": '"Chromium";v="' + fp.uaMajor + '", "Not)A;Brand";v="24"',
           "sec-ch-ua-mobile": "?0",
-          "sec-ch-ua-platform": '"Linux"',
+          "sec-ch-ua-platform": '"' + fp.chPlatform + '"',
           "Accept-Language": "en-US,en;q=0.9",
         },
       });
@@ -1498,7 +1693,7 @@ async function createDom(region, prefix) {
       enableImageFileLoading: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,
       navigator: { userAgent: fp.userAgent },
-      viewport: { width: fp.screen.w, height: fp.screen.h, devicePixelRatio: 1 },
+      viewport: { width: fp.screen.w, height: fp.screen.h, devicePixelRatio: fp.screen.dpr || 1 },
       fetch: {
         disableSameOriginPolicy: true,
         interceptor,

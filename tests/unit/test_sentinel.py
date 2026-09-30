@@ -110,8 +110,8 @@ async def test_sentinel_discover_new_plan_and_claim(monkeypatch):
     assert res["ok"] is True
     assert len(res["new_plans"]) == 1
     assert res["new_plans"][0]["plan_id"] == "plan_spring_5m"
-    # 验证全池顺序抢领触发
-    assert claimed_accounts == ["acc1", "acc2"]
+    # 验证全池顺序抢领触发（同优先级随机打散后全集覆盖）
+    assert sorted(claimed_accounts) == ["acc1", "acc2"]
     # 验证 Bark 通知触发
     assert len(sent_notifications) == 1
     assert "新春特惠赠送" in sent_notifications[0]["body"]
@@ -280,5 +280,56 @@ async def test_sentinel_bark_failure_retains_unseen_until_delivered(monkeypatch)
     await s.check_once()
     assert "plan_0930" in store.get_seen_plan_ids()
     assert bark_attempt == 2
+
+
+@pytest.mark.asyncio
+async def test_sentinel_rotates_probe_across_active_accounts(monkeypatch):
+    """验证多轮巡检时探针在多个 ACTIVE 账号间随机打散轮转，不会永远固定消耗第 1 个账号。"""
+    accounts = []
+    for i in range(4):
+        acc = Account.create("zai", f"active_{i}", f"t{i}")
+        acc.mode = "jwt"
+        acc.jwt_token = f"ey...jwt{i}"
+        acc.status = Status.ACTIVE
+        accounts.append(acc)
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: list(accounts))
+    store.add_seen_plan_ids(["plan_0930"])
+
+    probed_names: set[str] = set()
+
+    async def mock_preview(a):
+        probed_names.add(a.name)
+        return [{"plan_id": "plan_0930", "name": "Trust Build", "priority": 10, "grants": []}]
+
+    monkeypatch.setattr("app.sentinel.preview_plans", mock_preview)
+    monkeypatch.setattr(asyncio, "sleep", _noop)
+
+    s = Sentinel()
+    for _ in range(20):
+        await s.check_once()
+
+    # 20 轮巡检在 4 个 ACTIVE 账号间随机轮转，必然覆盖超过 1 个探针账号
+    assert len(probed_names) > 1
+
+
+def test_solver_js_polymorphic_self_consistent_fingerprint():
+    """验证 captcha_node/solver.js 已彻底移除跨层 Linux 硬编码矛盾，且具备多态桌面 SKU 与动态 Canvas PNG 生成。"""
+    from pathlib import Path
+
+    solver_path = Path(__file__).resolve().parents[2] / "captcha_node" / "solver.js"
+    content = solver_path.read_text(encoding="utf-8")
+
+    # 1. 不再存在任何 sec-ch-ua-platform 或 userAgentData 的 "Linux" 硬编码
+    assert '"sec-ch-ua-platform", \'"Linux"\'' not in content
+    assert '"sec-ch-ua-platform": \'"Linux"\'' not in content
+    assert 'platform: "Linux"' not in content
+
+    # 2. 统一引用 fp.chPlatform / fp.platformVersion / fp.arch 并内置动态 Canvas PNG 与多态 DESKTOP_SKUS
+    assert "fp.chPlatform" in content
+    assert "fp.platformVersion" in content
+    assert "fp.arch" in content
+    assert "generateCanvasPngDataUrl" in content
+    assert "DESKTOP_SKUS" in content
 
 

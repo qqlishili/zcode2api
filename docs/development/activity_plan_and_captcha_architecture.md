@@ -86,7 +86,7 @@
 
 ---
 
-## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.18 演进）
+## 4. 架构加固与对抗防线（v2.5.16 ~ v2.5.19 演进）
 
 ### 4.1 彻底切断自动呼起与提交死循环链
 - **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
@@ -103,12 +103,14 @@
   3. **切换门禁**：下拉框切至已持有账号时，容器降级展示友好提示并阻断验证码实例化；
   4. **提交门禁**：`submitManualClaim` 最终兜底校验目标套餐持有状态，已持有则关闭弹窗并提示。
 
-### 4.3 Node 端求解器硬件脱敏（对抗 3012 虚拟机识别）
-- **现象归因**：`captcha_node/solver.js` 原硬编码了 `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)...))` 软渲染器与单像素 1x1 图片，触发阿里云对 CI/虚拟机特征的强风控拦截（3012）。
+### 4.3 Node 端求解器硬件脱敏与多态自洽指纹池（v2.5.16 & v2.5.19）
+- **现象归因**：
+  1. 早期版本硬编码了 `SwiftShader` 软渲染器与 1x1 单像素图，且虽在 `generateFingerprint()` 中将 `navigator.platform` 改为 `"Win32"`，但在 `injectRequestHeaders`、`createDom` 与 `navigator.userAgentData` 中仍残留 `"sec-ch-ua-platform": '"Linux"'` 与 `platform: "Linux", platformVersion: "6.5.0"`，形成跨层平台特征精神分裂；
+  2. 每次求解均复用完全相同的静态 `canvasImage` Base64 字符串与单一硬件配置，导致全池多账号短时间集中领取时，上游解密 `verifyParam` 发现所有验证码来自同一 Canvas 哈希与单一静态浏览器环境。
 - **治理方案**：
-  1. 升级为真实独立显卡：`ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)` 与 `Google Inc. (NVIDIA)`；
-  2. 桌面硬件环境对齐：`platform: "Win32"`，屏幕工作区 1920×1040（扣除 40px 任务栏）；
-  3. 真实 Canvas 指纹：使用具备真实 RGBA 噪点特征的 32×32 图块替代单像素图。
+  1. **跨层平台特征 100% 归一化自洽**：彻底清除 `"Linux"` 硬编码，`sec-ch-ua-platform`、`navigator.userAgentData.platform`、`platformVersion`、`architecture`、`hardwareConcurrency`、`deviceMemory`、`screen.availWidth`、`devicePixelRatio` 全部统一从当前抽样的 `fp` 实例动态读取；
+  2. **多态桌面硬件 SKU 池（`DESKTOP_SKUS` × `CHROME_VERSIONS`）**：涵盖 Chrome `127~131`、Windows 10/11（NVIDIA RTX 3060 / 4060 / 3070 / GTX 1660 SUPER、AMD RX 6700 XT、Intel Iris Xe）与 macOS Sonoma/Sequoia（Apple M2 / M3 / M2 Pro）共 45 种自洽桌面组合，每次子进程求解随机抽样；
+  3. **一码一指纹动态微噪点（`generateCanvasPngDataUrl` + `audioJitter`）**：每次求解通过 `crypto.randomBytes` 与 `zlib.deflateSync` 实时合成带随机微噪点的唯一 32×32 RGBA PNG DataURL 及离线音频微抖动，彻底消除多账号验证码 Canvas 哈希碰撞。
 
 ### 4.4 模态框生命周期与实例清理
 - 模态框遮罩点击统一收敛至 `closeClaimModal()`；
@@ -133,6 +135,14 @@
   1. **传输层瞬态退避重试（`app/notify.py`）**：默认超时提升至 `12.0s`，内置 2 次指数退避重试（仅针对超时/网络异常/5xx 重试；遇 4xx 立即熔断防触发 Bark 官方 IP 封禁）；
   2. **确认送达后落库（`app/sentinel.py`）**：仅当 Bark 推送成功（或未配置 Bark / 连续 3 轮巡检失败兜底）时才将 `plan_id` 写入 `sentinel_seen_plans`，且重推轮次自动将已领账号识别为“已持有(成功)”；
   3. **全链路领取成功战报归一化（`notify_claim_outcomes` / `schedule_claim_notification`）**：统一提取非 `skipped` 的真实新领成功项，覆盖哨兵自动补领、入池自动领取、后台一键领取与手动滑块领取四大场景，Web 接口采用后台强引用 Task 异步非阻塞投递。
+
+### 4.7 哨兵探针轮转与批量领取节流防限流（v2.5.19）
+- **现象归因**：
+  1. `Sentinel.check_once()` 原先仅按状态排序而未打散同优先级账号，导致每 30 分钟一次的 `preview_plans` 探针永远固定由列表第 1 个 `ACTIVE` 账号独自承压（全天 48 次），且抢领顺序永远固定；
+  2. `POST /admin/api/claim` 批量接口在多账号循环中从预解池瞬时取出多枚验证码后，以 0ms 间隔背靠背瞬发 `POST /billing/claim`。
+- **治理方案**：
+  1. **同优先级随机轮转**：`Sentinel.check_once()` 在探针筛选与全池抢领前先执行 `random.shuffle` 再按 `ACTIVE` 优先稳定排序，使巡检探针与抢领顺序在池内均匀分摊；
+  2. **批量领取离散抖动节流**：`POST /admin/api/claim` 在多账号连续向上游发起 `do_claim` 之间自动注入 `0.6~1.5s` 随机抖动延时，与哨兵抢领节流策略完全对齐。
 
 
 

@@ -94,11 +94,12 @@ class Sentinel:
         """执行单次活动巡检与差量闭环处理，返回探测与抢领结果摘要。"""
         import time
 
-        # 1. 筛选候选可计费 JWT 账号（含 ACTIVE 与 EXHAUSTED，优先 ACTIVE 作为探针）
+        # 1. 筛选候选可计费 JWT 账号（含 ACTIVE 与 EXHAUSTED，同优先级随机打散轮转分摊探针压力，优先 ACTIVE）
         candidates = [
             a for a in store.list_accounts("zai")
             if a.allows_billing() and not a.is_claim_blocked()
         ]
+        random.shuffle(candidates)
         candidates.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
         if not candidates:
             logs.info("sentinel", "未找到可用的 JWT 账号用于活动探测，跳过本次巡检")
@@ -178,7 +179,7 @@ class Sentinel:
 
         logs.ok("sentinel", f"🎉 发现 {len(new_plans)} 个全新活动套餐: {[p.get('name') or p['plan_id'] for p in new_plans]}")
 
-        # 4. 单并发顺序串行 + 抖动执行全池自动抢领（包含 ACTIVE 与 EXHAUSTED 账号，严格保护验证码预解池与 Node Solver）
+        # 4. 单并发顺序串行 + 同优先级随机打散 + 抖动执行全池自动抢领（包含 ACTIVE 与 EXHAUSTED 账号，严格保护验证码预解池与 Node Solver）
         claim_reports: list[dict] = []
         new_pids_lower = {str(p.get("plan_id") or "").strip().lower() for p in new_plans if p.get("plan_id")}
         if store.sentinel_auto_claim():
@@ -186,6 +187,8 @@ class Sentinel:
                 a for a in store.list_accounts("zai")
                 if a.allows_billing()
             ]
+            random.shuffle(all_jwt)
+            all_jwt.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
             for acc in all_jwt:
                 if acc.is_claim_blocked():
                     claim_reports.append({"name": acc.name, "result": "1005避让中"})

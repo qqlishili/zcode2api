@@ -290,7 +290,7 @@ class TestBonusActive:
                                     "total_units": 5_000_000,
                                     "used_units": 0,
                                     "remaining_units": 5_000_000,
-                                    "expires_at": 1790697599,
+                                    "expires_at": int(time.time()) + 86400,
                                 }
                             ]
                         },
@@ -319,7 +319,7 @@ class TestBonusActive:
                 "total": 5_000_000,
                 "used": 100_000,
                 "remaining": 4_900_000,
-                "expires_at": 1790697599,
+                "expires_at": int(time.time()) + 86400,
             }
         }
         acc.status = Status.ACTIVE

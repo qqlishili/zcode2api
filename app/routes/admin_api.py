@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 
 import httpx
@@ -496,6 +497,7 @@ async def claim(payload: dict = Body(default=None)):
          "message": billing_block_reason(a) or AUTH_EXPIRED_MESSAGE}
         for a in candidates if not a.allows_billing()
     ]
+    claimed_attempts = 0
     for acc in candidates:
         if not acc.allows_billing():
             continue
@@ -510,6 +512,11 @@ async def claim(payload: dict = Body(default=None)):
                 "message": "已持有该套餐，已自动跳过",
             })
             continue
+
+        if claimed_attempts > 0:
+            # 批量多账号连续请求上游领取时注入离散随机抖动，消除 0ms 瞬发群聚特征
+            await asyncio.sleep(random.uniform(0.6, 1.5))
+        claimed_attempts += 1
 
         try:
             result = await do_claim(acc, plan_id)
