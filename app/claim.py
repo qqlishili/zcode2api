@@ -277,6 +277,14 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
         if str(p.get("plan_id") or "").strip().lower() not in held
     ]
     if not unclaimed:
+        if account.claimable_plans:
+            from .store import store
+
+            account.claimable_plans = []
+            live = store.find(account.provider, account.id)
+            if live is not None:
+                live.claimable_plans = []
+                store.update_account(live)
         logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
         return outcomes
 
