@@ -15,12 +15,14 @@ from ..captcha import CaptchaSolveError
 from ..claim import (
     AUTH_EXPIRED_MESSAGE,
     ClaimError,
+    _norm_plan_id,
     account_held_plan_ids,
     auto_claim_all_plans,
     billing_block_reason,
     claim_with_captcha,
     preview_plans,
     report_activation_events,
+    sync_account_claimable_plans,
 )
 from ..claim import claim as do_claim
 from ..install import run_install_sequence_for_account
@@ -220,22 +222,13 @@ async def claim_refresh_one(account_id: str):
     if blocked:
         return {"ok": False, "message": blocked, "plans": acc.claimable_plans, "account": acc.public_view()}
     try:
-        from ..claim import account_held_plan_ids, preview_plans, report_activation_events
-
         try:
             await asyncio.wait_for(report_activation_events(acc), timeout=5.0)
         except Exception as act_err:
             logs.warn("claim", f"账号 {acc.name} 激活上报跳过: {act_err}")
 
         plans = await asyncio.wait_for(preview_plans(acc), timeout=8.0)
-        held_ids = account_held_plan_ids(acc)
-        unclaimed = [
-            p for p in plans
-            if isinstance(p, dict)
-            and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_ids
-        ]
-        acc.claimable_plans = unclaimed
-        store.update_account(acc)
+        unclaimed = sync_account_claimable_plans(acc, plans)
         return {"ok": True, "plans": unclaimed, "account": acc.public_view()}
     except Exception as err:
         logs.warn("claim", f"账号 {acc.name} 探测活动失败: {err}")
@@ -503,6 +496,7 @@ async def claim_preview(account_id: str | None = None):
             activation_error = str(err)
         try:
             plans = await preview_plans(acc)
+            sync_account_claimable_plans(acc, plans)
             out.append({"account_id": acc.id, "account_name": acc.name,
                         "plans": plans, "error": None,
                         "activated": activation_error is None,
@@ -539,7 +533,7 @@ async def claim(payload: dict = Body(default=None)):
         if not acc.allows_billing():
             continue
         held = account_held_plan_ids(acc)
-        if plan_id and plan_id.strip().lower() in held:
+        if plan_id and _norm_plan_id(plan_id) in held:
             outcomes.append({
                 "account_id": acc.id,
                 "account_name": acc.name,
@@ -594,6 +588,7 @@ async def claim(payload: dict = Body(default=None)):
                              "ok": False, "message": str(err)})
             continue
         await refresh_accounts([acc])
+        sync_account_claimable_plans(acc, extra_held_ids={result.get("plan_id") or plan_id or ""})
         outcomes.append({"account_id": acc.id, "account_name": acc.name,
                          "ok": True, **result})
     from ..notify import schedule_claim_notification
@@ -646,6 +641,7 @@ async def claim_manual(payload: dict = Body(...)):
                               "ok": False, "message": str(err)}],
                 "summary": {"ok": 0, "fail": 1}}
     await fetch_quota(acc, include_claimable=True)
+    sync_account_claimable_plans(acc, extra_held_ids={result.get("plan_id") or plan_id or ""})
     outcomes = [{"account_id": acc.id, "account_name": acc.name, "ok": True, **result}]
     from ..notify import schedule_claim_notification
 

@@ -237,6 +237,120 @@ async def report_activation_events(account: Account) -> str | None:
     return None
 
 
+def _norm_plan_id(plan_or_id: dict | str | None) -> str:
+    """归一化提取小写去空格的套餐 ID（兼容 dict 的 plan_id / planId / pid 及字符串）。"""
+    if isinstance(plan_or_id, dict):
+        raw = plan_or_id.get("plan_id") or plan_or_id.get("planId") or plan_or_id.get("pid") or ""
+    else:
+        raw = plan_or_id or ""
+    return str(raw).strip().lower()
+
+
+def is_base_plan_id(plan_id: str | dict | None) -> bool:
+    """是否为基础/体验套餐（非限时大促活动）。"""
+    return _norm_plan_id(plan_id) in ("zcode-v3-start-plan", "zcode-v3-start-plan-0817", "default")
+
+
+def account_held_plan_ids(account: Account) -> set[str]:
+    """提取账号当前已持有/生效的套餐 plan_id 集合（小写去空格）。"""
+    held = set()
+    for pl in getattr(account, "plans", []) or []:
+        pid = _norm_plan_id(pl)
+        if pid:
+            held.add(pid)
+    for slot in getattr(account, "plan_slots", []) or []:
+        pid = _norm_plan_id(slot)
+        if pid and pid != "default":
+            held.add(pid)
+    return held
+
+
+def filter_unclaimed_plans(
+    account: Account,
+    plans: list[dict] | None,
+    *,
+    extra_held_ids: set[str] | None = None,
+) -> list[dict]:
+    """过滤出账号当前尚未持有的有效活动套餐列表（保序去重）。"""
+    if not plans:
+        return []
+    held = account_held_plan_ids(account)
+    if extra_held_ids:
+        held |= {_norm_plan_id(pid) for pid in extra_held_ids if _norm_plan_id(pid)}
+    seen: set[str] = set()
+    unclaimed: list[dict] = []
+    for p in plans:
+        if not isinstance(p, dict):
+            continue
+        pid = _norm_plan_id(p)
+        if not pid or pid in held or pid in seen:
+            continue
+        seen.add(pid)
+        unclaimed.append(p)
+    return unclaimed
+
+
+def sync_account_claimable_plans(
+    account: Account,
+    plans: list[dict] | None = None,
+    *,
+    extra_held_ids: set[str] | None = None,
+    persist: bool = True,
+) -> list[dict]:
+    """归一化收口：将候选活动剔除已持有项后同步写入 account.claimable_plans 并按需落库。"""
+    from .store import store
+
+    live = store.find(account.provider, account.id) if persist else None
+    combined_held = account_held_plan_ids(account)
+    if live is not None and live is not account:
+        combined_held |= account_held_plan_ids(live)
+    if extra_held_ids:
+        combined_held |= {_norm_plan_id(pid) for pid in extra_held_ids if _norm_plan_id(pid)}
+
+    source = (
+        plans
+        if plans is not None
+        else (getattr(account, "claimable_plans", None) or (getattr(live, "claimable_plans", None) if live else None) or [])
+    )
+    unclaimed = filter_unclaimed_plans(account, source, extra_held_ids=combined_held)
+    changed = (getattr(account, "claimable_plans", None) != unclaimed) or (
+        live is not None and getattr(live, "claimable_plans", None) != unclaimed
+    )
+    account.claimable_plans = unclaimed
+    if live is not None:
+        live.claimable_plans = unclaimed
+        if persist and changed:
+            store.update_account(live)
+    return unclaimed
+
+
+def sync_pool_claimable_plans(
+    plans: list[dict] | None,
+    accounts: list[Account] | None = None,
+) -> None:
+    """将探针发现的有效非基础活动套餐广播同步至池内可计费 JWT 账号的 claimable_plans。
+
+    确保单账号探针探测到上游活动后，即便其余账号处于 3012 冷却、1005 避让或尚未轮到领取，
+    其待领状态也能立即落库并在管理台渲染活动领取 Icon。
+    """
+    if not plans:
+        return
+    promo_plans = [
+        p for p in plans
+        if isinstance(p, dict) and _norm_plan_id(p) and not is_base_plan_id(p)
+    ]
+    if not promo_plans:
+        return
+    from .store import store
+
+    targets = accounts if accounts is not None else [
+        a for a in store.list_accounts("zai") if a.allows_billing()
+    ]
+    for acc in targets:
+        merged = [*promo_plans, *(getattr(acc, "claimable_plans", None) or [])]
+        sync_account_claimable_plans(acc, merged)
+
+
 async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | None = None) -> list[dict]:
     """新账号入池或哨兵自动领取：激活上报 + 逐个领取全部可领套餐。
 
@@ -271,20 +385,9 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
         logs.info("claim", f"账号 {account.name} 上游无投放套餐，跳过领取")
         return outcomes
 
-    held = account_held_plan_ids(account)
-    unclaimed = [
-        p for p in plans
-        if str(p.get("plan_id") or "").strip().lower() not in held
-    ]
+    # 探查完成立即将未持有套餐落库，确保后续即便全部领取失败（如 3012），页面也能显示待领 Icon
+    unclaimed = sync_account_claimable_plans(account, plans)
     if not unclaimed:
-        if account.claimable_plans:
-            from .store import store
-
-            account.claimable_plans = []
-            live = store.find(account.provider, account.id)
-            if live is not None:
-                live.claimable_plans = []
-                store.update_account(live)
         logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
         return outcomes
 
@@ -329,34 +432,13 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
         except Exception as q_err:  # noqa: BLE001
             logs.warn("claim", f"账号 {account.name} 自动领取后刷新额度跳过: {q_err}")
 
-    from .store import store
-
-    live = store.find(account.provider, account.id)
-    target_acc = live if live is not None else account
     claimed_ok_ids = {
-        str(o.get("plan_id") or "").strip().lower()
+        _norm_plan_id(o)
         for o in outcomes
         if o.get("ok") or "已经领取过" in str(o.get("message") or "")
     }
-    held_now = account_held_plan_ids(target_acc) | claimed_ok_ids
-    remaining_claimable = [
-        p for p in unclaimed
-        if isinstance(p, dict)
-        and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_now
-    ]
-    if target_acc.claimable_plans != remaining_claimable:
-        target_acc.claimable_plans = remaining_claimable
-        account.claimable_plans = remaining_claimable
-        if live is not None:
-            store.update_account(live)
-
+    sync_account_claimable_plans(account, unclaimed, extra_held_ids=claimed_ok_ids)
     return outcomes
-
-
-def is_base_plan_id(plan_id: str) -> bool:
-    """是否为基础/体验套餐（非限时大促活动）。"""
-    pid = plan_id.lower().strip()
-    return pid in ("zcode-v3-start-plan", "zcode-v3-start-plan-0817", "default")
 
 
 def pool_active_plans(now: float | None = None) -> list[dict]:
@@ -370,24 +452,7 @@ def pool_active_plans(now: float | None = None) -> list[dict]:
     now_ts = now if now is not None else time.time()
     known: dict[str, dict] = {}
     for a in store.list_accounts():
-        # 1. 已生效套餐
-        for raw in getattr(a, "plans", []) or []:
-            if not isinstance(raw, dict):
-                continue
-            pid = str(raw.get("plan_id") or raw.get("planId") or "").strip()
-            if not pid or is_base_plan_id(pid):
-                continue
-            ends = float(raw.get("ends_at") or raw.get("expires_at") or 0)
-            if ends and ends <= now_ts:
-                continue
-            parsed = parse_plan(raw)
-            if parsed:
-                parsed["ends_at"] = ends
-                if pid not in known or parsed["priority"] > known[pid]["priority"]:
-                    known[pid] = parsed
-
-        # 2. 曾探测到的可领活动
-        for raw in getattr(a, "claimable_plans", []) or []:
+        for raw in (*(getattr(a, "plans", []) or []), *(getattr(a, "claimable_plans", []) or [])):
             if not isinstance(raw, dict):
                 continue
             pid = str(raw.get("plan_id") or raw.get("planId") or "").strip()
@@ -409,10 +474,11 @@ def pool_active_plans(now: float | None = None) -> list[dict]:
 
 
 async def preview_plans(account: Account) -> list[dict]:
-    """拉取账号当前可领取套餐，按优先级降序。
+    """拉取账号当前可领取套餐，按优先级降序，并同步持久化待领状态。
 
     优先请求上游 /billing/preview；若上游接口返回空（如临时大促未投放 preview
     或非特定参数下不下发），自动回退池内已知有效活动作为候选，确保池内经验共享。
+    探查完成后立即同步写入当前账号及池内可计费账号的 claimable_plans。
     """
     blocked = billing_block_reason(account, action="上游查询")
     if blocked:
@@ -443,55 +509,48 @@ async def preview_plans(account: Account) -> list[dict]:
 
     # 合并上游 plans 与池内已知有效活动（上游优先）
     merged_map: dict[str, dict] = {}
-    for p in upstream_plans:
-        pid = str(p.get("plan_id") or "").strip().lower()
-        if pid:
-            merged_map[pid] = p
-
-    for p in pool_active_plans():
-        pid = str(p.get("plan_id") or "").strip().lower()
+    for p in (*upstream_plans, *pool_active_plans()):
+        pid = _norm_plan_id(p)
         if pid and pid not in merged_map:
             merged_map[pid] = p
 
     plans = list(merged_map.values())
     plans.sort(key=lambda p: (-p["priority"], p["plan_id"]))
+    # 探查即落库：当前账号同步全量未领套餐，同时将非基础活动广播至池内其余可计费账号
+    sync_account_claimable_plans(account, plans)
+    sync_pool_claimable_plans(plans)
     return plans
 
 
-def account_held_plan_ids(account: Account) -> set[str]:
-    """提取账号当前已持有/生效的套餐 plan_id 集合（小写去空格）。"""
-    held = set()
-    for pl in getattr(account, "plans", []) or []:
-        if isinstance(pl, dict):
-            pid = str(pl.get("plan_id") or pl.get("planId") or "").strip().lower()
-            if pid:
-                held.add(pid)
-    for slot in getattr(account, "plan_slots", []) or []:
-        if isinstance(slot, dict):
-            pid = str(slot.get("pid") or "").strip().lower()
-            if pid and pid != "default":
-                held.add(pid)
-    return held
-
-
 async def _auto_pick_plan(account: Account, plan_id: str | None) -> tuple[str, str, list]:
-    """plan_id 为空时 preview 自动选优先级最高的未领套餐。返回 (plan_id, plan_name, grants)。"""
+    """plan_id 为空时 preview 自动选优先级最高的未领套餐，并在探查后立即同步 claimable_plans。"""
     if plan_id:
         pid_clean = plan_id.strip()
+        pid_norm = _norm_plan_id(pid_clean)
         for p in pool_active_plans():
-            if str(p.get("plan_id") or "").strip().lower() == pid_clean.lower():
+            if _norm_plan_id(p) == pid_norm:
+                merged = [p, *(getattr(account, "claimable_plans", None) or [])]
+                sync_account_claimable_plans(account, merged)
                 return pid_clean, p.get("name") or pid_clean, p.get("grants") or []
         return pid_clean, pid_clean, []
 
     plans = await preview_plans(account)
-    held = account_held_plan_ids(account)
-    unclaimed = [p for p in plans if str(p.get("plan_id") or "").strip().lower() not in held]
+    unclaimed = sync_account_claimable_plans(account, plans)
     if not unclaimed:
         if plans:
             raise ClaimError("该账号已领取过当前所有可用活动套餐", code=1003)
         raise ClaimError("当前暂无可领取的活动套餐")
     best = unclaimed[0]
     return best["plan_id"], best["name"] or best["plan_id"], best["grants"]
+
+
+def _ensure_claimable_account(account: Account) -> None:
+    """领取前置栅栏：校验账号为可计费 JWT 账号且未处于冷却/1005 避让期。"""
+    if not (account.mode == "jwt" and account.jwt_token):
+        raise ClaimError("仅 Coding Plan (JWT) 账号支持领取")
+    blocked = billing_block_reason(account)
+    if blocked:
+        raise ClaimError(blocked)
 
 
 def _claim_headers(account: Account, verify_param: str, region: str | None) -> dict:
@@ -512,21 +571,24 @@ def _claim_headers(account: Account, verify_param: str, region: str | None) -> d
 
 
 async def _post_claim(account: Account, headers: dict, plan_id: str) -> dict:
-    """提交 billing/claim 并翻译业务码。"""
+    """提交单次 billing/claim 并统一处理成功/1003 已领剔除与 1005 避让标记。"""
     body = await _billing_request(
         account, "POST", "/billing/claim",
         headers=headers, json={"plan_id": plan_id},
     )
     code = _business_code(body)
-    if code != 0:
-        err = _fail_error(code, body)
-        if code == 1005:
-            _mark_claim_blocked(account, err.next_at)
-            blocked_ts = account.claim_blocked_until or time.time()
-            dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
-            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}", code=1005, next_at=err.next_at)
-        raise err
-    return body
+    if code == 0:
+        sync_account_claimable_plans(account, extra_held_ids={plan_id})
+        return body
+    err = _fail_error(code, body)
+    if code == 1003:
+        sync_account_claimable_plans(account, extra_held_ids={plan_id})
+    elif code == 1005:
+        _mark_claim_blocked(account, err.next_at)
+        blocked_ts = account.claim_blocked_until or time.time()
+        dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
+        raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}", code=1005, next_at=err.next_at)
+    raise err
 
 
 def _claim_outcome(body: dict, plan_id: str, plan_name: str, grants: list) -> dict:
@@ -561,11 +623,7 @@ async def claim_with_captcha(
 
     plan_id 缺省时先 preview 自动选优先级最高套餐（无需验证码）。
     """
-    if not (account.mode == "jwt" and account.jwt_token):
-        raise ClaimError("仅 Coding Plan (JWT) 账号支持领取")
-    blocked = billing_block_reason(account)
-    if blocked:
-        raise ClaimError(blocked)
+    _ensure_claimable_account(account)
     if not (verify_param or "").strip():
         raise ClaimError("缺少验证码参数，请先完成人机验证")
 
@@ -585,12 +643,7 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
     返回 {"plan_id", "plan_name", "grants", "starts_at", "ends_at", "server_time"}；
     3007（验证码失败）自动换码重试一次。
     """
-    if not (account.mode == "jwt" and account.jwt_token):
-        raise ClaimError("仅 Coding Plan (JWT) 账号支持领取")
-    blocked = billing_block_reason(account)
-    if blocked:
-        raise ClaimError(blocked)
-
+    _ensure_claimable_account(account)
     plan_id, plan_name, grants = await _auto_pick_plan(account, plan_id)
     if report_activation:
         try:
@@ -602,24 +655,14 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
         verify_param, verify_region = await captcha_manager.get_verify_param()
         config = await captcha_manager.fetch_config()
         headers = _claim_headers(account, verify_param, verify_region or config.get("region"))
-
-        body = await _billing_request(
-            account, "POST", "/billing/claim",
-            headers=headers, json={"plan_id": plan_id},
-        )
-        code = _business_code(body)
-        if code == 0:
+        try:
+            body = await _post_claim(account, headers, plan_id)
             return _claim_outcome(body, plan_id, plan_name, grants)
-        err = _fail_error(code, body)
-        if code == 1005:
-            _mark_claim_blocked(account, err.next_at)
-            blocked_ts = account.claim_blocked_until or time.time()
-            dt_str = datetime.fromtimestamp(blocked_ts, tz=_TZ_BEIJING).strftime("%H:%M:%S")
-            raise ClaimError(f"今日领取名额已用完，已自动避让至次日 {dt_str}", code=1005, next_at=err.next_at)
-        if code == 3007 and attempt == 1:
-            logs.warn("claim", f"账号 {account.name} 验证码被拒，换码重试")
-            captcha_manager.invalidate()
-            last_err = err
-            continue
-        raise err
+        except ClaimError as err:
+            if err.code == 3007 and attempt == 1:
+                logs.warn("claim", f"账号 {account.name} 验证码被拒，换码重试")
+                captcha_manager.invalidate()
+                last_err = err
+                continue
+            raise
     raise last_err or ClaimError("领取失败")

@@ -421,4 +421,90 @@ async def test_sentinel_probe_reports_activation_and_records_fail_cooldown(monke
         "result": "失败(机房环境被上游风控拦截(3012)，请使用浏览器滑块手动领取)",
     }]
     assert (acc.id, "zcode-v3-start-plan-trust-1001") in s._catchup_cooldown
+    # 即使自动抢领遇 3012 失败，账号的 claimable_plans 也必须保留该待领活动供前端渲染 Icon
+    assert [p["plan_id"] for p in acc.claimable_plans] == ["zcode-v3-start-plan-trust-1001"]
+
+
+@pytest.mark.asyncio
+async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatch):
+    """验证 preview_plans 探查即同步全池未持有账号的 claimable_plans，且 claim 遇 3012 失败保留待领项、成功或 1003 则剔除。"""
+    from app import claim as claim_module
+
+    acc_probe = Account.create("zai", "probe_acc", "t1")
+    acc_probe.mode = "jwt"
+    acc_probe.jwt_token = "ey...jwt1"
+    acc_probe.status = Status.ACTIVE
+    acc_probe.plans = [{"plan_id": "zcode-v3-start-plan-trust-1001", "name": "ZCode Trust Build"}]
+
+    acc_unclaimed = Account.create("zai", "国内-5735", "t2")
+    acc_unclaimed.mode = "jwt"
+    acc_unclaimed.jwt_token = "ey...jwt2"
+    acc_unclaimed.status = Status.EXHAUSTED
+    acc_unclaimed.plans = []
+    acc_unclaimed.claimable_plans = []
+
+    monkeypatch.setattr(store, "list_accounts", lambda provider=None: [acc_probe, acc_unclaimed])
+    monkeypatch.setattr(
+        store,
+        "find",
+        lambda provider, acc_id: acc_probe if acc_id == acc_probe.id else (acc_unclaimed if acc_id == acc_unclaimed.id else None),
+    )
+    monkeypatch.setattr(store, "update_account", lambda a: True)
+
+    async def mock_billing_req(account, method, path, **kwargs):
+        if path == "/billing/preview":
+            return {
+                "code": 0,
+                "data": {
+                    "plans": [{
+                        "plan_id": "zcode-v3-start-plan-trust-1001",
+                        "name": "ZCode Trust Build",
+                        "priority": 110,
+                        "entitlements": [{
+                            "meter": "model_usage",
+                            "unit_type": "token",
+                            "show_name": "GLM-5.3-Flash",
+                            "grant_units": 100000000,
+                            "period": "one_time",
+                        }],
+                    }]
+                },
+            }
+        # 模拟 POST /billing/claim 命中 3012 风控拦截
+        return {"code": 3012, "msg": "request has been blocked"}
+
+    class _DummyCaptcha:
+        async def get_verify_param(self):
+            return "v-param", "cn"
+
+        async def fetch_config(self):
+            return {"region": "cn"}
+
+        def invalidate(self):
+            pass
+
+    monkeypatch.setattr(claim_module, "_billing_request", mock_billing_req)
+    monkeypatch.setattr(claim_module, "captcha_manager", _DummyCaptcha())
+
+    # 1. 探针账号调用 preview_plans：自身已持有该活动故 claimable_plans 为空，而池内未持有的 国内-5735 立即获得待领项
+    plans = await claim_module.preview_plans(acc_probe)
+    assert len(plans) == 1
+    assert acc_probe.claimable_plans == []
+    assert [p["plan_id"] for p in acc_unclaimed.claimable_plans] == ["zcode-v3-start-plan-trust-1001"]
+
+    # 2. 国内-5735 调用 claim 遭遇 3012 抛错：claimable_plans 依然保留，供页面展示活动领取 Icon
+    acc_unclaimed.claimable_plans = []
+    with pytest.raises(claim_module.ClaimError) as exc_info:
+        await claim_module.claim(acc_unclaimed, report_activation=False)
+    assert exc_info.value.code == 3012
+    assert [p["plan_id"] for p in acc_unclaimed.claimable_plans] == ["zcode-v3-start-plan-trust-1001"]
+
+    # 3. 当手动滑块领取成功（code=0）时，claimable_plans 中的该活动立即被剔除
+    async def mock_billing_claim_ok(account, method, path, **kwargs):
+        return {"code": 0, "data": {"plan": {"starts_at": 1700000000, "ends_at": 1700086400}}}
+
+    monkeypatch.setattr(claim_module, "_billing_request", mock_billing_claim_ok)
+    await claim_module.claim_with_captcha(acc_unclaimed, "slider-ok", "cn", "zcode-v3-start-plan-trust-1001")
+    assert acc_unclaimed.claimable_plans == []
+
 

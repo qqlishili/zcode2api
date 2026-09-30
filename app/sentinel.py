@@ -11,20 +11,23 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
 from . import logs
 from .claim import (
     _TZ_BEIJING,
+    _norm_plan_id,
     account_held_plan_ids,
     auto_claim_all_plans,
     is_base_plan_id,
     pool_active_plans,
     preview_plans,
     report_activation_events,
+    sync_pool_claimable_plans,
 )
-from .models import Status
+from .models import Account, Status
 from .notify import notify_claim_outcomes, send_bark_notification
 from .store import store
 
@@ -98,7 +101,7 @@ class Sentinel:
             mmdd = dt.strftime("%m%d")
             has_new = bool((last_result or {}).get("new_plans"))
             seen_today = any(
-                str(pid).strip().lower().endswith(mmdd)
+                _norm_plan_id(pid).endswith(mmdd)
                 for pid in store.get_seen_plan_ids()
             )
             if not has_new and not seen_today:
@@ -152,29 +155,39 @@ class Sentinel:
             except asyncio.CancelledError:
                 break
 
-    async def check_once(self) -> dict[str, Any]:
-        """执行单次活动巡检与差量闭环处理，返回探测与抢领结果摘要。"""
-        now_ts = time.time()
-        # 顺手清理已到期的补领冷却记录
-        if self._catchup_cooldown:
-            expired_keys = [k for k, ts in self._catchup_cooldown.items() if ts <= now_ts]
-            for k in expired_keys:
-                self._catchup_cooldown.pop(k, None)
+    def _prune_expired_cooldown(self, now_ts: float) -> None:
+        """清理已到期的补领失败冷却记录。"""
+        if not self._catchup_cooldown:
+            return
+        for k in [k for k, ts in self._catchup_cooldown.items() if ts <= now_ts]:
+            self._catchup_cooldown.pop(k, None)
 
-        # 1. 筛选候选可计费 JWT 账号（含 ACTIVE 与 EXHAUSTED，同优先级随机打散轮转分摊探针压力，优先 ACTIVE）
+    def _record_cooldown(
+        self,
+        account_id: str,
+        plan_ids: Iterable[str | dict],
+        now_ts: float | None = None,
+    ) -> None:
+        """将指定账号与套餐标记进补领冷却窗口（6小时），防止连续撞击上游风控。"""
+        until = (now_ts if now_ts is not None else time.time()) + _CATCHUP_COOLDOWN_SEC
+        for item in plan_ids:
+            pid = _norm_plan_id(item)
+            if pid:
+                self._catchup_cooldown[(account_id, pid)] = until
+
+    @staticmethod
+    def _billable_candidates(*, include_claim_blocked: bool = False) -> list[Account]:
+        """筛选可计费 JWT 账号，同优先级随机打散并按 ACTIVE 优先排序。"""
         candidates = [
             a for a in store.list_accounts("zai")
-            if a.allows_billing() and not a.is_claim_blocked()
+            if a.allows_billing() and (include_claim_blocked or not a.is_claim_blocked())
         ]
         random.shuffle(candidates)
         candidates.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
-        if not candidates:
-            logs.info("sentinel", "未找到可用的 JWT 账号用于活动探测，跳过本次巡检")
-            return {"ok": False, "reason": "no_active_sentinel"}
+        return candidates
 
-        # 2. 单轮探针（上限 min(3, len(candidates)) 次，前置当日激活事件上报触发跨日投放资格，遇 401 标记失效并轮换下一位）
-        plans = None
-        sentinel_acc = None
+    async def _probe_upstream_plans(self, candidates: list[Account]) -> list[dict] | None:
+        """执行有界单轮探针（最多 3 个账号）：前置日活事件上报 + preview_plans。"""
         max_probe = min(3, len(candidates))
         for candidate in candidates[:max_probe]:
             try:
@@ -182,112 +195,101 @@ class Sentinel:
                     await asyncio.wait_for(report_activation_events(candidate), timeout=5.0)
                 except Exception as act_err:
                     logs.info("sentinel", f"探针账号 {candidate.name} 前置激活上报跳过: {act_err}")
-                plans = await preview_plans(candidate)
-                sentinel_acc = candidate
-                break
+                return await preview_plans(candidate)
             except Exception as err:
                 logs.warn("sentinel", f"账号 {candidate.name} 探测失败: {err}，尝试下一个探针")
+        logs.err("sentinel", f"连续 {max_probe} 次哨兵探针均失败，终止本轮巡检")
+        return None
 
-        if sentinel_acc is None or plans is None:
-            logs.err("sentinel", f"连续 {max_probe} 次哨兵探针均失败，终止本轮巡检")
-            return {"ok": False, "reason": "probe_exhausted"}
-
-        # 3. 差量对比已见活动（SQLite meta 表原子去重）
-        seen_ids = store.get_seen_plan_ids()
-        new_plans = [p for p in plans if p.get("plan_id") and p["plan_id"] not in seen_ids]
-
-        if not new_plans:
-            # 存量未领账号自动补领闭环：若开启自动抢领，检查池内是否有漏领当期有效活动的账号（如此前处于 EXHAUSTED 或网络抖动漏领）
-            catchup_reports: list[dict] = []
-            catchup_ok_outcomes: list[dict] = []
-            if store.sentinel_auto_claim():
-                now_ts = time.time()
-                active_pids = {
-                    str(p.get("plan_id") or "").strip().lower()
-                    for p in pool_active_plans(now_ts)
-                    if p.get("plan_id") and not is_base_plan_id(str(p.get("plan_id")))
-                }
-                for acc in candidates:
-                    held = account_held_plan_ids(acc)
-                    acc_claimable = {
-                        str(p.get("plan_id") or p.get("planId") or "").strip().lower()
-                        for p in (getattr(acc, "claimable_plans", None) or [])
-                        if isinstance(p, dict) and p.get("plan_id") and not is_base_plan_id(str(p.get("plan_id")))
-                    }
-                    target_pids = (active_pids | acc_claimable) - held
-                    # 过滤掉处于补领失败冷却期内的套餐
-                    pending_pids = [
-                        pid for pid in target_pids
-                        if self._catchup_cooldown.get((acc.id, pid), 0) <= now_ts
-                    ]
-                    if not pending_pids:
-                        continue
-                    try:
-                        await asyncio.sleep(random.uniform(0.6, 1.5))
-                        outcomes = await auto_claim_all_plans(acc)
-                        ok_items = [o for o in outcomes if o.get("ok")]
-                        if ok_items:
-                            catchup_reports.append({"name": acc.name, "result": f"补领成功{len(ok_items)}项"})
-                            for item in ok_items:
-                                catchup_ok_outcomes.append({"account_name": acc.name, **item})
-                        else:
-                            # 补领未成功则记入冷却，避免每轮巡检重复撞击上游风控
-                            for pid in pending_pids:
-                                self._catchup_cooldown[(acc.id, pid)] = time.time() + _CATCHUP_COOLDOWN_SEC
-                            catchup_reports.append({"name": acc.name, "result": "补领未果(已避让)"})
-                    except Exception as err:
-                        for pid in pending_pids:
-                            self._catchup_cooldown[(acc.id, pid)] = time.time() + _CATCHUP_COOLDOWN_SEC
-                        catchup_reports.append({"name": acc.name, "result": f"补领失败({err})"})
-
-            if catchup_reports:
-                logs.ok("sentinel", f"巡检完成，已为 {len(catchup_reports)} 个漏领账号执行自动补领: {catchup_reports}")
-                if catchup_ok_outcomes:
-                    await notify_claim_outcomes(catchup_ok_outcomes, source="哨兵自动补领")
-            else:
-                logs.info("sentinel", f"巡检完成，当前共 {len(plans)} 个上游套餐，无新活动")
-            return {"ok": True, "new_plans_count": 0, "plans_count": len(plans), "catchup_reports": catchup_reports}
-
-        logs.ok("sentinel", f"🎉 发现 {len(new_plans)} 个全新活动套餐: {[p.get('name') or p['plan_id'] for p in new_plans]}")
-
-        # 4. 单并发顺序串行 + 同优先级随机打散 + 抖动执行全池自动抢领（包含 ACTIVE 与 EXHAUSTED 账号，严格保护验证码预解池与 Node Solver）
-        claim_reports: list[dict] = []
-        new_pids_lower = {str(p.get("plan_id") or "").strip().lower() for p in new_plans if p.get("plan_id")}
+    async def _run_catchup_claims(
+        self,
+        candidates: list[Account],
+        plans: list[dict],
+        now_ts: float,
+    ) -> dict[str, Any]:
+        """存量未领账号自动补领闭环：检查池内漏领当期有效活动的账号并串行补领。"""
+        catchup_reports: list[dict] = []
+        catchup_ok_outcomes: list[dict] = []
         if store.sentinel_auto_claim():
-            all_jwt = [
-                a for a in store.list_accounts("zai")
-                if a.allows_billing()
-            ]
-            random.shuffle(all_jwt)
-            all_jwt.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
-            for acc in all_jwt:
-                if acc.is_claim_blocked():
-                    claim_reports.append({"name": acc.name, "result": "1005避让中"})
+            active_pids = {
+                _norm_plan_id(p)
+                for p in pool_active_plans(now_ts)
+                if _norm_plan_id(p) and not is_base_plan_id(p)
+            }
+            for acc in candidates:
+                held = account_held_plan_ids(acc)
+                acc_claimable = {
+                    _norm_plan_id(p)
+                    for p in (getattr(acc, "claimable_plans", None) or [])
+                    if isinstance(p, dict) and _norm_plan_id(p) and not is_base_plan_id(p)
+                }
+                target_pids = (active_pids | acc_claimable) - held
+                pending_pids = [
+                    pid for pid in target_pids
+                    if self._catchup_cooldown.get((acc.id, pid), 0) <= now_ts
+                ]
+                if not pending_pids:
                     continue
                 try:
-                    # 离散随机抖动延时，消除群聚效应
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     outcomes = await auto_claim_all_plans(acc)
-                    ok_count = sum(1 for o in outcomes if o.get("ok"))
-                    fail_items = [o for o in outcomes if not o.get("ok")]
-                    if ok_count:
-                        res_str = f"成功领{ok_count}项"
-                    elif new_pids_lower & account_held_plan_ids(acc):
-                        res_str = "已持有(成功)"
-                    elif fail_items:
-                        first_msg = str(fail_items[0].get("message") or "领取失败").split("（")[0]
-                        res_str = f"失败({first_msg})"
-                        for item in fail_items:
-                            pid_fail = str(item.get("plan_id") or "").strip().lower()
-                            if pid_fail:
-                                self._catchup_cooldown[(acc.id, pid_fail)] = time.time() + _CATCHUP_COOLDOWN_SEC
+                    ok_items = [o for o in outcomes if o.get("ok")]
+                    if ok_items:
+                        catchup_reports.append({"name": acc.name, "result": f"补领成功{len(ok_items)}项"})
+                        for item in ok_items:
+                            catchup_ok_outcomes.append({"account_name": acc.name, **item})
                     else:
-                        res_str = "无新配额"
-                    claim_reports.append({"name": acc.name, "result": res_str})
+                        self._record_cooldown(acc.id, pending_pids)
+                        catchup_reports.append({"name": acc.name, "result": "补领未果(已避让)"})
                 except Exception as err:
-                    claim_reports.append({"name": acc.name, "result": f"失败({err})"})
+                    self._record_cooldown(acc.id, pending_pids)
+                    catchup_reports.append({"name": acc.name, "result": f"补领失败({err})"})
 
-        # 5. 格式化构建 Bark 通知文本
+        if catchup_reports:
+            logs.ok("sentinel", f"巡检完成，已为 {len(catchup_reports)} 个漏领账号执行自动补领: {catchup_reports}")
+            if catchup_ok_outcomes:
+                await notify_claim_outcomes(catchup_ok_outcomes, source="哨兵自动补领")
+        else:
+            logs.info("sentinel", f"巡检完成，当前共 {len(plans)} 个上游套餐，无新活动")
+        return {"ok": True, "new_plans_count": 0, "plans_count": len(plans), "catchup_reports": catchup_reports}
+
+    async def _claim_new_plans_across_pool(self, new_plans: list[dict]) -> list[dict]:
+        """发现新活动时：先向全池可计费账号同步待领状态，再按单并发顺序串行 + 抖动执行全池抢领。"""
+        all_jwt = self._billable_candidates(include_claim_blocked=True)
+        # 先把新活动同步进全池未持有账号的 claimable_plans，确保即便跳过或抢领失败，页面立即可见待领 Icon
+        sync_pool_claimable_plans(new_plans, accounts=all_jwt)
+        if not store.sentinel_auto_claim():
+            return []
+
+        claim_reports: list[dict] = []
+        new_pids_lower = {_norm_plan_id(p) for p in new_plans if _norm_plan_id(p)}
+        for acc in all_jwt:
+            if acc.is_claim_blocked():
+                claim_reports.append({"name": acc.name, "result": "1005避让中"})
+                continue
+            try:
+                await asyncio.sleep(random.uniform(0.6, 1.5))
+                outcomes = await auto_claim_all_plans(acc)
+                ok_count = sum(1 for o in outcomes if o.get("ok"))
+                fail_items = [o for o in outcomes if not o.get("ok")]
+                if ok_count:
+                    res_str = f"成功领{ok_count}项"
+                elif new_pids_lower & account_held_plan_ids(acc):
+                    res_str = "已持有(成功)"
+                elif fail_items:
+                    first_msg = str(fail_items[0].get("message") or "领取失败").split("（")[0]
+                    res_str = f"失败({first_msg})"
+                    self._record_cooldown(acc.id, fail_items)
+                else:
+                    res_str = "无新配额"
+                claim_reports.append({"name": acc.name, "result": res_str})
+            except Exception as err:
+                claim_reports.append({"name": acc.name, "result": f"失败({err})"})
+        return claim_reports
+
+    @staticmethod
+    def _format_bark_report(new_plans: list[dict], claim_reports: list[dict]) -> tuple[str, str]:
+        """组装新活动发现与全池抢领战报的 Bark 标题与正文。"""
         body_lines = []
         for p in new_plans:
             p_name = p.get("name") or p.get("plan_id")
@@ -298,15 +300,20 @@ class Sentinel:
         if claim_reports:
             success_cnt = sum(1 for r in claim_reports if "成功" in r["result"])
             body_lines.append(f"\n📊 全池抢领战报 ({success_cnt}/{len(claim_reports)} 成功):")
-            for r in claim_reports[:6]:  # 最多展示前 6 个账号明细防超长
+            for r in claim_reports[:6]:
                 body_lines.append(f"  · {r['name']}: {r['result']}")
             if len(claim_reports) > 6:
                 body_lines.append(f"  · 其余 {len(claim_reports) - 6} 个账号已处理完毕")
 
-        notify_title = f"🎉 发现 ZCode 新活动 ({len(new_plans)}项)"
-        notify_body = "\n".join(body_lines)
+        return f"🎉 发现 ZCode 新活动 ({len(new_plans)}项)", "\n".join(body_lines)
 
-        # 6. 时序安全投递与状态落库（仅当 Bark 推送成功或未配置 Bark 或连续失败达上限时才将 plan_id 写入 seen_ids，防单次网络抖动丢通知）
+    async def _deliver_and_commit_new_plans(
+        self,
+        new_plans: list[dict],
+        claim_reports: list[dict],
+    ) -> None:
+        """时序安全投递 Bark 战报并更新 seen_ids（防单次网络抖动丢通知）。"""
+        notify_title, notify_body = self._format_bark_report(new_plans, claim_reports)
         bark_key = store.bark_device_key()
         bark_server = store.bark_server_url()
         commit_ids: list[str] = []
@@ -340,6 +347,28 @@ class Sentinel:
         if commit_ids:
             store.add_seen_plan_ids(commit_ids)
 
+    async def check_once(self) -> dict[str, Any]:
+        """执行单次活动巡检与差量闭环处理，返回探测与抢领结果摘要。"""
+        now_ts = time.time()
+        self._prune_expired_cooldown(now_ts)
+
+        candidates = self._billable_candidates(include_claim_blocked=False)
+        if not candidates:
+            logs.info("sentinel", "未找到可用的 JWT 账号用于活动探测，跳过本次巡检")
+            return {"ok": False, "reason": "no_active_sentinel"}
+
+        plans = await self._probe_upstream_plans(candidates)
+        if plans is None:
+            return {"ok": False, "reason": "probe_exhausted"}
+
+        seen_ids = store.get_seen_plan_ids()
+        new_plans = [p for p in plans if p.get("plan_id") and p["plan_id"] not in seen_ids]
+        if not new_plans:
+            return await self._run_catchup_claims(candidates, plans, now_ts)
+
+        logs.ok("sentinel", f"🎉 发现 {len(new_plans)} 个全新活动套餐: {[p.get('name') or p['plan_id'] for p in new_plans]}")
+        claim_reports = await self._claim_new_plans_across_pool(new_plans)
+        await self._deliver_and_commit_new_plans(new_plans, claim_reports)
         return {
             "ok": True,
             "new_plans": new_plans,

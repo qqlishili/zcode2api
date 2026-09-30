@@ -442,7 +442,7 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
     # 当 include_claimable=True 时，同步探测待领取活动套餐（并发前置日活上报，带独立短超时与异常隔离）
     if include_claimable and account.mode == "jwt" and account.jwt_token and account.allows_billing():
         try:
-            from .claim import preview_plans, report_activation_events
+            from .claim import preview_plans, report_activation_events, sync_account_claimable_plans
 
             try:
                 # 兼容 5 秒短超时，前置激活事件上报（不阻断 preview）
@@ -451,20 +451,15 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
                 logs.warn("quota", f"账号 {account.name} 刷新前置日活上报跳过: {act_err}")
 
             claim_plans = await asyncio.wait_for(preview_plans(account), timeout=8.0)
-            account.claimable_plans = claim_plans
+            sync_account_claimable_plans(account, claim_plans, persist=False)
         except Exception as claim_err:
             logs.info("quota", f"账号 {account.name} 待领活动探测跳过/异常: {claim_err}")
 
     # 归一化收口：将账号已持有的套餐从待领列表（claimable_plans）中剔除，确保落库数据干净无冗余
     if account.claimable_plans:
-        from .claim import account_held_plan_ids
+        from .claim import sync_account_claimable_plans
 
-        held_ids = account_held_plan_ids(account)
-        account.claimable_plans = [
-            p for p in account.claimable_plans
-            if isinstance(p, dict)
-            and str(p.get("plan_id") or p.get("planId") or "").strip().lower() not in held_ids
-        ]
+        sync_account_claimable_plans(account, persist=False)
     if include_claimable:
         result["claimable"] = account.claimable_plans
 
