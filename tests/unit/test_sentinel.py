@@ -486,11 +486,15 @@ async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatc
     monkeypatch.setattr(claim_module, "_billing_request", mock_billing_req)
     monkeypatch.setattr(claim_module, "captcha_manager", _DummyCaptcha())
 
-    # 1. 探针账号调用 preview_plans：自身已持有该活动故 claimable_plans 为空，而池内未持有的 国内-5735 立即获得待领项
+    # 1. 探针账号调用 preview_plans：自身已持有该活动故 claimable_plans 为空，而池内未持有的 国内-5735 立即获得待领项及完整 grants
     plans = await claim_module.preview_plans(acc_probe)
     assert len(plans) == 1
     assert acc_probe.claimable_plans == []
     assert [p["plan_id"] for p in acc_unclaimed.claimable_plans] == ["zcode-v3-start-plan-trust-1001"]
+    assert acc_unclaimed.claimable_plans[0]["grants"] == [{"name": "GLM-5.3-Flash", "units": 100000000.0, "period": "one_time"}]
+    # 验证 pool_active_plans 再次重入解析 claimable_plans 并二次广播时，grants 元数据幂等保留不丢失
+    claim_module.sync_pool_claimable_plans(plans)
+    assert acc_unclaimed.claimable_plans[0]["grants"] == [{"name": "GLM-5.3-Flash", "units": 100000000.0, "period": "one_time"}]
 
     # 2. 国内-5735 调用 claim 遭遇 3012 抛错：claimable_plans 依然保留，供页面展示活动领取 Icon
     acc_unclaimed.claimable_plans = []
@@ -498,6 +502,7 @@ async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatc
         await claim_module.claim(acc_unclaimed, report_activation=False)
     assert exc_info.value.code == 3012
     assert [p["plan_id"] for p in acc_unclaimed.claimable_plans] == ["zcode-v3-start-plan-trust-1001"]
+    assert acc_unclaimed.claimable_plans[0]["grants"] == [{"name": "GLM-5.3-Flash", "units": 100000000.0, "period": "one_time"}]
 
     # 3. 当手动滑块领取成功（code=0）时，claimable_plans 中的该活动立即被剔除
     async def mock_billing_claim_ok(account, method, path, **kwargs):
@@ -506,5 +511,6 @@ async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatc
     monkeypatch.setattr(claim_module, "_billing_request", mock_billing_claim_ok)
     await claim_module.claim_with_captcha(acc_unclaimed, "slider-ok", "cn", "zcode-v3-start-plan-trust-1001")
     assert acc_unclaimed.claimable_plans == []
+
 
 

@@ -145,7 +145,7 @@ def _business_code(body: dict) -> int:
 
 
 def parse_plan(raw: dict) -> dict | None:
-    """提取可领取套餐（plan_id/name/描述/优先级 + model_usage token 授权项）。"""
+    """提取可领取套餐（plan_id/name/描述/优先级 + model_usage token 授权项，支持已解析结构幂等重入）。"""
     plan_id = str(raw.get("plan_id") or raw.get("planId") or "").strip()
     if not plan_id:
         return None
@@ -162,6 +162,16 @@ def parse_plan(raw: dict) -> dict | None:
             "units": float(units),
             "period": ent.get("period") or "one_time",
         })
+    if not grants and isinstance(raw.get("grants"), list):
+        grants = [
+            {
+                "name": str(g.get("name") or "").strip(),
+                "units": float(g.get("units") or 0),
+                "period": g.get("period") or "one_time",
+            }
+            for g in raw["grants"]
+            if isinstance(g, dict) and str(g.get("name") or "").strip()
+        ]
     return {
         "plan_id": plan_id,
         "name": str(raw.get("name") or "").strip(),
@@ -271,23 +281,23 @@ def filter_unclaimed_plans(
     *,
     extra_held_ids: set[str] | None = None,
 ) -> list[dict]:
-    """过滤出账号当前尚未持有的有效活动套餐列表（保序去重）。"""
+    """过滤出账号当前尚未持有的有效活动套餐列表（保序去重，同名套餐优先保留含 grants 的完整项）。"""
     if not plans:
         return []
     held = account_held_plan_ids(account)
     if extra_held_ids:
         held |= {_norm_plan_id(pid) for pid in extra_held_ids if _norm_plan_id(pid)}
-    seen: set[str] = set()
-    unclaimed: list[dict] = []
+    by_pid: dict[str, dict] = {}
     for p in plans:
         if not isinstance(p, dict):
             continue
         pid = _norm_plan_id(p)
-        if not pid or pid in held or pid in seen:
+        if not pid or pid in held:
             continue
-        seen.add(pid)
-        unclaimed.append(p)
-    return unclaimed
+        prev = by_pid.get(pid)
+        if prev is None or (not prev.get("grants") and p.get("grants")):
+            by_pid[pid] = p
+    return list(by_pid.values())
 
 
 def sync_account_claimable_plans(
@@ -310,7 +320,10 @@ def sync_account_claimable_plans(
     source = (
         plans
         if plans is not None
-        else (getattr(account, "claimable_plans", None) or (getattr(live, "claimable_plans", None) if live else None) or [])
+        else [
+            *(getattr(account, "claimable_plans", None) or []),
+            *(getattr(live, "claimable_plans", None) or [] if live is not None and live is not account else []),
+        ]
     )
     unclaimed = filter_unclaimed_plans(account, source, extra_held_ids=combined_held)
     changed = (getattr(account, "claimable_plans", None) != unclaimed) or (
@@ -445,7 +458,7 @@ def pool_active_plans(now: float | None = None) -> list[dict]:
     """提取池内所有账号中当前已生效且未过期的活动套餐（集群经验共享）。
 
     从池内所有账号的 plans / claimable_plans 中聚合提炼未过期、非基础
-    体验方案的大促活动（去重，按 priority 降序）。
+    体验方案的大促活动（去重，按 priority 降序，同优先级优先保留含 grants/ends_at 的完整项）。
     """
     from .store import store
 
@@ -465,7 +478,12 @@ def pool_active_plans(now: float | None = None) -> list[dict]:
             if parsed:
                 if ends:
                     parsed["ends_at"] = ends
-                if pid not in known or parsed["priority"] > known[pid]["priority"]:
+                prev = known.get(pid)
+                if (
+                    prev is None
+                    or (parsed["priority"], len(parsed.get("grants") or []), parsed.get("ends_at") or 0)
+                    > (prev["priority"], len(prev.get("grants") or []), prev.get("ends_at") or 0)
+                ):
                     known[pid] = parsed
 
     plans = list(known.values())
@@ -507,11 +525,14 @@ async def preview_plans(account: Account) -> list[dict]:
     except Exception as err:
         logs.info("claim", f"账号 {account.name} 上游 preview 请求未果: {err}")
 
-    # 合并上游 plans 与池内已知有效活动（上游优先）
+    # 合并上游 plans 与池内已知有效活动（上游优先，若上游项缺 grants 则用池内已知 grants 补齐）
     merged_map: dict[str, dict] = {}
     for p in (*upstream_plans, *pool_active_plans()):
         pid = _norm_plan_id(p)
-        if pid and pid not in merged_map:
+        if not pid:
+            continue
+        prev = merged_map.get(pid)
+        if prev is None or (not prev.get("grants") and p.get("grants")):
             merged_map[pid] = p
 
     plans = list(merged_map.values())
@@ -527,8 +548,8 @@ async def _auto_pick_plan(account: Account, plan_id: str | None) -> tuple[str, s
     if plan_id:
         pid_clean = plan_id.strip()
         pid_norm = _norm_plan_id(pid_clean)
-        for p in pool_active_plans():
-            if _norm_plan_id(p) == pid_norm:
+        for p in (*(getattr(account, "claimable_plans", None) or []), *pool_active_plans()):
+            if isinstance(p, dict) and _norm_plan_id(p) == pid_norm:
                 merged = [p, *(getattr(account, "claimable_plans", None) or [])]
                 sync_account_claimable_plans(account, merged)
                 return pid_clean, p.get("name") or pid_clean, p.get("grants") or []
