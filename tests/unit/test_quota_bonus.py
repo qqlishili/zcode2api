@@ -499,3 +499,151 @@ class TestBonusActive:
         assert updated.status == Status.EXHAUSTED
 
 
+class TestSmoothPollingAndStagger:
+    """v2.6.2 后台额度监控去抖错峰、验证码补货微抖动与批量入池串行平滑测试。"""
+
+    @pytest.mark.asyncio
+    async def test_refresh_accounts_stagger_injects_pacing_delays(self, fresh_app, monkeypatch):
+        """验证 stagger_sec > 0 时首号 0ms 立即发起，后续账号注入 [0.75x, 1.25x] 错峰延时；默认 stagger_sec=0 零延时。"""
+        from app import quota
+
+        a1 = fresh_app.add_account("zai", "stagger-1", "jwt.token.1")
+        a2 = fresh_app.add_account("zai", "stagger-2", "jwt.token.2")
+        a3 = fresh_app.add_account("zai", "stagger-3", "jwt.token.3")
+
+        sleeps: list[float] = []
+
+        async def _fake_sleep(sec: float) -> None:
+            sleeps.append(sec)
+
+        async def _fake_fetch(acc, include_claimable: bool = False) -> dict:
+            return {"balance": {}}
+
+        monkeypatch.setattr(quota, "_sleep", _fake_sleep)
+        monkeypatch.setattr(quota, "fetch_quota", _fake_fetch)
+
+        # 默认 stagger_sec=0.0（前端手动刷新）：不产生人为 sleep
+        res_fast = await quota.refresh_accounts([a1, a2, a3])
+        assert res_fast == {"ok": 3, "fail": 0}
+        assert sleeps == []
+
+        # 后台错峰路径 stagger_sec=0.4：3 个账号产生 2 次错峰 sleep，且均在 [0.3, 0.5] 区间内
+        res_smooth = await quota.refresh_accounts([a1, a2, a3], include_claimable=False, stagger_sec=0.4, max_concurrency=2)
+        assert res_smooth == {"ok": 3, "fail": 0}
+        assert len(sleeps) == 2
+        assert all(0.3 <= s <= 0.5 for s in sleeps)
+
+    @pytest.mark.asyncio
+    async def test_quota_monitor_check_once_debounces_recently_checked_accounts(self, fresh_app, monkeypatch):
+        """验证 QuotaMonitor.check_once 自动跳过刚被网关 _safe_refresh 刷过的账号，只错峰刷新陈旧账号。"""
+        from app import quota
+
+        now = time.time()
+        acc_fresh = fresh_app.add_account("zai", "recently-checked", "jwt.token.fresh")
+        acc_fresh.last_checked_at = now - 5.0  # 5 秒前刚刷过
+        fresh_app.update_account(acc_fresh)
+
+        acc_stale = fresh_app.add_account("zai", "stale-checked", "jwt.token.stale")
+        acc_stale.last_checked_at = now - 120.0  # 120 秒前刷过
+        fresh_app.update_account(acc_stale)
+
+        acc_never = fresh_app.add_account("zai", "never-checked", "jwt.token.never")
+        acc_never.last_checked_at = None
+        fresh_app.update_account(acc_never)
+
+        refreshed_ids: list[str] = []
+        captured_kwargs: dict = {}
+
+        async def _fake_refresh(accounts, include_claimable: bool = True, **kwargs) -> dict:
+            refreshed_ids.extend(a.id for a in accounts)
+            captured_kwargs.update(kwargs)
+            return {"ok": len(accounts), "fail": 0}
+
+        monkeypatch.setattr(quota, "refresh_accounts", _fake_refresh)
+        mon = quota.QuotaMonitor()
+        summary = await mon.check_once(interval=60)
+
+        assert summary["ok"] == 2
+        assert summary["skipped_debounced"] == 1
+        assert set(refreshed_ids) == {acc_stale.id, acc_never.id}
+        assert acc_fresh.id not in refreshed_ids
+        assert captured_kwargs.get("stagger_sec") == 0.4
+        assert captured_kwargs.get("max_concurrency") == 2
+
+    @pytest.mark.asyncio
+    async def test_captcha_refill_batch_staggers_consecutive_solves(self, monkeypatch):
+        """验证 CaptchaManager._refill_batch 连解多枚 token 时在第 2 枚起注入 0.4~1.0s 微抖动。"""
+        from app import captcha as cap_mod
+        from app.captcha import CaptchaManager, _Token
+
+        sleeps: list[float] = []
+
+        async def _fake_sleep(sec: float) -> None:
+            sleeps.append(sec)
+
+        mgr = CaptchaManager()
+
+        async def _fake_config() -> dict:
+            return {"sceneId": "s", "region": "sgp", "prefix": "p"}
+
+        async def _fake_solve(cfg: dict) -> _Token:
+            return _Token("param-ok", "sgp")
+
+        monkeypatch.setattr(cap_mod, "_sleep", _fake_sleep)
+        monkeypatch.setattr(cap_mod, "POOL_MIN", 3)
+        monkeypatch.setattr(cap_mod, "POOL_MAX", 5)
+        monkeypatch.setattr(mgr, "fetch_config", _fake_config)
+        monkeypatch.setattr(mgr, "_solve_one", _fake_solve)
+
+        await mgr._refill_batch(need=3)
+        assert mgr._pool_size == 3
+        assert len(sleeps) == 2
+        assert all(0.4 <= s <= 1.0 for s in sleeps)
+
+    @pytest.mark.asyncio
+    async def test_admin_schedule_install_and_auto_claim_stagger_batch(self, fresh_app, monkeypatch):
+        """验证批量入池时 _schedule_install 与 _schedule_auto_claim 通过串行锁错峰执行，不发生 0ms 惊群。"""
+        import asyncio
+
+        from app.routes import admin_api as admin_mod
+
+        a1 = fresh_app.add_account("zai", "batch-1", "jwt.token.b1")
+        a2 = fresh_app.add_account("zai", "batch-2", "jwt.token.b2")
+
+        sleeps: list[float] = []
+        installed: list[str] = []
+        claimed: list[str] = []
+
+        async def _fake_bg_sleep(sec: float) -> None:
+            sleeps.append(sec)
+
+        async def _fake_install(acc) -> dict:
+            installed.append(acc.id)
+            return {"installed": True}
+
+        async def _fake_claim(acc) -> list:
+            claimed.append(acc.id)
+            return []
+
+        monkeypatch.setattr(admin_mod, "_bg_sleep", _fake_bg_sleep)
+        monkeypatch.setattr(admin_mod, "run_install_sequence_for_account", _fake_install)
+        monkeypatch.setattr(admin_mod, "auto_claim_all_plans", _fake_claim)
+        admin_mod._install_inflight = 0
+        admin_mod._auto_claim_inflight = 0
+
+        admin_mod._schedule_install(a1)
+        admin_mod._schedule_install(a2)
+        admin_mod._schedule_auto_claim(a1)
+        admin_mod._schedule_auto_claim(a2)
+
+        if admin_mod._install_tasks:
+            await asyncio.gather(*list(admin_mod._install_tasks))
+        if admin_mod._auto_claim_tasks:
+            await asyncio.gather(*list(admin_mod._auto_claim_tasks))
+
+        assert installed == [a1.id, a2.id]
+        assert claimed == [a1.id, a2.id]
+        # 2 个 install 触发 1 次 0.3~0.8s 错峰，2 个 auto_claim 触发 1 次 0.6~1.5s 错峰
+        assert len(sleeps) == 2
+        assert any(0.3 <= s <= 0.8 for s in sleeps)
+        assert any(0.6 <= s <= 1.5 for s in sleeps)

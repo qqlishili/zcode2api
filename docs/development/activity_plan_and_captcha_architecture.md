@@ -86,7 +86,7 @@
 
 ---
 
-## 4. 架构加固与对抗防线（v2.5.16 ~ v2.6.1 演进）
+## 4. 架构加固与对抗防线（v2.5.16 ~ v2.6.2 演进）
 
 ### 4.1 彻底切断自动呼起与提交死循环链
 - **现象归因**：前序版本在提示吐司（`claimToast`）中捕获到 3012 风控时，隐式递归调用 `openClaimModal`。而弹窗内无感验证通过后又在 `success` 钩子中触发自动提交，在海外 IP 连续风控时导致 `Toast -> Modal -> Captcha -> Submit -> Toast` 的恶性正反馈死循环。
@@ -167,3 +167,12 @@
   1. **OAuth 协议对齐（`app/oauth.py`、`app/routes/admin_api.py`）**：`ZaiAuthFlow.init()` 校验 `code != 0` 抛错，并优先采用 `data.poll_token`（未下发时回退本地随机 token）；`login_poll` 识别 `code == 3004` 返回 `status: "expired"`；
   2. **结构化 `ClaimError` 与精确 `next_at` 避让（`app/claim.py`、`accounts.html`）**：`ClaimError(message, *, code=-1, next_at=None)` 携带业务码与 `next_at`（毫秒），`_mark_claim_blocked` 优先采用 `next_at + 5~60s` 离散抖动（缺失时回退北京时间次日 00:05 兜底），成功回执透传 `starts_at`/`ends_at`/`server_time`，前端 Toast 展示恢复倒计时；
   3. **Windows 内核版本归一与哨兵优雅停服（`app/hostinfo.py`、`app/fingerprint.py`、`app/sentinel.py`）**：新增 `_windows_kernel_version()` 通过 `sys.getwindowsversion()` 合成 `"10.0.xxxxx"`，恢复 `fingerprint.py` 严格三段式 `_RELEASE_SHAPE` 校验门；`Sentinel.stop()` 引入 `STOP_GRACE_SECONDS = 5.0` 优雅停机超时保护。
+
+### 4.10 后台额度监控去抖错峰、验证码补货微抖动与批量入池串行平滑（v2.6.2）
+- **现象归因**：
+  1. **`QuotaMonitor` 整点脉冲与重复刷新**：原 `QuotaMonitor` 每 60s 整点通过 `Semaphore(4)` 零间隔并发刷新全部账号（单秒突发 $3N$ 个 `/billing/*` 请求），且未检查 `last_checked_at`，导致刚被网关对话 `_safe_refresh` 刷过的账号被重复刷新；
+  2. **验证码预解池连解与批量入池惊群**：`CaptchaManager._refill_batch` 在冷启动或清池后 0ms 背靠背连拉多个子进程；批量添加/导入账号时同秒并发创建 $2N$ 个安装与自动领取协程。
+- **治理方案**：
+  1. **额度监控去抖与错峰平滑（`app/quota.py`）**：`QuotaMonitor.check_once()` 自动跳过近期已刷账号（`< min(0.8 * interval, BILLING_REFRESH_MIN_INTERVAL)`），随机打散待刷账号顺序，并以 `max_concurrency=2, stagger_sec=0.4`（`0.3~0.5s` 离散间隔）错峰平滑请求，周期等待附加 `±10%` Jitter，`stop()` 接入 5s 超时保护；
+  2. **预解池连解微间隔（`app/captcha.py`）**：`_refill_batch` 在单批多枚连解（`solved > 0`）之间注入 `0.4~1.0s` 随机微抖动；
+  3. **批量入池串行错峰锁（`app/routes/admin_api.py`）**：`_schedule_install` 与 `_schedule_auto_claim` 内置串行锁与连续任务间随机退避（`0.3~0.8s` 与 `0.6~1.5s`），单号入池 0ms 立即执行，批量入池自动削峰排队。

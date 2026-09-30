@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,8 @@ from . import constants, logs, settings
 from .models import Account, Status
 from .store import store
 
+_sleep = asyncio.sleep
+STOP_GRACE_SECONDS = 5.0
 _TZ_BEIJING = timezone(timedelta(hours=8))
 _DEVICE_MID: str | None = None
 
@@ -469,14 +472,33 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
     return result or {"error": "无法获取额度数据"}
 
 
-async def refresh_accounts(accounts: list[Account], include_claimable: bool = True) -> dict:
-    """并发刷新一批账号，返回汇总。默认 include_claimable=True 联动探测待领活动。"""
+async def refresh_accounts(
+    accounts: list[Account],
+    include_claimable: bool = True,
+    *,
+    stagger_sec: float = 0.0,
+    max_concurrency: int = 4,
+) -> dict:
+    """并发刷新一批账号，返回汇总。默认 include_claimable=True 联动探测待领活动。
+
+    当 stagger_sec > 0 时（后台定时巡检路径），通过发射锁在多账号间注入离散随机错峰延迟，
+    将整点脉冲尖峰削平为平滑涓流，避免同秒齐射触发上游 WAF 频控。
+    """
     if not accounts:
         return {"ok": 0, "fail": 0}
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(max(1, max_concurrency))
+    pace_lock = asyncio.Lock()
+    dispatched = 0
 
     async def _one(acc: Account) -> bool:
+        nonlocal dispatched
         async with sem:
+            if stagger_sec > 0 and len(accounts) > 1:
+                async with pace_lock:
+                    idx = dispatched
+                    dispatched += 1
+                    if idx > 0:
+                        await _sleep(random.uniform(stagger_sec * 0.75, stagger_sec * 1.25))
             res = await fetch_quota(acc, include_claimable=include_claimable)
             return "error" not in res
 
@@ -492,6 +514,34 @@ class QuotaMonitor:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
+    async def check_once(self, interval: int | None = None) -> dict:
+        """单轮后台额度刷新：去抖跳过近期已刷账号 + 随机打散顺序 + 错峰平滑请求。"""
+        eff_interval = store.quota_refresh_interval() if interval is None else interval
+        if eff_interval <= 0:
+            return {"ok": 0, "fail": 0, "skipped_debounced": 0}
+        now = time.time()
+        min_age = min(eff_interval * 0.8, float(settings.BILLING_REFRESH_MIN_INTERVAL))
+        pool = [
+            a for a in store.list_accounts("zai")
+            if a.mode == "jwt" and a.allows_billing()
+        ]
+        accounts = [
+            a for a in pool
+            if not a.last_checked_at or (now - a.last_checked_at) >= min_age
+        ]
+        skipped_debounced = len(pool) - len(accounts)
+        if not accounts:
+            return {"ok": 0, "fail": 0, "skipped_debounced": skipped_debounced}
+        random.shuffle(accounts)
+        # 后台高频轮询仅刷新核心额度，不触发激活上报与 preview（由 Sentinel 低频巡检负责）
+        res = await refresh_accounts(
+            accounts,
+            include_claimable=False,
+            stagger_sec=0.4,
+            max_concurrency=2,
+        )
+        return {**res, "skipped_debounced": skipped_debounced}
+
     async def _loop(self) -> None:
         # 启动后先等几秒，避免与服务启动争抢
         try:
@@ -504,17 +554,11 @@ class QuotaMonitor:
             interval = store.quota_refresh_interval()  # 实时读取设置，改后即生效
             if interval > 0:
                 try:
-                    accounts = [
-                        a for a in store.list_accounts("zai")
-                        if a.mode == "jwt" and a.allows_billing()
-                    ]
-                    if accounts:
-                        # 后台高频轮询仅刷新核心额度，不触发激活上报与 preview（由 Sentinel 低频巡检负责）
-                        await refresh_accounts(accounts, include_claimable=False)
+                    await self.check_once(interval=interval)
                 except Exception as err:  # noqa: BLE001 - 后台任务需吞掉异常继续运行
                     logs.err("quota", f"后台刷新出错: {err}")
-            # interval<=0 视为关闭：仍周期性回看设置，便于随时启用
-            wait = interval if interval > 0 else 30
+            # interval<=0 视为关闭：仍周期性回看设置，便于随时启用；开启时附加 ±10% 抖动防固定机器时钟特征
+            wait = interval * random.uniform(0.9, 1.1) if interval > 0 else 30.0
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=wait)
             except TimeoutError:
@@ -527,9 +571,18 @@ class QuotaMonitor:
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._task:
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(task, timeout=STOP_GRACE_SECONDS)
+        except TimeoutError:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 monitor = QuotaMonitor()
+

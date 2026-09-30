@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 
 import httpx
 
 from . import constants, logs, settings
 from .store import store
+
+_sleep = asyncio.sleep
 
 # 池参数（对齐 zapi：min 20-40 / max 120 过重，单账号网关用小池足矣）
 POOL_MIN = settings.CAPTCHA_POOL_MIN
@@ -142,6 +145,9 @@ class CaptchaManager:
             config = await self.fetch_config()
             solved = 0
             while self._pool_size < POOL_MAX and (self._pool_size < POOL_MIN or solved < need):
+                if solved > 0:
+                    # 多枚连解之间注入微抖动，避免同秒连续拉起子进程冲击 o.alicdn.com
+                    await _sleep(random.uniform(0.4, 1.0))
                 token = await self._solve_one(config)
                 if token is None:
                     break

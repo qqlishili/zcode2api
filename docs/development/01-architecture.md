@@ -126,7 +126,7 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
 
 ### 4.3 额度监控
 
-后台任务按 `quota_refresh_interval`（默认 60s，meta 表可改，0 = 关）刷新池内 JWT 账号；冷却 / invalid / 风控禁用 / 手动停用不打 billing。每个账号探测 `billing/current` + `billing/balance` + `usage`。上游 `billing/balance` 响应 200 且合法解析时以物理事实强制同步覆盖：若 `balances` 为空（套餐自然到期或未开通），彻底清空 `account.quota` 避免残留历史快照，并置为 EXHAUSTED（原因 `no_active_quota` / `额度已用完`）；若返回非空窗口，优先深度提取 `capabilities` 中的 `model:<id>` 协议标签（若含 `flash` 则无条件归一化为 `GLM-5.3-Flash`，并兜底检查 `show_name` / `model` 是否含 `flash`），过滤 `expires_at <= now` 的过期残留窗口后，确保周期性日窗与异名活动赠送池（如 `GLM-5.3-Flash 体验版`）安全累加合并至标准的 `GLM-5.3-Flash` 单一窗口；耗尽判定优先以主免费池模型 `DEFAULT_MODEL`（`GLM-5.3-Flash`）的 `remaining <= 0` 判定 EXHAUSTED（避免闲置的 `GLM-5.3` 余量阻塞耗尽状态或引发误恢复；无主模型窗口时回退按全窗口判定）；额度恢复且非冷却 → 回 ACTIVE。废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。成功对话后的 billing 刷新有 `BILLING_REFRESH_MIN_INTERVAL`（默认 60s）去抖。
+后台任务按 `quota_refresh_interval`（默认 60s，周期附加 `±10%` 随机抖动防机器时钟特征，meta 表可改，0 = 关）刷新池内 JWT 账号；冷却 / invalid / 风控禁用 / 手动停用不打 billing。单轮巡检（`QuotaMonitor.check_once`）前置共享 `last_checked_at` 去抖跳过近期（`< min(0.8 * interval, BILLING_REFRESH_MIN_INTERVAL)`）已被网关对话 `_safe_refresh` 或手动刷新过的账号，并对待刷账号随机打散顺序、以 `max_concurrency=2` + `stagger_sec=0.4`（`0.3~0.5s` 离散间隔）错峰平滑请求，彻底消除整点脉冲尖峰。每个账号探测 `billing/current` + `billing/balance` + `usage`。上游 `billing/balance` 响应 200 且合法解析时以物理事实强制同步覆盖：若 `balances` 为空（套餐自然到期或未开通），彻底清空 `account.quota` 避免残留历史快照，并置为 EXHAUSTED（原因 `no_active_quota` / `额度已用完`）；若返回非空窗口，优先深度提取 `capabilities` 中的 `model:<id>` 协议标签（若含 `flash` 则无条件归一化为 `GLM-5.3-Flash`，并兜底检查 `show_name` / `model` 是否含 `flash`），过滤 `expires_at <= now` 的过期残留窗口后，确保周期性日窗与异名活动赠送池（如 `GLM-5.3-Flash 体验版`）安全累加合并至标准的 `GLM-5.3-Flash` 单一窗口；耗尽判定优先以主免费池模型 `DEFAULT_MODEL`（`GLM-5.3-Flash`）的 `remaining <= 0` 判定 EXHAUSTED（避免闲置的 `GLM-5.3` 余量阻塞耗尽状态或引发误恢复；无主模型窗口时回退按全窗口判定）；额度恢复且非冷却 → 回 ACTIVE。废 JWT / 风控禁用绝不能因额度数字复活 Plan 通道。成功对话后的 billing 刷新有 `BILLING_REFRESH_MIN_INTERVAL`（默认 60s）去抖。
 
 ### 4.4 活动领取
 
@@ -143,7 +143,7 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
        │    └─ 401 → 标 INVALID
        └─ 领取成功 → 透传 starts_at / ends_at / server_time（秒→毫秒）并刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
-前台界面与服务端协同保障（v2.5.18 ~ v2.6.1）：
+前台界面与服务端协同保障（v2.5.18 ~ v2.6.2）：
 - 后端 `auto_claim_all_plans` 前置过滤 `account_held_plan_ids`（及 `skip_plan_ids`），跳过已持有套餐，并在领取成功或命中 1003 后自动调用 `fetch_quota` 刷新额度并恢复 `ACTIVE` 状态；
 - `ClaimError` 结构化携带上游 `code` 与 `next_at`（1005 时提取 `data.plan.ends_at * 1000`），前端 `claimToast` 自动展示预计恢复倒计时；
 - 全链路领取成功（哨兵自动补领、入池自动领取、后台一键领取、浏览器滑块手动领取）统一接入 `notify_claim_outcomes` / `schedule_claim_notification` 异步推送 Bark 战报；
@@ -176,7 +176,7 @@ Sentinel 后台巡检循环（默认 1800 秒，单例持有强引用防 GC）�
 | Web / CLI 粘贴 | `POST /admin/api/accounts` 或 `cli.py add-account`（JWT 或 Key） |
 | JSON 导入 | `GET/POST /admin/api/export|import` 或 `cli.py export/import`（明文 name/mode/secret） |
 
-入池后：按账号安装序（configs + 激活事件）+ JWT 自动领取。CLI 与 Web 同序。官方 callback 在 `zcode.z.ai`，hub 只 poll 结果，收不到授权 code。
+入池后：按账号安装序（configs + 激活事件，批量入池经 `_install_lock` 串行错峰 `0.3~0.8s`）+ JWT 自动领取（经 `_auto_claim_lock` 串行错峰 `0.6~1.5s`）。CLI 与 Web 同序。官方 callback 在 `zcode.z.ai`，hub 只 poll 结果，收不到授权 code。
 
 ## 5. 与来源项目的边界
 

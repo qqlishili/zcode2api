@@ -362,7 +362,10 @@ async def login_poll(flow_id: str):
 
 
 # ── 额度领取 ─────────────────────────────────────────────────────────────────
+_bg_sleep = asyncio.sleep
 _auto_claim_tasks: set[asyncio.Task] = set()  # 强引用防 GC
+_auto_claim_lock = asyncio.Lock()
+_auto_claim_inflight: int = 0
 _login_followup_tasks: set[asyncio.Task] = set()
 
 
@@ -391,29 +394,41 @@ def _schedule_auto_claim(account) -> None:
     """入池后调度后台自动领取（激活上报 + 全量可领套餐）。
 
     不阻塞入池响应（验证码求解可长达数十秒）；仅 JWT 账号。失败不影响入池。
+    单账号入池 0ms 立即执行；多账号同批入池（_auto_claim_inflight > 0）时通过
+    _auto_claim_lock 串行排队并注入 0.6~1.5s 错峰抖动，避免瞬间挤兑验证码池。
     """
+    global _auto_claim_inflight
     if not (account.mode == "jwt" and account.jwt_token):
         return
+    was_queued = _auto_claim_inflight > 0
+    _auto_claim_inflight += 1
 
     async def _job():
-        live = store.find(account.provider, account.id)
-        if live is None:
-            return
+        global _auto_claim_inflight
         try:
-            outcomes = await auto_claim_all_plans(live)
-            live = store.find(account.provider, account.id)
-            if live is None:
-                return
-            if outcomes:
-                await refresh_accounts([live])  # 领到额度立即反映到 UI
-                from ..notify import schedule_claim_notification
+            async with _auto_claim_lock:
+                if was_queued:
+                    await _bg_sleep(random.uniform(0.6, 1.5))
+                live = store.find(account.provider, account.id)
+                if live is None:
+                    return
+                try:
+                    outcomes = await auto_claim_all_plans(live)
+                    live = store.find(account.provider, account.id)
+                    if live is None:
+                        return
+                    if outcomes:
+                        await refresh_accounts([live])  # 领到额度立即反映到 UI
+                        from ..notify import schedule_claim_notification
 
-                schedule_claim_notification(
-                    [{"account_name": live.name, **o} for o in outcomes],
-                    source="入池自动领取",
-                )
-        except Exception as err:  # noqa: BLE001 - 兜底：绝不冒泡
-            logs.warn("claim", f"账号 {account.name} 自动领取任务异常: {err}")
+                        schedule_claim_notification(
+                            [{"account_name": live.name, **o} for o in outcomes],
+                            source="入池自动领取",
+                        )
+                except Exception as err:  # noqa: BLE001 - 兜底：绝不冒泡
+                    logs.warn("claim", f"账号 {account.name} 自动领取任务异常: {err}")
+        finally:
+            _auto_claim_inflight = max(0, _auto_claim_inflight - 1)
 
     task = asyncio.create_task(_job())
     _auto_claim_tasks.add(task)
@@ -430,6 +445,8 @@ def _jwt_accounts(account_ids: list[str] | None) -> list:
 
 # 按账号安装序的后台任务引用（同 _auto_claim_tasks：事件循环只持弱引用）
 _install_tasks: set[asyncio.Task] = set()
+_install_lock = asyncio.Lock()
+_install_inflight: int = 0
 
 
 def _schedule_install(account) -> None:
@@ -437,16 +454,27 @@ def _schedule_install(account) -> None:
 
     不阻塞入池响应；任何账号模式都跑（apiKey 账号 user_id 退空串，同官方
     未登录安装形态）。失败不影响入池；重复调用安全（installed_at 幂等跳过）。
+    批量入池或启动补配指纹时通过 _install_lock 串行错峰上报。
     """
+    global _install_inflight
+    was_queued = _install_inflight > 0
+    _install_inflight += 1
 
     async def _job():
-        live = store.find(account.provider, account.id)
-        if live is None:
-            return
+        global _install_inflight
         try:
-            await run_install_sequence_for_account(live)
-        except Exception as err:  # noqa: BLE001 - 兜底：绝不冒泡
-            logs.warn("install", f"账号 {account.name} 安装序任务异常: {err}")
+            async with _install_lock:
+                if was_queued:
+                    await _bg_sleep(random.uniform(0.3, 0.8))
+                live = store.find(account.provider, account.id)
+                if live is None:
+                    return
+                try:
+                    await run_install_sequence_for_account(live)
+                except Exception as err:  # noqa: BLE001 - 兜底：绝不冒泡
+                    logs.warn("install", f"账号 {account.name} 安装序任务异常: {err}")
+        finally:
+            _install_inflight = max(0, _install_inflight - 1)
 
     task = asyncio.create_task(_job())
     _install_tasks.add(task)
