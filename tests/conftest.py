@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
 import threading
@@ -133,7 +134,18 @@ async def gateway_client(fresh_app, mock_server, monkeypatch, stub_captcha):
     async with AsyncClient(
         transport=ASGITransport(app=gateway), base_url="http://gateway.test"
     ) as client:
-        yield client, mock_app
+        try:
+            yield client, mock_app
+        finally:
+            # ASGITransport 不运行 lifespan；在 Mock / store 解绑和循环关闭前完成刷新。
+            tasks = [t for t in gateway_module._bg_tasks if t.get_loop() is asyncio.get_running_loop()]
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+            finally:
+                await gateway_module.close_shared_client()
 
 
 def seed_account(store, secret: str, name: str = "t"):

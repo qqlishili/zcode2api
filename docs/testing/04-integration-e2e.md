@@ -39,6 +39,17 @@
 | INT-030 | 真实 solver 冒烟 | （可选，`@pytest.mark.real_captcha`）真实 happy-dom 子进程求解一次 | 输出 verifyParam 结构合法（base64(JSON{certifyId,...})）；默认 CI 跳过 |
 | INT-031 | solver 缺失报错 | 未 npm install → 明确报错指引用，而非悬死 | 用户体验 |
 
+### INT-E 网关夹具收尾
+
+用例：`tests/integration/test_gateway_lifecycle.py`。
+
+| ID | 场景 | 步骤 | 断言 |
+|----|------|------|------|
+| INT-040 | 后台额度刷新收尾 | 成功请求启动刷新 → 用事件暂停刷新 → 释放事件并退出夹具 | 刷新完成而非被取消，账号查询时间更新，共享客户端已关闭并摘除 |
+| INT-041 | 后台异常不被吞掉 | 启动会抛异常的本轮后台任务 → 退出夹具 | 暴露原异常，连接仍关闭 |
+
+历史本地隔离回归：相关 273 项通过、0 警告；生产用量取证见开发文档 `07` 持续项。
+
 ## 2. 故障注入矩阵（Mock 上游 `x-mock-scenario`）
 
 | scenario | 行为 | 主要消费者 |
