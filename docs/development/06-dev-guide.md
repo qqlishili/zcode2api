@@ -21,15 +21,15 @@ python cli.py accounts                   # 巡检；另有 quota / status
 
 ## 2. 测试命令
 
+在项目虚拟环境中运行。启动前，将 `ZCODE_DATA_DIR` 指向本次新建的临时目录，并设置 `PYTHON_DOTENV_DISABLED=1`；上游隔离见 §4，不在生产服务目录测试。
+
 ```bash
-pytest tests/unit -q                     # 单元（无网络）
-pytest tests/interop -q                  # enc:v1 / .zsb 对拍向量
-pytest tests/contract -q                 # 上游响应结构契约
-docker compose -f tests/mock_upstream/compose.yaml up -d   # Mock 上游 :9901
-ZCODE_MOCK_UPSTREAM=http://127.0.0.1:9901 pytest tests/integration -q
-docker compose -f tests/e2e/compose.yaml up --build --abort-on-container-exit  # 全栈 E2E
-pytest --cov=app --cov-report=term-missing  # 覆盖率（门禁见测试文档 01）
+python -m pytest tests/unit -q
+python -m pytest tests/integration -q
+python -m pytest --cov=app --cov-report=term-missing  # 需安装 pytest-cov
 ```
+
+Windows 可通过 `./.venv/Scripts/python.exe -m` 调用同样模块。`tests/interop/`、`tests/contract/` 与 Mock / E2E compose 尚未提供，对应测试规划见测试文档 `03`～`05`。
 
 ## 3. 编码规范
 
@@ -40,17 +40,11 @@ pytest --cov=app --cov-report=term-missing  # 覆盖率（门禁见测试文档 
 - 日志：请求行沿用 `#id | fmt | model | status | ttfb | tokens` 表格风格；池换号必须打 `#id account failed (<reason>)` 便于 grep。
 - 提交信息 `feat|fix|test|docs|refactor(scope): ...`；每个 Phase 对应里程碑分支 `phase/N`。
 
-## 4. Mock 上游（开发期默认挂接）
+## 4. Mock 上游（隔离测试）
 
-`tests/mock_upstream/` 是 FastAPI 应用，模拟 zcode.z.ai / api.z.ai / open.bigmodel.cn 全部端点（见测试文档 04 的注入矩阵）。开发时通过环境变量把上游指过去：
+`tests/mock_upstream/server.py` 提供 FastAPI Mock，覆盖网关、额度、领取、客户端配置与 OAuth 的测试路由。既有 `gateway_client` 夹具启动本机 TCP Mock，并注入上游地址、额度查询和验证码桩；场景与控制头见测试文档 `04` §2。
 
-```bash
-ZAI_UPSTREAM_URL=http://127.0.0.1:9901/api/v1/zcode-plan/anthropic/v1/messages \
-ZAI_FALLBACK_URL=http://127.0.0.1:9901/api/anthropic/v1/messages \
-ZCODE_MOCK_UPSTREAM=http://127.0.0.1:9901 python cli.py serve
-```
-
-Mock 的故障注入用请求头控制（`x-mock-scenario: quota_exhausted | rate_limited | auth_invalid | captcha_challenge | captcha_3007 | sse_ok | sse_truncate | slow_first_byte`）。
+仅设置 `ZAI_UPSTREAM_URL` / `ZAI_FALLBACK_URL` 不能隔离 billing、OAuth、事件上报等调用。项目没有统一重定向所有上游的环境变量；独立运行开发服务前须分别核对这些调用的注入，不能使用真实账号做隔离测试。
 
 ## 5. 构建与部署
 
@@ -85,41 +79,37 @@ WantedBy=multi-user.target
 
 代理来源未受信或未传有效转发头时，计数会按代理连接地址归组。发布前须核对代理与 Uvicorn 配置，并验证同一客户端换伪造头仍会锁定、不同客户端的失败计数相互隔离；仅探活成功不能证明该链路正确。
 
-### 分开发版脚本
+### Git 发布（原目录更新）
 
-操作者需要 Bash、Git、rsync、SSH，远端需有 rsync、systemctl、curl 与既有运行环境。两份脚本共用 `scripts/deploy-common.sh`，不会自动读取应用 `.env`。
+发布顺序：本地提交 → 推送原分支 → VPS 原目录快进更新 → 核对提交与运行文件。沿用已有服务、数据和配置，不再以 rsync 为默认入口。
 
-将下面的占位值替换后保存在本机 `.env.deploy.local`（已被 `.env.*` 忽略），只写部署参数，不写账号凭据：
-
-```bash
-export DEPLOY_HOST='<SSH_ALIAS>'
-export DEPLOY_DIR='<PROJECT_DIR>'
-export DEPLOY_SERVICE='<SERVICE_NAME>.service'
-export DEPLOY_PORT='<PORT>'
-# 前端另有目录时，填写后端 ZCODE_FRONTEND_DIR 实际指向的位置
-# export DEPLOY_FRONTEND_DIR='<FRONTEND_DIR>'
-```
-
-目录须为非根绝对路径，不含空格、shell 特殊字符或 `.` / `..` 路径段；端口须与现有服务一致。使用已配置的 SSH 身份，不把私钥、密码或真实主机信息写入公开脚本。
+核对差分，只暂存本次确认的文件，提交信息沿用 §3。推送后记录完整 `<RELEASE_COMMIT>`，核对远程分支。
 
 ```bash
-source .env.deploy.local
-bash scripts/deploy-backend.sh --dry-run
-bash scripts/deploy-frontend.sh --dry-run
-# 核对私有配置中的目标与同步清单，确认已有备份和上一版本记录后发布
-bash scripts/deploy-backend.sh
-bash scripts/deploy-frontend.sh
+git status --short
+git diff -- <FILE_1> <FILE_2>
+git add -- <FILE_1> <FILE_2>
+git commit -m '<TYPE>(<SCOPE>): <DESCRIPTION>'
+git push origin <BRANCH>
+git rev-parse HEAD
+git ls-remote origin refs/heads/<BRANCH>
 ```
 
-`--dry-run` 仍会通过 SSH 读取远端目录，但不写入或重启。脚本只同步 Git 已跟踪的发布文件：后端为 `app/`（不含旧 `statics/`）、`cli.py`、`requirements.txt` 与 Node 求解器源码、清单、锁文件；前端为 `frontend/`。账号数据、应用配置、虚拟环境、日志、Node 已安装依赖和本机未跟踪文件均不在同步范围内。
+VPS 有未提交修改时，先逐文件核对并承接到本地发布提交；确认一致后再处理对应改动。不直接覆盖或用 `git reset --hard` / `git clean` 清场。
 
-依赖未变时后端脚本同步后重启已有 systemd 服务，并检查状态及 `/meta`；前端从磁盘热读，无需重启。依赖有变时，在维护窗口停服，先执行 `bash scripts/deploy-backend.sh --sync-only`，在远端原虚拟环境中安装 `requirements.txt`，按 Node 锁文件执行 `npm ci`，再执行正常后端发版。脚本不会自动升级依赖。
+工作树干净、当前分支正确且指定提交已推送后，在原目录执行：
 
-脚本不删除远端文件；涉及源码删除或改名时，按差分单独处理对应代码文件，避免对项目根目录执行 `--delete`、`git clean` 或 `git reset --hard`。前端目标必须与服务实际读取目录一致。
+```bash
+cd '<PROJECT_DIR>'
+git fetch origin <BRANCH>
+git merge --ff-only <RELEASE_COMMIT>
+git rev-parse HEAD
+git status --short
+```
 
-rsync 更新的是远端工作树，不会更新远端 Git HEAD。发布记录须关联本地代码版本与实际同步清单；不能只看远端提交号判断运行版本。后续使用 `git pull` 前，先核对远端工作树差分。
+不能快进时先核对提交差异，不强推或改写历史。依赖有变时在维护窗口按原虚拟环境和 Node 锁文件安装；后端业务改动重启已有服务，文档或前端热读文件改动无需重启。
 
-发布验收：`/meta` 的版本、前端页面与 `frontend/version` 一致，再用实际客户端完成一次请求；仅探活成功不代表功能验收通过。回滚用发布前记录的代码版本与依赖恢复服务，保留账号数据；详细备份位置和真实操作记录不进公开仓库。
+发布验收：三处提交号一致，运行文件无未提交差分，服务仍读取原目录；业务改动核对 `/meta`、前端版本及实际客户端请求。记录上一提交与依赖版本以便回滚，保留账号数据。
 
 ### 公开仓库边界
 
@@ -137,8 +127,7 @@ rsync 更新的是远端工作树，不会更新远端 Git HEAD。发布记录�
 
 | 症状 | 排查 |
 |------|------|
-| 全部请求 503 no_available_account | `GET /admin/api/pool` 看状态分布；`billing` 端点 401 多为 JWT 过期（需重登）而非无额度 |
+| 全部请求 503 no_available_account | `GET /admin/api/status` 看状态分布；`billing` 端点 401 多为 JWT 过期（需重登）而非无额度 |
 | 验证码连续失败 | 确认 `captcha_node/node_modules` 已装；`ZCODE_CAPTCHA_TIMEOUT` 调大；阿里云指纹逻辑变更时需更新 solver.js 的浏览器 API 桩 |
 | 额度一直是 0 / 401 | WAF 拦截：检查是否带全套身仿真头；错峰参数是否被调成 0 |
 | 领取一直 ineligible | `identity.appVersion` 低于活动要求，升级配置值 |
-| .zsb 导入解密失败 | 口令错误（错口令即失败无提示，是设计行为）；确认 KDF 迭代未被改 |
