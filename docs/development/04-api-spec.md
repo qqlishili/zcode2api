@@ -11,6 +11,7 @@
 - 请求/响应：标准 Anthropic Messages API（含 `stream: true` 的 SSE 透传）。
 - 上游转发目标由账号模式决定：JWT → `zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages`；API Key → `api.z.ai/api/anthropic/v1/messages`。
 - 行为：多轮会话亲和选号 + 池内 round-robin 选号（`store.select`）→ 单账号失败按分类换号（≤`MAX_ACCOUNT_ATTEMPTS=5`，满号跳过不计）→ 验证码挑战原账号重试（≤3）。429/5xx/验证码等待期间释放该账号并发槽，醒后重新占槽或换号。
+- 会话固定窗口为 600 秒、最多 20 次成功绑定；超过窗口或达到次数后，优先在满足模型优先级的可用账号中换号。没有可服务替代时允许原账号回退，不覆盖健康、额度、并发或失败排除约束。
 - 模型名规范化：纯免费赠送池模式下，网关入口将客户端传入的任意模型名统一归一化为 `constants.DEFAULT_MODEL`（`GLM-5.3-Flash`），并按 `GLM-5.3-Flash` 思考契约转换 `thinking` / `output_config.effort`。
 
 ### 1.2 `GET /v1/models`

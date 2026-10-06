@@ -854,13 +854,19 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
     attempts = 0
     req_model = str(body.get("model") or "").strip() if isinstance(body, dict) else ""
     affinity_key, prefer_sticky = _extract_session_affinity_key(provider, body, incoming_headers)
+    # 在查询解绑前保留旧号，仅用于本次新窗口的软偏好，不放入 tried。
+    entry = _session_affinity.get(affinity_key) if prefer_sticky else None
+    avoid_id = None
+    if entry and (time.time() - entry[1] > _SESSION_AFFINITY_TTL
+                  or (entry[2] if len(entry) > 2 else 0) >= _SESSION_AFFINITY_MAX_REQUESTS):
+        avoid_id = entry[0]
 
     while attempts < MAX_ACCOUNT_ATTEMPTS:
         account = None
         if attempts == 0 and prefer_sticky:
             account = _get_sticky_account(provider, affinity_key, tried, limit, model=req_model)
         if account is None:
-            account = store.select(provider, skip_ids=tried, model=req_model)
+            account = store.select(provider, skip_ids=tried, model=req_model, avoid_id=avoid_id)
         if account is None:
             break
         tried.add(account.id)

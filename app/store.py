@@ -316,6 +316,7 @@ class Store:
         provider: str,
         skip_ids: set[str] | None = None,
         model: str | None = None,
+        avoid_id: str | None = None,
     ) -> Account | None:
         """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量的自动跳过。
 
@@ -335,6 +336,9 @@ class Store:
                 preferred = [a for a in pool if a.explicitly_supports_model(model)]
                 if preferred:
                     pool = preferred
+            # 新会话窗口优先换号；无替代时允许旧号，不覆盖模型优先级或失败排除。
+            if avoid_id:
+                pool = [a for a in pool if a.id != avoid_id] or pool
             cursor = self._rotation.get(provider, 0)
             account = pool[cursor % len(pool)]
             self._rotation[provider] = (cursor + 1) % 1_000_000
