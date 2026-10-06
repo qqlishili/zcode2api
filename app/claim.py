@@ -7,7 +7,7 @@
 
 上游业务码语义（沿用 zcode-switch 映射）：1001 套餐不存在 / 1002 活动结束 /
 1003 已领取过 / 1004 不符合条件 / 1005 今日名额用完 / 3001 参数错误 /
-3007 验证码失败（换验证码重试一次）/ 401 未登录。
+3007 验证码失败（清码后单次止损）/ 401 未登录。
 """
 
 from __future__ import annotations
@@ -662,7 +662,7 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
     """领取套餐。plan_id 缺省时自动选优先级最高的可领套餐。
 
     返回 {"plan_id", "plan_name", "grants", "starts_at", "ends_at", "server_time"}；
-    3007（验证码失败）自动换码重试一次。
+    3007（验证码失败）清空预解池后直接返回失败，不在本次领取中换码连打。
     """
     _ensure_claimable_account(account)
     plan_id, plan_name, grants = await _auto_pick_plan(account, plan_id)
@@ -671,19 +671,14 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
             await report_activation_events(account)
         except Exception as act_err:
             logs.warn("claim", f"账号 {account.name} 领取前激活上报跳过: {act_err}")
-    last_err: ClaimError | None = None
-    for attempt in (1, 2):
-        verify_param, verify_region = await captcha_manager.get_verify_param()
-        config = await captcha_manager.fetch_config()
-        headers = _claim_headers(account, verify_param, verify_region or config.get("region"))
-        try:
-            body = await _post_claim(account, headers, plan_id)
-            return _claim_outcome(body, plan_id, plan_name, grants)
-        except ClaimError as err:
-            if err.code == 3007 and attempt == 1:
-                logs.warn("claim", f"账号 {account.name} 验证码被拒，换码重试")
-                captcha_manager.invalidate()
-                last_err = err
-                continue
-            raise
-    raise last_err or ClaimError("领取失败")
+    verify_param, verify_region = await captcha_manager.get_verify_param()
+    config = await captcha_manager.fetch_config()
+    headers = _claim_headers(account, verify_param, verify_region or config.get("region"))
+    try:
+        body = await _post_claim(account, headers, plan_id)
+    except ClaimError as err:
+        if err.code == 3007:
+            logs.warn("claim", f"账号 {account.name} 验证码被拒，清空预解池并停止本次领取")
+            captcha_manager.invalidate()
+        raise
+    return _claim_outcome(body, plan_id, plan_name, grants)

@@ -194,6 +194,13 @@
 - **治理方案**：
   1. **「探查即落库 + 全池经验广播 + 幂等重入保真」单一事实源（`app/claim.py`）**：提炼 `_norm_plan_id`、`filter_unclaimed_plans`、`sync_account_claimable_plans`、`sync_pool_claimable_plans` 四个原子函数。在 `preview_plans(account)` 完成探查瞬间即同步持久化当前账号的 `claimable_plans`，并将非基础大促活动通过 `sync_pool_claimable_plans` 广播同步至池内所有未持有该活动的可计费 JWT 账号；`parse_plan` 支持对已解析 `grants` 列表的幂等重入，且 `pool_active_plans` / `filter_unclaimed_plans` / `preview_plans` 去重合并时优先保留含完整 `grants` 与 `ends_at` 的元数据项；`_auto_pick_plan` 在发起 `POST /billing/claim` 前确保待领项已入库，`_post_claim` 在成功（`code == 0`）或已领（`code == 1003`）时自动剔除该项，遇 `3012`/`1005` 失败则天然保留待领 Icon；
   2. **底层方法原子化拆解与拼装（`app/claim.py`、`app/sentinel.py`、`app/quota.py`、`app/routes/admin_api.py`）**：
-     - `claim()` 与 `claim_with_captcha()` 共享 `_ensure_claimable_account()` 前置栅栏与 `_post_claim()` 单次提交原语，`claim()` 仅负责外层 `3007` 换码重试闭环；
+     - `claim()` 与 `claim_with_captcha()` 共享 `_ensure_claimable_account()` 前置栅栏与 `_post_claim()` 单次提交原语，`claim()` 负责验证码获取及拒码处理（v2.6.5 起 `3007` 清码后单次止损）；
      - `Sentinel.check_once()` 拆解为 `_prune_expired_cooldown`、`_record_cooldown`、`_billable_candidates`、`_probe_upstream_plans`、`_run_catchup_claims`、`_claim_new_plans_across_pool`、`_format_bark_report`、`_deliver_and_commit_new_plans` 8 个职责单一的小步骤方法组合编排。
 
+### 4.13 上游小修定向融合：客户端版本归一与领取拒码止损（v2.6.5）
+- **移植来源**：[dengyie/zcode2api 的 bda8ea1](https://github.com/dengyie/zcode2api/commit/bda8ea15793764dec3dd748e2d17702a85084854)（上游 v2.6.8）。本地版本独立递增，按已有架构吸收增量。
+- **融合内容**：
+  1. `CLIENT_APP_VERSION` 跟进至 `3.14.4`，`BILLING_APP_VERSION` 引用同一常量，消息头、billing 头、configs 查询串及激活事件版本同步；
+  2. `claim()` 收到 `3007` 时清空预解池并直接返回失败，本次不换码连打；复用 `_post_claim()` 保留待领状态，后续手动领取或哨兵补领仍可恢复。对话网关的验证码挑战重试保持原有语义。
+- **保留边界**：继续复用本地 `Sentinel`、安装与入池领取串行错峰锁、1005 持久避让及 grants 保真同步。Chromium 求解、强制直连、轮询降频和风控冷却/自动换指纹另行评估，不叠加上游周期领取器。
+- **行为验证**：`tests/integration/test_claim.py::TestClaim::test_claim_captcha_rejected_stops_without_retry` 覆盖一次求解/一次提交、一次清码、业务码回执、待领项保留以及后续领取成功剔除；版本出口由 constants、billing 请求头及激活事件用例共同验证。

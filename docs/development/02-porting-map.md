@@ -44,6 +44,7 @@
 | 领取请求 | POST `billing/claim`，头：`Authorization: Bearer {jwt}` + 验证码头 + `X-Device-Mid` + 版本身份头 | 重写（httpx） | 验证码走 `captcha.py` |
 | 退避策略 | `already_claimed`/`quota_exhausted` → 服务端窗口；其它 → cooldown 10min；404 预览未上线静默 | 直译 | 参数入 settings：`claim.poll_interval=300s`、`claim.cooldown=600s`、`claim.auto=true` |
 | 参考（协议已验证的实现） | zapi `src/claim/*`（scheduler/runtime/client） | 仅协议对照 | 不复制代码 |
+| 上游定向增量（v2.6.5） | dengyie/zcode2api `1b3b271`（版本）/ `1165108`（领取止损），固定审查版本 `bda8ea1` | 已融合：客户端 3.14.4、领取 3007 单次止损 | billing 复用客户端版本；领取沿用本地 `_post_claim`、待领同步与哨兵调度，保留串行错峰 |
 
 ## 5. 加密与封包
 

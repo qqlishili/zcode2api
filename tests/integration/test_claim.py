@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from app import constants
 from tests.conftest import seed_account
 
 GOOD_JWT = "h1.eyJzdWIiOiJhIn0.sig"
@@ -91,7 +92,7 @@ class TestClaim:
         from app.fingerprint import profile_for
 
         profile = profile_for(acc)
-        assert headers.get("x-zcode-app-version") == "3.14.3"  # BILLING_APP_VERSION
+        assert headers.get("x-zcode-app-version") == constants.BILLING_APP_VERSION
         assert headers.get("x-platform") == profile.platform_full
         assert headers.get("x-device-mid") == profile.device_mid
         assert b"mock-claim-plan" in body
@@ -108,19 +109,34 @@ class TestClaim:
         assert outcome["ok"] is True
         assert outcome["plan_id"] == "mock-claim-plan"
 
-    async def test_claim_captcha_rejected_retries_once(self, claim_env):
+    async def test_claim_captcha_rejected_stops_without_retry(self, claim_env):
         client, mock, stub, acc = claim_env
         mock.state.claim_scenario = "claim_captcha_fail"
+        mock.state.calls.clear()
         res = await client.post("/admin/api/claim",
                                 json={"account_ids": [acc.id]},
                                 headers={"Authorization": "Bearer zcode"})
         outcome = res.json()["outcomes"][0]
         assert outcome["ok"] is False
+        assert outcome["code"] == 3007
         assert "验证码校验失败" in outcome["message"]
-        # 3007 → 换码重试一次：求解 2 次 + invalidate 1 次
-        assert stub.solve_count == 2
+        # CL-011：拒码出池，本次只提交一次，待领状态保留供后续重试
+        claim_calls = [c for c in mock.state.calls if c[1].endswith("/billing/claim")]
+        assert len(claim_calls) == 1
+        assert stub.solve_count == 1
         assert stub.invalidated == 1
         assert res.json()["summary"] == {"ok": 0, "fail": 1}
+        assert [p["plan_id"] for p in acc.claimable_plans] == ["mock-claim-plan"]
+
+        # 下一次领取仍可成功，不把验证码拒绝变成账号永久禁用或名额避让
+        mock.state.claim_scenario = None
+        recovered = await client.post("/admin/api/claim",
+                                      json={"account_ids": [acc.id]},
+                                      headers={"Authorization": "Bearer zcode"})
+        assert recovered.json()["summary"] == {"ok": 1, "fail": 0}
+        assert stub.solve_count == 2
+        assert stub.invalidated == 1
+        assert acc.claimable_plans == []
 
     async def test_preview_reports_activation_events(self, claim_env):
         """preview 前上报 app_launch + app_daily_active（zcode-switch 同形）。"""
@@ -142,7 +158,7 @@ class TestClaim:
         body = _json.loads(body)
         # user_id 来自 JWT payload（GOOD_JWT sub="a" 兜底）；无 Authorization 头
         assert body["user_id"] == "a"
-        assert body["app_version"] == "3.14.3"
+        assert body["app_version"] == constants.BILLING_APP_VERSION
         assert body["device_mid"]
         # 指纹档案（2026-09-07）：事件字段按账号指纹出值，与 billing 头同源
         from app.fingerprint import profile_for
@@ -168,8 +184,8 @@ class TestClaim:
                          if c[1].endswith("/billing/preview")]
         assert preview_calls
         h = preview_calls[-1][2]
-        assert h.get("user-agent") == "ZCode/3.14.3"
-        assert h.get("x-zcode-app-version") == "3.14.3"
+        assert h.get("user-agent") == f"ZCode/{constants.BILLING_APP_VERSION}"
+        assert h.get("x-zcode-app-version") == constants.BILLING_APP_VERSION
         assert h.get("x-title") == "Z Code@electron"
         assert h.get("x-release-channel") == "stable"
         # 平台/语言/设备按账号指纹档案出值（2026-09-07 随机指纹池）
@@ -380,7 +396,7 @@ class TestManualClaim:
 
         profile = profile_for(acc)
         assert headers.get("x-device-mid") == profile.device_mid
-        assert headers.get("x-zcode-app-version") == "3.14.3"  # 客户端 claim 头形态
+        assert headers.get("x-zcode-app-version") == constants.BILLING_APP_VERSION
         assert headers.get("x-platform") == profile.platform_full
         assert b"mock-claim-plan" in body
         assert stub.solve_count == 0

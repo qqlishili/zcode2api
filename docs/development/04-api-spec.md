@@ -86,7 +86,7 @@
 | 方法/路径 | 说明 |
 |-----------|------|
 | `GET /admin/api/claim/preview` | 立即拉取当前可领套餐（`?account_id` 单账号；先上报激活事件） |
-| `POST /admin/api/claim` | `{account_ids?, plan_id?}` 自动领取（服务端求解验证码，3007 换码重试一次） |
+| `POST /admin/api/claim` | `{account_ids?, plan_id?}` 自动领取（服务端求解验证码；3007 清空预解池后单次止损，回执保留业务码与待领状态） |
 | `POST /admin/api/claim/manual` | `{account_id, captcha_verify_param, captcha_region?, plan_id?}` 浏览器滑块人工领取 |
 | `GET /admin/api/claim/captcha-config` | 前端滑块 SDK 初始化参数（scene/region/prefix/enabled） |
 

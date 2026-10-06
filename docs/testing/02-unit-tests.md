@@ -85,6 +85,7 @@
 | CL-008 | 多账号批量 | 池内 3 JWT 账号 → 各自领取，互不阻塞（错峰） | P1 |
 | CL-009 | auto=false 手动模式 | 调度器不自动发 claim；`POST /admin/api/claim` 生效 | P1 |
 | CL-010 | 非 JWT 账号跳过 | apiKey 模式账号不参与领取 | P1 |
+| CL-011 | 领取拒码单次止损与恢复 | Mock 返回 3007 → 一次求解/一次提交/一次清码、保留待领项与业务码；后续成功领取剔除待领项（`tests/integration/test_claim.py`） | P1 |
 
 ## 6. CAPTCHA — 验证码（captcha.py / solver.js）
 

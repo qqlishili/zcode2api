@@ -24,21 +24,21 @@ def test_billing_base():
 def test_client_configs():
     assert constants.CLIENT_CONFIGS_URL == "https://zcode.z.ai/api/v1/client/configs"
     # 实测带 platform 参数上游 3001，只允许 app_version
-    assert constants.CLIENT_CONFIGS_QUERY == "app_version=3.14.3"
+    assert constants.CLIENT_CONFIGS_QUERY == "app_version=3.14.4"
 
 
 def test_client_version_single_source():
-    # 对齐官方客户端 3.14.3
+    # 对齐上游跟进的官方客户端 3.14.4
     # 全部版本出口必须引用同一常量，禁止再出现字面量版本号
-    assert constants.CLIENT_APP_VERSION == "3.14.3"
+    assert constants.CLIENT_APP_VERSION == "3.14.4"
     assert constants.X_ZCODE_APP_VERSION == constants.CLIENT_APP_VERSION
     assert constants.USER_AGENT == f"ZCode/{constants.CLIENT_APP_VERSION}"
     assert constants.CLIENT_PLATFORM == "darwin-arm64"  # asar TH() = platform-arch
 
 
 def test_billing_version_and_activation():
-    # billing 族对齐官方现行版 3.14.3
-    assert constants.BILLING_APP_VERSION == "3.14.3"
+    # billing 与消息族复用同一客户端版本，避免两处字面量独立漂移
+    assert constants.BILLING_APP_VERSION == constants.CLIENT_APP_VERSION
     assert constants.BILLING_TITLE == "Z Code@electron"
     assert constants.BILLING_RELEASE_CHANNEL == "stable"
     assert constants.EVENT_REPORT_URL == "https://zcode.z.ai/api/v1/event/report"

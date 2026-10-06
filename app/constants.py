@@ -41,15 +41,15 @@ USAGE_PATH = "/usage"
 OAUTH_CLI_INIT_PATH = "/api/v1/oauth/cli/init"
 OAUTH_CLI_POLL_PATH = "/api/v1/oauth/cli/poll"   # + /{flow_id}
 
-# ── 客户端版本（单一真相源：对齐官方 ZCode 客户端 3.14.3）──────────────────────
+# ── 客户端版本（单一真相源：跟进上游 bda8ea1 的官方客户端 3.14.4）────────────
 # 客户端 claim 头实测缺版本/平台头 → 上游 3007；client/configs 带 platform 参数 → 3001
-CLIENT_APP_VERSION = "3.14.3"
+CLIENT_APP_VERSION = "3.14.4"
 CLIENT_PLATFORM = "darwin-arm64"  # asar TH() = process.platform-arch，服务端固定伪装
 CLIENT_CONFIGS_URL = f"{ZCODE_ORIGIN}/api/v1/client/configs"
 CLIENT_CONFIGS_QUERY = f"app_version={CLIENT_APP_VERSION}"
 
-# ── billing 族版本 / 激活上报（对齐官方客户端 3.14.3）─────────────────────────
-BILLING_APP_VERSION = "3.14.3"
+# ── billing 族版本 / 激活上报（复用同一官方客户端版本）────────────────────────
+BILLING_APP_VERSION = CLIENT_APP_VERSION
 BILLING_TITLE = "Z Code@electron"        # zcode-switch billing 头实证形态
 BILLING_RELEASE_CHANNEL = "stable"
 # 官方客户端每日活跃事件：POST /api/v1/event/report（不在 zcode-plan 下、无

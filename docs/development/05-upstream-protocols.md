@@ -89,7 +89,7 @@ API Key 通道差异：`x-api-key: {apiKey}.{secret?}` 替代 Bearer，无验证
 | 402 / body 含 quota|insufficient|balance|exhaust|额度|余额不足 | 额度耗尽 | exhausted，30min 重试窗 |
 | 429 | 限流 | cooling 300s |
 | 401 / 403(非验证码) | 凭证失效 | invalid，直到重登 |
-| 403 + captcha 挑战 / 400+`code:3007` | 验证码问题 | 刷新 verifyParam 原账号重试 |
+| 403 + captcha 挑战 / 400+`code:3007` | 验证码问题 | 对话刷新 verifyParam 原账号重试；领取 3007 清空预解池后单次止损 |
 
 ## 4. 免费额度（Start Plan）
 
@@ -115,10 +115,11 @@ POST billing/claim     → 头: Bearer JWT + 验证码头 + X-Device-Mid + X-ZCo
 前置: identity.appVersion ≥ 活动要求的最低客户端版本（否则 ineligible）
 ```
 
-版本口径（单一真相源 `app/constants.py`）：`CLIENT_APP_VERSION="3.14.3"`；
+版本口径（单一真相源 `app/constants.py`）：`CLIENT_APP_VERSION="3.14.4"`，`BILLING_APP_VERSION` 直接引用该值；
 无账号路径的 `CLIENT_PLATFORM="darwin-arm64"`（asar `TH()` = `process.platform-process.arch`）。
 有账号时 `X-Platform` / preview `platform` 跟该号 DeviceProfile 走（成套桌面 SKU，一号一台），禁止再盖成全局 darwin-arm64。
 `USER_AGENT` / `X-ZCode-App-Version` / configs 查询串全部引用版本常量。
+版本依据：[dengyie/zcode2api 的 1b3b271](https://github.com/dengyie/zcode2api/commit/1b3b271972c00c24245b28ac74069b249bd5bea1)（2026-10-02 客户端版本跟进）；消息、billing 与激活事件共用此口径。
 
 ## 6. 免费额度以外的两条通道（认知备查）
 
