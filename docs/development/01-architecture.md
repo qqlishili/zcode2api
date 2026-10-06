@@ -34,7 +34,7 @@ zcode-hub 是一个**自托管服务**，同时承担两个角色：
 | 运行时 | Python 3.11+ | 继承 zcode2api 底座 |
 | Web | FastAPI + Uvicorn | 异步网关，SSE 流式透传 |
 | HTTP 客户端 | httpx | 连接池 + 流式 + 超时细粒度控制 |
-| 存储 | SQLite (WAL) | 账号池 / 设置 / 领取历史；单机自托管 |
+| 存储 | SQLite (WAL) | 账号池 / 设置（凭证明文）；领取历史待实现 |
 | 验证码 | Node + happy-dom 子进程 | 复用 zcode2api 方案：无浏览器运行阿里云无痕 SDK |
 | 前端 | 原生 JS + 轻量模板 | 继承 zcode2api 后台骨架，扩额度/领取面板 |
 | 测试 | pytest + pytest-asyncio + respx | 单元 + 契约；Mock 上游见测试文档 |

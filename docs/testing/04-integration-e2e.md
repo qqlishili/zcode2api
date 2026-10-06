@@ -65,7 +65,6 @@
 | AFF-005 | 多会话与思考块 | 交错多轮、故障转移和取消 | 绑定正确，槽位无泄漏，沿用思考块兼容 |
 
 
-
 | scenario | 行为 | 主要消费者 |
 |----------|------|-----------|
 | `ok` | 正常 200（SSE 或批量按请求 stream 参数） | 基线 |
@@ -88,7 +87,7 @@
 
 ## 3. E2E 用例（compose 全栈）
 
-环境：`tests/e2e/compose.yaml` = zcode-hub 服务 + Mock 上游 + 种子脚本（预置 3 账号）。
+规划环境：`tests/e2e/compose.yaml` = zcode-hub 服务 + Mock 上游 + 种子脚本（预置 3 账号）。
 
 | ID | 场景 | 步骤 | 断言 |
 |----|------|------|------|
@@ -100,7 +99,7 @@
 
 ## 4. 真实上游冒烟（发版前，手动）
 
-脚本 `tests/smoke/real_upstream.sh`（需 `ZCODE_SMOKE_CREDENTIALS` 注入，跑完清理）：
+规划脚本 `tests/smoke/real_upstream.sh`（需 `ZCODE_SMOKE_CREDENTIALS` 注入，跑完清理）：
 
 1. `GET /health` 池 ≥1
 2. `/v1/messages` 8-token 非流式一条 → 200 且 usage>0

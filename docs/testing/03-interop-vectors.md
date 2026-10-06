@@ -1,12 +1,12 @@
 # 测试 03 — 互通对拍向量与 Fixture 规范
 
-状态：enc:v1 向量已确认（来自 zcode-switch 官方测试向量）；.zsb 向量待 M0 回填 envelope 后生成。
+状态：enc:v1 来源向量已确认；.zsb 格式已回填，互通测试待实现。
 
 ## 1. enc:v1 对拍向量
 
 ### 1.1 zcode-switch 官方向量（必须原样内置）
 
-文件：`tests/interop/vectors/enc-v1/zsw-node-enc-v1.json`
+规划文件：`tests/interop/vectors/enc-v1/zsw-node-enc-v1.json`
 
 ```json
 {
@@ -60,9 +60,9 @@ pytest tests/interop/test_enc_v1.py -q
 
 ## 2. .zsb 互通向量（M1 产出）
 
-### 2.1 前置回填任务（M0）
+### 2.1 来源格式回填记录（M0）
 
-从 zcode-switch `src-tauri/src/cipher.rs`（110 行，全文通读）确认 envelope 完整 schema，回填开发文档 03 §4。重点确认：nonce/salt/ciphertext 字段名与编码、payload 明文的账号数组结构、可能的版本号/checksum 字段。
+来源格式已回填至开发文档 `03` §4；实现时按对应来源版本核对字段与编码，再生成互通向量。
 
 ### 2.2 向量生成流程
 
@@ -102,7 +102,7 @@ pytest tests/interop/test_enc_v1.py -q
 | `messages-error-402.json` / `-429.json` / `-401.json` / `-403-captcha.json` / `-400-3007.json` | 错误体原文 | 分类器数据源 |
 | `oauth-init.json` / `oauth-poll-done.json` / `z-login.json` / `customer-info.json` / `api-keys.json` | OAuth 链路各步 | z2a oauth.py + zsw oauth.rs |
 
-**契约测试**（`tests/contract/`）断言两件事：① Mock 上游返回与 fixture 逐字段一致；② 我方解析器对 fixture 的解析结果稳定（金样本断言）。真实上游冒烟若失败 → 先 diff 此层。
+**规划的契约测试**（`tests/contract/`）断言两件事：① Mock 上游返回与 fixture 逐字段一致；② 我方解析器对 fixture 的解析结果稳定（金样本断言）。真实上游冒烟若失败 → 先 diff 此层。
 
 ## 4. 向量维护规则
 

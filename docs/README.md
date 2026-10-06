@@ -11,11 +11,11 @@
 | **开发文档** ||
 | [01-architecture.md](development/01-architecture.md) | 总体架构、模块职责、请求流程、状态机 | 全体 |
 | [02-porting-map.md](development/02-porting-map.md) | 三方源码 → 新项目模块的移植映射（函数级对照） | 开发 |
-| [03-data-formats.md](development/03-data-formats.md) | DB schema、凭证存储 v2、enc:v1 编解码、.zsb 包格式 | 开发 |
+| [03-data-formats.md](development/03-data-formats.md) | SQLite 与明文凭证存储；enc:v1 / .zsb 规划格式 | 开发 |
 | [04-api-spec.md](development/04-api-spec.md) | 网关 API（Anthropic/OpenAI/Responses）+ 管理 API 规范 | 开发/调用方 |
 | [05-upstream-protocols.md](development/05-upstream-protocols.md) | 上游协议参考：OAuth/对话/计费/领取/验证码/风控 | 开发 |
 | [06-dev-guide.md](development/06-dev-guide.md) | 环境搭建、编码规范、测试运行、构建与部署（Linux + systemd） | 开发 |
-| [07-roadmap.md](development/07-roadmap.md) | 四阶段路线图、里程碑与依赖关系 | 全体 |
+| [07-roadmap.md](development/07-roadmap.md) | 里程碑、实施状态与依赖关系 | 全体 |
 | [activity_plan_and_captcha_architecture.md](development/activity_plan_and_captcha_architecture.md) | 多活动套餐归一化展示、待领活动感知与双轨验证优化设计方案（含 v2.6.5 客户端版本归一与领取拒码单次止损、探查即落库全池待领同步与原子方法拼装重构、跨零点准时破冰调度、错峰平滑轮询、上游协议/领取 3.11.2 语义融合、种子驱动深度混淆指纹池与全链路 Bark 战报推送） | 开发/架构 |
 | **测试文档** ||
 | [01-test-strategy.md](testing/01-test-strategy.md) | 测试策略总纲、分层、Mock 上游方案、覆盖门禁 | 全体 |

@@ -1,20 +1,18 @@
 # 03 — 数据格式与存储规范
 
-状态：**定稿**。enc:v1 / SQLite / `.zsb` envelope 全字段清单均已按源码核对（.zsb 于 2026-09-03 从 zsw `cipher.rs` 全文 + `store.rs` 回填）。
+状态：SQLite / 配置描述当前实现；enc:v1 / `.zsb` 为待实现的来源格式参考。
 
-## 1. SQLite Schema（`data/zcode-hub.db`，WAL）
+## 1. 当前 SQLite Schema（`$ZCODE_DATA_DIR/accounts.db`，WAL）
 
 ```sql
 -- 账号池
 CREATE TABLE accounts (
-    id          TEXT PRIMARY KEY,          -- zai-<sha256[:12]>（按 provider+凭证派生，重登稳定）
+    id          TEXT PRIMARY KEY,          -- <规范化名称>-<8位随机十六进制>；重登幂等由 Store 检查凭证
     provider    TEXT NOT NULL,             -- 'zai' | 'bigmodel'
     name        TEXT,
-    label       TEXT,                      -- 用户可读标签（login --label）
-    mode        TEXT NOT NULL,             -- 'jwt' | 'apiKey'
-    status      TEXT NOT NULL,             -- active|exhausted|cooling|invalid|disabled
+    mode        TEXT,                      -- 'jwt' | 'apiKey'
+    status      TEXT,                      -- active|exhausted|cooling|invalid|disabled
     enabled     INTEGER NOT NULL DEFAULT 1,
-    cooling_until REAL,                    -- unix 秒
     created_at  REAL,
     data        TEXT NOT NULL              -- JSON：凭证 + 运行时统计（见下）
 );
@@ -22,52 +20,40 @@ CREATE INDEX idx_acc_provider ON accounts(provider);
 CREATE INDEX idx_acc_status   ON accounts(status);
 
 -- data JSON 字段（Account.to_dict()）
--- { jwt_token?, api_key?, api_secret?, user_id?, quota:{model:{total,used,remaining,expires_at}},
---   plan_slots:[...], plan: {...}, use_count, fail_count, last_used_at, last_checked_at, last_error }
+-- { id, name, provider, mode, jwt_token, api_key, quota, plan, plans, plan_slots, claimable_plans,
+--   usage, use_count, fail_count, cooling_until, claim_blocked_until, last_used_at, last_checked_at, ... }
 
 -- 设置 KV（admin_key / gateway_key / 各 interval）
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-
--- 领取历史
-CREATE TABLE claim_history (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    account_id  TEXT NOT NULL,
-    plan_id     TEXT, plan_name TEXT,
-    outcome     TEXT NOT NULL,             -- claimed|already_claimed|quota_exhausted|failed
-    starts_at   REAL, ends_at   REAL,      -- 套餐生效窗口
-    detail      TEXT,                      -- 上游原始响应摘要
-    created_at  REAL NOT NULL
-);
 ```
 
-设计要点（继承 z2a 并扩展）：
+存储约定：
 
 - **内存驻留 + 落库同步**：运行期账号对象常驻内存保证轮询游标与状态实时性，每次变更 `INSERT OR REPLACE` 落库；启动时读快照重建（z2a `store.py` 语义）。
-- 凭证字段在 `data` JSON 内**加密存储**（AES-256-GCM，主密钥来自 `ZCODE_MASTER_SECRET` env；缺省派生方式同 enc:v1 的 fallback 思路，文档化并可在测试中固定）。这是对 z2a 明文存储缺陷的修复。
-- `public_view()` 一律脱敏：`{key[:8]}…{key[-6:]}`。
+- 凭证随 `data` JSON 明文存储；`Store.export` 输出明文 `{version, exported_at, providers}` JSON。加密落库与领取历史待实现。
+- `public_view()` 的 `token_masked` 对长度超过 16 的凭证使用 `{key[:8]}…{key[-6:]}`，短字符串沿用原值。
 
 ## 2. 运行时配置（settings）
+
+下表为 `app/settings.py` 的主要环境变量。网关密钥由 DB meta 管理，不读取 `ZCODE_GATEWAY_KEY`；`config.example.yaml` 未接入。
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `ZCODE_PORT` / `ZCODE_HOST` | 3000 / 0.0.0.0 | 服务监听 |
 | `ZCODE_ADMIN_KEY` | `zcode` | 后台密码初值（之后以 DB meta 为准） |
-| `ZCODE_GATEWAY_KEY` | 空 | 网关 API Key（空 = 不校验，仅限本机使用） |
-| `ZCODE_MASTER_SECRET` | 派生 | 账号凭证加密主密钥 |
 | `ZCODE_DATA_DIR` | `./data` | SQLite 与凭证目录 |
-| `POOL_MAX_ATTEMPTS` | 4 | 单请求内换号上限 |
-| `POOL_COOLDOWN_SECONDS` | 300 | 429 冷却 |
-| `POOL_EXHAUSTED_RETRY_SECONDS` | 1800 | 额度耗尽重试窗口 |
-| `QUOTA_REFRESH_INTERVAL` | 60 | 额度轮询间隔（0 关闭） |
-| `QUOTA_STAGGER_MAX_MS` | 8000 | 错峰抖动上限 |
-| `CLAIM_ENABLED` / `CLAIM_AUTO` | false / true | 领取开关 / 后台自动 |
-| `CLAIM_POLL_INTERVAL` / `CLAIM_COOLDOWN` | 300s / 600s | 领取轮询 / 失败退避 |
+| `ZCODE_COOLING_SECONDS` | 300 | 5xx 重试耗尽 / 连接失败冷却；429 为原地等待重试 |
+| `ZCODE_ACCOUNT_CONCURRENCY` | 2 | 单号并发初值，DB meta 可热改，0 不限 |
+| `ZCODE_QUOTA_REFRESH_INTERVAL` | 60 | 额度轮询初值，DB meta 可热改，0 关闭 |
+| `ZCODE_BILLING_REFRESH_MIN_INTERVAL` | 60 | 成功对话与后台额度刷新去抖 |
+| `ZCODE_SENTINEL_INTERVAL` / `ZCODE_SENTINEL_AUTO_CLAIM` | 1800 / 1 | 活动哨兵初值，DB meta 可热改 |
 | `ZAI_UPSTREAM_URL` / `ZAI_FALLBACK_URL` / `BIGMODEL_UPSTREAM_URL` | 官方端点 | 上游可覆写（测试注入用） |
 | `ZCODE_NODE_PATH` / `ZCODE_CAPTCHA_TIMEOUT` / `ZCODE_CAPTCHA_RETRIES` | node / 40s / 4 | 验证码求解 |
+| `CAPTCHA_POOL_MIN` / `CAPTCHA_POOL_MAX` / `CAPTCHA_TOKEN_TTL` | 3 / 10 / 75000 | 预解池目标 / 上限 / token TTL（毫秒） |
 
 ## 3. enc:v1 编解码（ZCode 客户端凭证格式，zsw zcrypto.rs）
 
-用于：读取/写回本机 ZCode 客户端 `~/.zcode/v2/credentials.json`（Phase 3）。
+用于 ZCode 客户端凭证（Phase 3，待实现），与 `frontend/js/auth.js` 的同名后台密钥格式不同。
 
 ```
 字符串形态:  enc:v1:{nonce_b64}.{tag_b64}.{ct_b64}
@@ -81,7 +67,7 @@ secret 默认: "zcode-credential-fallback:{platform}:{home}:{username}"
 env 覆盖:    ZCODE_CREDENTIAL_SECRET
 ```
 
-Python 参考实现（`zclient.py`，须通过对拍向量）：
+Python 参考算法（须通过对拍向量）：
 
 ```python
 import base64, hashlib
@@ -122,13 +108,13 @@ def encrypt_with_secret(plain: str, secret: str) -> str:
 
 ## 4. `.zsb` 加密封包（与 zcode-switch 互通）
 
-设计目标：**zcode-hub 导出的 .zsb 能被 zcode-switch 导入，反之亦然。**
+设计目标（待实现）：**zcode-hub 导出的 .zsb 能被 zcode-switch 导入，反之亦然。**
 
 > 状态：**已回填定稿**（2026-09-03，源码：zsw `cipher.rs` 全文 110 行 + `store.rs` `export_bundle_value` L777 / `import_candidates` L794 / Account 结构 L82 / `capture_current` L448）。
 
 ### 4.1 外层 envelope（加密层，cipher.rs）
 
-`.zsb` 文件本体是一个 JSON 对象，顶层字段恰好三个：`format` / `version` / `kdf` / `cipher`（四个）：
+`.zsb` 文件本体是一个 JSON 对象，顶层字段为四个：`format` / `version` / `kdf` / `cipher`：
 
 ```json
 {
@@ -176,17 +162,17 @@ def encrypt_with_secret(plain: str, secret: str) -> str:
 - `credentials` 是 `~/.zcode/v2/credentials.json` 的原样内容（`capture_current` 直接存 live 文件），敏感值是 `enc:v1:` 密文；`config` 是 `config.json` 原样内容或 null。
 - 导入识别：`import_candidates()` 只认 `format == "zcode-accounts-bundle"`，其余（含旧版单账号 `zcode-account`、裸 credentials.json）报「无法识别」拒绝——**不要**为了宽容而放宽这个判定，否则 03 测试文档的负向向量 BN-002/003 会失效。
 - 时间戳：zsw 用本地时区 ISO8601（chrono `Local`），我们保持 ISO8601 即可，导入方不校验格式。
-- zcode-hub 侧导入只取 `credentials` 中的可解字段（provider/apiKey/secret/jwt/name），多余字段忽略（同 zsw 行为）。
+- 封包导入计划只取 `credentials` 中的可解字段（provider/apiKey/secret/jwt/name），多余字段忽略（同 zsw 行为）。
 
 ### 4.3 口令来源
 
-- CLI `--password` 或环境变量 `ZSW_PASSWORD`（沿用 zsw 命名保持脚本兼容；zcode-hub 自身另支持 `ZCODE_BUNDLE_PASSWORD`，`ZSW_PASSWORD` 优先）。
+- 规划：CLI `--password` 或环境变量 `ZSW_PASSWORD`（沿用 zsw 命名；`ZCODE_BUNDLE_PASSWORD` 为备选，`ZSW_PASSWORD` 优先）。
 
 ## 5. 运行时产物
 
 | 产物 | 位置 | 生命周期 |
 |------|------|----------|
 | `accounts.db` (+wal/shm) | `$ZCODE_DATA_DIR` | 常驻，备份对象 |
-| 验证码缓存 | 进程内存 | TTL 45s，进程重启即失 |
-| claim_history | SQLite 表 | 永久，UI 展示 |
+| 验证码预解池 | 进程内存 | 默认 token TTL 75000ms，进程重启即失 |
+| claim_history（规划） | 尚无对应表 | 持久化历史与 UI 仍待实现 |
 | 日志 | stdout（由进程管理器接管） | 滚动由部署层负责 |

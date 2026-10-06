@@ -1,5 +1,7 @@
 # 07 — 路线图
 
+模块名保留原计划；勾选仅表示相应功能已有实现，里程碑按出口标准验收。
+
 ## 里程碑总览
 
 ```
@@ -12,7 +14,7 @@ M0 骨架      ──▶ M1 账号运营层(P1) ──▶ M2 网关扩展(P2) �
 - [ ] 仓库初始化：`app/` 骨架、`requirements.txt`、`config.example.yaml`、CI（pytest + ruff + mypy-basic）
 - [ ] 从 zcode2api 复制底座：`store/models/captcha(+captcha_node)/oauth(zai)/routes/gateway(anthropic)/statics`
 - [ ] 上游常量收口 `app/constants.py`；`docs/development/03-data-formats.md` 的 .zsb envelope 字段回填（通读 zsw `cipher.rs` 全文 + `store.rs` L1090-L1300）
-- [ ] Mock 上游最小版（messages + billing + client/configs）进 `tests/mock_upstream/`
+- [x] Mock 上游最小版（messages + billing + client/configs）进 `tests/mock_upstream/`
 
 **出口标准**：zcode2api 原行为在 Mock 上游下全绿（回归基线建立）。
 
@@ -30,11 +32,11 @@ M0 骨架      ──▶ M1 账号运营层(P1) ──▶ M2 网关扩展(P2) �
 
 ## M2 — 网关扩展（Phase 2）
 
-- [ ] `translator/`：OpenAI↔Anthropic 请求/响应/usage/tool_calls 映射（对照表先写测试用例）
-- [ ] `gateway/openai.py`：`/v1/chat/completions`（流式 + 批量）
+- [x] `translator/`：OpenAI↔Anthropic 请求/响应/usage/tool_calls 映射（对照表先写测试用例）
+- [x] `gateway/openai.py`：`/v1/chat/completions`（流式 + 批量）
 - [ ] `translator/sse.py`：SSE 逐块双向翻译
 - [ ] `gateway/responses.py`：`/v1/responses` + previous_response_id LRU
-- [ ] 网关鉴权接入新端点；模型白名单统一
+- [x] 网关鉴权接入新端点；模型白名单统一
 
 **出口标准**：Claude Code（Anthropic 透传）、OpenAI SDK（chat/completions 流式+批量）、Codex CLI（/v1/responses）三客户端在 Mock 上游回归全绿，真实上游冒烟各 1 次。
 
@@ -49,14 +51,16 @@ M0 骨架      ──▶ M1 账号运营层(P1) ──▶ M2 网关扩展(P2) �
 
 ## M4 — 风控对抗（按需，触发条件驱动）
 
-- [ ] endpoint routing：`agent/configs` 拉取 + URL 重写（fail-open）——**触发条件**：观测到上游把流量迁往 ultra 端点
-- [ ] client signing V4：Ed25519 + PoW——**触发条件**：`agent/configs` 返回 `codingPlanSignature.enable=true`
+- [ ] endpoint routing：`agent/configs` 拉取 + URL 重写（fail-open） —— **触发条件**：观测到上游把流量迁往 ultra 端点。
+- [ ] client signing V4：Ed25519 + PoW —— **触发条件**：`agent/configs` 返回 `codingPlanSignature.enable=true`。
 - [ ] start-plan 验证码池预热（进程内，非请求时求解）
 
 **出口标准**：触发条件出现后 1 周内上线；Mock 上游覆盖握手/签名/旁路梯子。
 
 ## 持续项
 
-- 每里程碑：更新 02 移植映射的"已完成"勾选与 05 协议文档的实测修订
+- 真实用量取证：补齐正常业务缓存语义与套餐余额差额证据。
+- 会话轮转观察：完成轮转后的有限运行观察。
+- 每里程碑：更新任务进度与 `02` 的实际落点，`05` 协议文档按实测修订
 - 上游协议变更追踪：`client/configs` 字段漂移（如 startPlanPreview 的 showName 变更已有先例）纳入 QUOTA-* 回归
-- 安全：`ZCODE_MASTER_SECRET`/`ZSW_PASSWORD` 不落盘、不入日志；`.env`/`data/` 永不入镜像（.dockerignore 断言测试）
+- 安全目标：`ZCODE_MASTER_SECRET` / `ZSW_PASSWORD` 不落盘、不入日志；`.env` / `data/` 不入镜像（.dockerignore 断言测试）。
