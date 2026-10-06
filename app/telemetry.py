@@ -1,7 +1,7 @@
 """激活遥测上报 —— 官方 event/report 端点的单一事实源。
 
 事件体 16 字段与 app.asar 逆向的 telemetry-core sendReport 逐字段一致
-（commit 65a547b 三源实证：首启日志 / asar 逆向 / pxed 实装模仿）。字段集、
+（commit 65a547b 三源实证：首启日志 / asar 逆向 / Linux 实装模仿）。字段集、
 URL、业务码判定只在本模块维护：
 
   - claim.report_activation_events（登录态激活上报，preview 前）

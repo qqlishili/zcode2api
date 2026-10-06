@@ -1,11 +1,17 @@
 #!/bin/bash
-# 前端独立发版：只同步 frontend/ 到 pxed，零后端重启、不断流
-# 用法: scripts/deploy-frontend.sh   （记得先 bump frontend/version 以刷新浏览器缓存）
+# 前端独立发版：只同步已跟踪的 frontend/ 文件，无需重启后端
+# 用法: bash scripts/deploy-frontend.sh [--dry-run]（先 bump frontend/version）
 set -euo pipefail
-HOST=pxed
-SRC="$(cd "$(dirname "$0")/.." && pwd)/frontend"
-DST=/data/zcode-hub/frontend
+source "$(dirname "$0")/deploy-common.sh"
 
-rsync -az --delete "$SRC/" "$HOST:$DST/"
-echo "✓ frontend → $HOST:$DST （静态文件从磁盘热读，无需重启）"
-echo "  验证: curl -s https://zcode.mangoqwq.com/admin/login | grep -o 'v=[0-9.]*' | head -1"
+DEPLOY_FRONTEND_DIR="${DEPLOY_FRONTEND_DIR:-$DEPLOY_DIR/frontend}"
+check_deploy_dir "$DEPLOY_FRONTEND_DIR"
+
+git -C "$ROOT/frontend" ls-files -z -- . |
+  rsync "${RSYNC_ARGS[@]}" "$ROOT/frontend/" "$DEPLOY_HOST:$DEPLOY_FRONTEND_DIR/"
+
+if [[ "$MODE" == dry-run ]]; then
+  echo "✓ frontend → 预演完成，未写入或重启服务"
+else
+  echo "✓ frontend → 同步完成，无需重启；请验证页面与 frontend/version"
+fi

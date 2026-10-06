@@ -30,3 +30,7 @@ zcode-accounts*.json
 *.key
 *secret*.json
 *token*.json
+
+# 本机工具与会话提示
+.serena/
+docs/PROMPT.md

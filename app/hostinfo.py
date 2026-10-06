@@ -42,8 +42,8 @@ def _resolve_timezone() -> str:
 
     解析顺序：
       1. /etc/localtime 符号链接路径反解（darwin 通常如此）
-      2. /etc/localtime 为实体文件时（部分 Linux 发行版是拷贝而非链接，
-         如 pxed），与 /usr/share/zoneinfo 逐文件字节比对取唯一匹配
+      2. /etc/localtime 为实体文件时（部分 Linux 发行版是拷贝而非链接），
+         与 /usr/share/zoneinfo 逐文件字节比对取唯一匹配
       3. 都失败退 UTC
     """
     path = Path("/etc/localtime")

@@ -38,7 +38,7 @@ DATA_DIR = _resolve_path("ZCODE_DATA_DIR", "data")
 # 账号与设置持久化到本地 SQLite（与 grok2api 的 local 后端一致）
 DB_PATH = DATA_DIR / "accounts.db"
 # 前端目录（前后端分离）：默认仓库根 frontend/，可用 ZCODE_FRONTEND_DIR 指向
-# 独立部署目录（线上 /data/zcode-hub/frontend）；包内 statics 仅作兜底
+# 独立部署目录；包内 statics 仅作兜底
 FRONTEND_DIR = _resolve_path(
     "ZCODE_FRONTEND_DIR",
     "frontend" if (ROOT_DIR / "frontend").is_dir() else str(Path(__file__).resolve().parent / "statics"),
@@ -59,7 +59,7 @@ CAPTCHA_POOL_MAX = _int("CAPTCHA_POOL_MAX", 10)       # 池上限
 CAPTCHA_TOKEN_TTL = _int("CAPTCHA_TOKEN_TTL", 75_000) # 单枚 token 最大可用时长（ms；上游实际 ~2min）
 CAPTCHA_CONFIG_CACHE_TTL = _int("CAPTCHA_CONFIG_CACHE_TTL", 600_000)  # ms
 
-# 验证码求解（无浏览器：Node + jsdom 模拟浏览器环境，运行阿里云无痕 SDK）
+# 验证码求解（无浏览器：Node + happy-dom 模拟浏览器环境，运行阿里云无痕 SDK）
 NODE_PATH = os.getenv("ZCODE_NODE_PATH", "node")
 CAPTCHA_SOLVER_DIR = ROOT_DIR / "captcha_node"
 CAPTCHA_SOLVER_JS = CAPTCHA_SOLVER_DIR / "solver.js"

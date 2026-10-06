@@ -14,7 +14,7 @@
 | [03-data-formats.md](development/03-data-formats.md) | DB schema、凭证存储 v2、enc:v1 编解码、.zsb 包格式 | 开发 |
 | [04-api-spec.md](development/04-api-spec.md) | 网关 API（Anthropic/OpenAI/Responses）+ 管理 API 规范 | 开发/调用方 |
 | [05-upstream-protocols.md](development/05-upstream-protocols.md) | 上游协议参考：OAuth/对话/计费/领取/验证码/风控 | 开发 |
-| [06-dev-guide.md](development/06-dev-guide.md) | 环境搭建、编码规范、测试运行、构建与部署（含 tebi 约定） | 开发 |
+| [06-dev-guide.md](development/06-dev-guide.md) | 环境搭建、编码规范、测试运行、构建与部署（Linux + systemd） | 开发 |
 | [07-roadmap.md](development/07-roadmap.md) | 四阶段路线图、里程碑与依赖关系 | 全体 |
 | [activity_plan_and_captcha_architecture.md](development/activity_plan_and_captcha_architecture.md) | 多活动套餐归一化展示、待领活动感知与双轨验证优化设计方案（含 v2.6.5 客户端版本归一与领取拒码单次止损、探查即落库全池待领同步与原子方法拼装重构、跨零点准时破冰调度、错峰平滑轮询、上游协议/领取 3.11.2 语义融合、种子驱动深度混淆指纹池与全链路 Bark 战报推送） | 开发/架构 |
 | **测试文档** ||
@@ -26,11 +26,11 @@
 
 ## 来源项目
 
-| 项目 | 角色 | 本地参考克隆 |
-|------|------|--------------|
-| [liu5269/zcode2api](https://github.com/liu5269/zcode2api) | 底座：FastAPI 网关 + 账号池 + 管理后台 | `/tmp/zcode2api`（可重新克隆） |
-| [pjpv/zcode-switch](https://github.com/pjpv/zcode-switch) | 移植源：enc:v1 编解码 / 额度模型 / 活动领取 / .zsb 封包 | `/tmp/zcode-switch` |
-| [TriDefender/zcode-api](https://github.com/TriDefender/zcode-api) | 设计参考：多格式网关 / 池化故障转移 / 风控对抗（已在 fork 中实现号池并部署验证） | `/Users/mango/project/zcode-api` |
+| 项目 | 角色 |
+|------|------|
+| [liu5269/zcode2api](https://github.com/liu5269/zcode2api) | 底座：FastAPI 网关 + 账号池 + 管理后台 |
+| [pjpv/zcode-switch](https://github.com/pjpv/zcode-switch) | 移植源：enc:v1 编解码 / 额度模型 / 活动领取 / .zsb 封包 |
+| [TriDefender/zcode-api](https://github.com/TriDefender/zcode-api) | 设计参考：多格式网关 / 池化故障转移 / 风控对抗（已在 fork 中实现号池并部署验证） |
 
 ## 快速导航
 

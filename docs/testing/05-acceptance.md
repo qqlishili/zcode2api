@@ -50,7 +50,7 @@
 
 ## 3. 性能与稳定性基线
 
-- 单实例（2C4G，tebi 规格）：≥ 30 并发流式请求无 5xx（Mock 上游）；内存 RSS < 400MB
+- 单实例（测试基线：2 核 / 4 GiB，实际 VPS 另行测量）：≥ 30 并发流式请求无 5xx（Mock 上游）；内存 RSS < 400MB
 - 转发开销：P95 增幅 < 15ms（TTFB 对比直连 Mock）
 - 72h 长跑（Mock）：无内存增长（泄漏阈值 < 10%）、无句柄泄漏、池状态无漂移
 - 验证码求解缓存命中率（持续负载下）> 90%
@@ -65,15 +65,17 @@
 
 ## 5. 发布产物
 
+当前源码部署按开发文档 06 §5 执行；容器镜像、compose 与独立 CHANGELOG 属于规划验收项。
+
 | 产物 | 说明 |
 |------|------|
 | Docker 镜像（GHCR） | 多架构 amd64/arm64；镜像内含 Node 求解器依赖 |
 | docker-compose.yml | 数据卷 `/data`；env 示例齐全 |
-| 裸机部署包 | 源码 + requirements 锁定（pip-tools）；tebi supervisor 样例（开发文档 06 §5） |
+| 裸机部署包 | 源码 + requirements；通用 systemd 与分开发版说明（开发文档 06 §5） |
 | CHANGELOG + 协议观测记录 | 上游行为变化、向量更新说明 |
 
 ## 6. 回滚
 
-- 镜像版本化 tag，`supervisorctl`/compose 一键回退上一 tag
+- 源码部署记录上一代码与依赖版本，恢复后用 systemd 重启；保留账号数据
 - SQLite 结构变更必须向后兼容一版（新列可空），回滚不破坏数据
-- 验证码 solver.js 更新保留上一版本文件（`solver.v{n}.js`），可 env 切回
+- 验证码求解器随代码版本回退；Node 依赖变化时一并恢复清单和锁文件，并在维护窗口重装

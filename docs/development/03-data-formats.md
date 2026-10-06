@@ -189,4 +189,4 @@ def encrypt_with_secret(plain: str, secret: str) -> str:
 | `accounts.db` (+wal/shm) | `$ZCODE_DATA_DIR` | 常驻，备份对象 |
 | 验证码缓存 | 进程内存 | TTL 45s，进程重启即失 |
 | claim_history | SQLite 表 | 永久，UI 展示 |
-| 日志 | stdout（supervisor/docker 接管） | 滚动由部署层负责 |
+| 日志 | stdout（由进程管理器接管） | 滚动由部署层负责 |

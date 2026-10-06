@@ -98,7 +98,7 @@ class TestAssign:
         assert (p.platform, p.arch, p.os_version, p.screen) in fingerprint.sku_combos()
         assert p.platform in ("darwin", "win32")
         assert p.device_mid != host.device_mid
-        # 宿主机四元组若不是桌面 SKU（pxed linux 云内核），账号档案不得等于宿主机
+        # 宿主机四元组若不是桌面 SKU（Linux 云内核），账号档案不得等于宿主机
         host_key = (host.platform, host.arch, host.os_version, host.screen)
         if host_key not in fingerprint.sku_combos():
             assert (p.platform, p.arch, p.os_version, p.screen) != host_key

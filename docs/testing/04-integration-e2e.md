@@ -36,7 +36,7 @@
 
 | ID | 场景 | 步骤 | 断言 |
 |----|------|------|------|
-| INT-030 | 真实 solver 冒烟 | （可选，`@pytest.mark.real_captcha`）真实 jsdom 子进程求解一次 | 输出 verifyParam 结构合法（base64(JSON{certifyId,...})）；默认 CI 跳过 |
+| INT-030 | 真实 solver 冒烟 | （可选，`@pytest.mark.real_captcha`）真实 happy-dom 子进程求解一次 | 输出 verifyParam 结构合法（base64(JSON{certifyId,...})）；默认 CI 跳过 |
 | INT-031 | solver 缺失报错 | 未 npm install → 明确报错指引用，而非悬死 | 用户体验 |
 
 ## 2. 故障注入矩阵（Mock 上游 `x-mock-scenario`）

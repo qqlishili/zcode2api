@@ -130,11 +130,11 @@ python cli.py import <file>          导入账号
 ## 无痕验证（免浏览器）
 
 JWT 账号调用上游时需携带阿里云无痕验证参数（请求头 `X-Aliyun-Captcha-Verify-Param`）。
-本项目**不启动真实浏览器**，而是用 **Node + jsdom** 在模拟浏览器环境中运行阿里云官方无痕 SDK 直接求解该参数。
+本项目**不启动真实浏览器**，而是用 **Node + happy-dom** 在模拟浏览器环境中运行阿里云官方无痕 SDK 直接求解该参数。
 
 - 求解器位于 `captcha_node/solver.js`，首次使用前执行 `cd captcha_node && npm install`。
 - `app/captcha.py` 以子进程方式调用，内置预热池、结果缓存（默认 45s）、并发去重与失败重试。
-- 求解器在 jsdom 中补齐了 SDK 依赖的浏览器 API（`matchMedia`、canvas/WebGL、`Worker`、`OffscreenCanvas`）。
+- 求解器在 happy-dom 中补齐了 SDK 依赖的浏览器 API（`matchMedia`、canvas/WebGL、`Worker`、`OffscreenCanvas`）。
 - 配置与会话缓存兜底：`client/configs` 拉取失败时回落内置默认参数。
 
 ## 鉴权
@@ -185,7 +185,7 @@ JWT 账号调用上游时需携带阿里云无痕验证参数（请求头 `X-Ali
 
 - Python 3.11+ · FastAPI · Uvicorn · httpx
 - SQLite（账号 / 设置持久化，WAL 模式）
-- Node.js + jsdom（免浏览器求解阿里云无痕验证）
+- Node.js + happy-dom（免浏览器求解阿里云无痕验证）
 
 ## 许可证
 

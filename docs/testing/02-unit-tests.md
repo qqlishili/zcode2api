@@ -97,7 +97,7 @@
 | CAP-004 | 超时杀进程 | 注入慢 solver → 40s 后 kill、无僵尸进程 | P1 |
 | CAP-005 | 动态配置回退 | `client/configs` 失败 → 使用默认 sceneId/region/prefix | P1 |
 | CAP-006 | invalidate 生效 | invalidate 后下次取参重新求解 | P0 |
-| CAP-007 | solver 桩完备性 | jsdom 桩函数（matchMedia/canvas/WebGL/Worker/OffscreenCanvas）清单断言（防误删） | P2 |
+| CAP-007 | solver 桩完备性 | happy-dom 桩函数（matchMedia/canvas/WebGL/Worker/OffscreenCanvas）清单断言（防误删） | P2 |
 
 ## 7. OAUTH / STORE — 登录与存储
 

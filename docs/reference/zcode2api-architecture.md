@@ -15,7 +15,7 @@
 | 协议兼容 | 完整复刻 Anthropic `/v1/messages` 请求/响应(含 SSE 流式) |
 | 高可用 | 多账号 round-robin;单账号失败/额度耗尽自动切换下一个 |
 | 可观测 | 后台周期刷新各账号额度,UI 实时展示状态与剩余额度 |
-| 无浏览器 | 用 Node + jsdom 在模拟浏览器环境跑阿里云无痕 SDK,**不启动真实浏览器** |
+| 无浏览器 | 用 Node + happy-dom 在模拟浏览器环境跑阿里云无痕 SDK,**不启动真实浏览器** |
 | 凭证安全 | 账号/密钥仅落本地 SQLite;前端鉴权,token 脱敏展示 |
 | 轻量部署 | 单进程 FastAPI + 一个 Node 子进程;无外部数据库依赖 |
 
@@ -43,7 +43,7 @@ graph TD
         OAUTH["OAuth Flow<br/>Z.AI 登录入池"]
     end
 
-    SOLVER["Captcha Solver（Node 子进程）<br/>jsdom + 阿里云无痕 SDK"]
+    SOLVER["Captcha Solver（Node 子进程）<br/>happy-dom + 阿里云无痕 SDK"]
     DB[("SQLite<br/>data/accounts.db (WAL)")]
 
     subgraph Upstream["上游"]
@@ -77,7 +77,7 @@ graph TD
 ```
 
 **命名约定**:图中用组件的**职责名**(Gateway、Account Store、Captcha Manager……)而非文件名标识,
-以避免歧义——例如代码里存在两个 `main.py`(根目录的 **CLI 入口** 与 `app/main.py` 的 **应用工厂**),
+以避免歧义——例如根目录的 `cli.py`(**CLI 入口**)与 `app/main.py`(**应用工厂**),
 在架构层面分别对应 *CLI* 与 *App Factory* 两个角色。组件 ↔ 文件的映射见 §3。
 
 ---
@@ -87,7 +87,7 @@ graph TD
 | 组件(职责名) | 文件 | 职责 |
 |--------------|------|------|
 | App Factory | `app/main.py` | FastAPI 应用工厂 + 生命周期(启动监控、打印 banner、挂载路由/静态资源) |
-| CLI | `main.py`(根) | 命令行入口:`serve` / `login` / `add-account` / `quota` / `export` … |
+| CLI | `cli.py`(根) | 命令行入口:`serve` / `login` / `add-account` / `quota` / `export` … |
 | Gateway 网关 | `app/routes/gateway.py` | `/v1/messages`(轮询+换号+验证码续期+SSE 透传)、`/v1/models` |
 | Admin API | `app/routes/admin_api.py` | `/admin/api/*`:账号增删改、启用禁用、刷新额度、OAuth、设置、导入导出 |
 | Pages | `app/routes/pages.py` | 后台页面(login / accounts / settings)与重定向 |
@@ -97,7 +97,7 @@ graph TD
 | Request Builder | `app/agent.py` | 按凭证选上游端点、组装请求头(含 `X-Aliyun-Captcha-Verify-Param`) |
 | Quota Monitor | `app/quota.py` | 单账号额度查询 + 状态判定 + 后台周期刷新任务 |
 | Captcha Manager | `app/captcha.py` | 拉取验证码配置、调用 Node 求解器、缓存/并发去重/重试 |
-| Captcha Solver | `captcha_node/solver.js` | jsdom 模拟浏览器跑阿里云无痕 SDK,输出 `verifyParam` |
+| Captcha Solver | `captcha_node/solver.js` | happy-dom 模拟浏览器跑阿里云无痕 SDK,输出 `verifyParam` |
 | OAuth Flow | `app/oauth.py` | Z.AI OAuth:init → poll → 兑换 API Key |
 | Settings | `app/settings.py` | 环境变量 / 默认值 / 路径 / 上游端点 |
 | Logs | `app/logs.py` | 彩色终端日志(banner / req / req_ok / req_err …) |
@@ -215,14 +215,14 @@ sequenceDiagram
     autonumber
     participant CM as Captcha Manager (Python)
     participant CFG as zcode.z.ai/client/configs
-    participant SV as Node Solver (jsdom)
+    participant SV as Node Solver (happy-dom)
     participant CDN as o.alicdn.com
     participant ALI as 阿里云无痕服务
 
     CM->>CFG: GET 验证码配置（sceneId/region/prefix）
     CFG-->>CM: {sceneId, region, prefix}
     CM->>SV: spawn solver.js（子进程）
-    SV->>SV: 构造 jsdom，注入浏览器 API 桩<br/>(matchMedia/canvas/WebGL/Worker/OffscreenCanvas)
+    SV->>SV: 构造 happy-dom，注入浏览器 API 桩<br/>(matchMedia/canvas/WebGL/Worker/OffscreenCanvas)
     SV->>CDN: 加载 AliyunCaptcha.js
     SV->>ALI: initAliyunCaptcha + startTracelessVerification
     ALI-->>SV: success(verifyParam)
@@ -287,8 +287,8 @@ meta(      key PK, value )      # admin_key / gateway_key / quota_refresh_interv
 │   ├── logs.py            # 彩色日志
 │   ├── routes/            # gateway / admin_api / pages
 │   └── statics/           # css / js / admin/*.html
-├── captcha_node/          # Captcha Solver（Node + jsdom，solver.js）
-├── main.py                # CLI 入口
+├── captcha_node/          # Captcha Solver（Node + happy-dom，solver.js）
+├── cli.py                 # CLI 入口
 ├── data/                  # 运行时生成：accounts.db
 └── docs/ARCHITECTURE.md   # 本文件
 ```
@@ -306,7 +306,7 @@ meta(      key PK, value )      # admin_key / gateway_key / quota_refresh_interv
   为启发式;真实上游的耗尽信号若不同,可能需要调整 `app/quota.py` / `app/routes/gateway.py` 的判定。
 - **模型清单**:`/v1/models` 当前固定为 `GLM-5.2` 与 `GLM-5-Turbo`,未做上游动态拉取。
 - **无痕验证 SDK**:`solver.js` 运行的是阿里云自家混淆 SDK;若其指纹逻辑(feilin / cloudauth-device)更新,
-  jsdom 中补齐的浏览器 API 桩可能需要相应调整。
+  happy-dom 中补齐的浏览器 API 桩可能需要相应调整。
 - **限流/冷却时长**:`COOLING_SECONDS` 为经验默认值,非上游明确约定。
 
 如发现实际行为与本文档不符,请优先以真实上游为准,并通过 Issue/PR 帮助我们修正文档与判定逻辑。

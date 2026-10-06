@@ -1,7 +1,7 @@
 """ZCode 首次安装初始化仿真 —— 按官方客户端真实首启顺序请求一遍。
 
 官方桌面端首启实测序（本机 ZCode 首启日志 2026-09-02 + app.asar 逆向
-+ pxed AppImage 实装模仿，三源交叉确认）：
++ Linux AppImage 实装模仿，三源交叉确认）：
   1. GET  /api/v1/client/configs?app_version=…   免鉴权拉取运行配置
      （验证码 scene/region 开关、startPlanPreview 等功能开关）
   2. POST /api/v1/event/report                   激活遥测（无 Authorization）

@@ -41,7 +41,7 @@
 
 - `pool.py`、`classify.py`、`translator/`、`bundle.py`、`zclient.enc_v1` **无 IO、时间注入**（`now: float | None = None` 参数），保证单元层无 mock 也能测。
 - 所有上游 URL 走 `settings`（测试注入 Mock 地址），代码中不出现硬编码上游域名（`constants.py` 例外，且 CI 有断言测试扫描）。
-- 验证码求解器在测试中统一替换为 `FakeCaptchaManager`（返回固定 verifyParam）；solver.js 本体用「桩可见性」测试（jsdom 桩函数齐全性）+ 真实环境手动验证。
+- 验证码求解器在测试中统一替换为 `FakeCaptchaManager`（返回固定 verifyParam）；solver.js 本体用「桩可见性」测试（happy-dom 桩函数齐全性）+ 真实环境手动验证。
 - SQLite 用 `tmp_path` fixture；时间用 `freezegun` 或注入。
 
 ## 4. 覆盖率与门禁

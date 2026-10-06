@@ -21,7 +21,7 @@
 | 新模块 | 来源 | 源符号 | 移植方式 | 备注 |
 |--------|------|--------|----------|------|
 | `captcha.py` | z2a `app/captcha.py` | `CaptchaManager.get_verify_param/_run_solver/invalidate` | 复制 | 缓存 45s、单飞锁、重试 4、超时 40s |
-| `captcha_node/solver.js` | z2a `captcha_node/solver.js` | jsdom 桩（matchMedia/canvas/WebGL/Worker/OffscreenCanvas）+ `startTracelessVerification` | 原样复制 | 输出 `VERIFY_PARAM=...`；阿里云 SDK 从 o.alicdn.com 加载 |
+| `captcha_node/solver.js` | z2a `captcha_node/solver.js` | happy-dom 桩（matchMedia/canvas/WebGL/Worker/OffscreenCanvas）+ `startTracelessVerification` | 原样复制 | 输出 `VERIFY_PARAM=...`；阿里云 SDK 从 o.alicdn.com 加载 |
 | 动态验证码配置 | z2a `fetch_config` + zsw `claim.rs CaptchaConfig` | `GET zcode.z.ai/api/v1/client/configs` → `configs.captcha.{sceneId,region,prefix}`（默认 `11xygtvd/sgp/no8xfe`） | 合并 | 配置缓存 10min |
 
 ## 3. 额度模型（zsw quota.rs → Python）

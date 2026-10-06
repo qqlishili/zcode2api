@@ -3,20 +3,20 @@
 ## 1. 环境搭建
 
 ```bash
-# 依赖：Python 3.12+、Node 20+（验证码求解器）、（可选）docker
+# 依赖：Python 3.11+、Node 20+（验证码求解器）
 git clone <zcode-hub 仓库> && cd zcode-hub
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt          # fastapi uvicorn httpx cryptography pytest pytest-asyncio respx
-cd captcha_node && npm install && cd ..  # jsdom（验证码求解器依赖）
-cp config.example.yaml config.yaml       # 按需修改
+cd captcha_node && npm ci && cd ..       # happy-dom（按锁文件安装）
+cp .env.example .env                     # 按需修改；不要提交真实配置
 ```
 
 本地跑起来：
 
 ```bash
-python main.py serve                     # 网关 + 后台，默认 http://127.0.0.1:3000
-python main.py login zai                 # OAuth 登录（浏览器授权，凭证入池）
-python main.py accounts / quota / status # 巡检
+python cli.py serve                     # 网关 + 后台，默认监听 0.0.0.0:3000
+python cli.py login zai                 # OAuth 登录（浏览器授权，凭证入池）
+python cli.py accounts                   # 巡检；另有 quota / status
 ```
 
 ## 2. 测试命令
@@ -47,36 +47,77 @@ pytest --cov=app --cov-report=term-missing  # 覆盖率（门禁见测试文档 
 ```bash
 ZAI_UPSTREAM_URL=http://127.0.0.1:9901/api/v1/zcode-plan/anthropic/v1/messages \
 ZAI_FALLBACK_URL=http://127.0.0.1:9901/api/anthropic/v1/messages \
-ZCODE_MOCK_UPSTREAM=http://127.0.0.1:9901 python main.py serve
+ZCODE_MOCK_UPSTREAM=http://127.0.0.1:9901 python cli.py serve
 ```
 
 Mock 的故障注入用请求头控制（`x-mock-scenario: quota_exhausted | rate_limited | auth_invalid | captcha_challenge | captcha_3007 | sse_ok | sse_truncate | slow_first_byte`）。
 
 ## 5. 构建与部署
 
-### Docker（通用）
+### Linux + systemd（源码部署）
+
+现有 VPS 使用 Python 虚拟环境、Node 求解器和 systemd 服务。继续使用既有目录、服务和数据；公开文档只记录通用约定，真实地址、目录、端口、服务名与运维记录留在私有配置中。
+
+首次部署按 §1 安装依赖，在 `.env` 中设置端口与密钥。服务须能找到 Node；如需绝对路径，使用 `ZCODE_NODE_PATH`。已有服务保留原配置，以下仅为新环境的单元示例（替换 `<PROJECT_DIR>`，按实际服务名保存）：
+
+```ini
+[Unit]
+Description=ZCode Hub
+After=network.target
+
+[Service]
+WorkingDirectory=<PROJECT_DIR>
+ExecStart=<PROJECT_DIR>/.venv/bin/python <PROJECT_DIR>/cli.py serve
+EnvironmentFile=<PROJECT_DIR>/.env
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+新单元安装后执行 `systemctl daemon-reload`，再按实际服务名启用。运行状态与日志分别用 `systemctl status <SERVICE_NAME>`、`journalctl -u <SERVICE_NAME>` 查看。
+
+### 分开发版脚本
+
+操作者需要 Bash、Git、rsync、SSH，远端需有 rsync、systemctl、curl 与既有运行环境。两份脚本共用 `scripts/deploy-common.sh`，不会自动读取应用 `.env`。
+
+将下面的占位值替换后保存在本机 `.env.deploy.local`（已被 `.env.*` 忽略），只写部署参数，不写账号凭据：
 
 ```bash
-docker compose up -d --build       # 含 Python + Node 双运行时；数据卷 /data
+export DEPLOY_HOST='<SSH_ALIAS>'
+export DEPLOY_DIR='<PROJECT_DIR>'
+export DEPLOY_SERVICE='<SERVICE_NAME>.service'
+export DEPLOY_PORT='<PORT>'
+# 前端另有目录时，填写后端 ZCODE_FRONTEND_DIR 实际指向的位置
+# export DEPLOY_FRONTEND_DIR='<FRONTEND_DIR>'
 ```
 
-### tebi 容器约定（现网部署目标）
+目录须为非根绝对路径，不含空格、shell 特殊字符或 `.` / `..` 路径段；端口须与现有服务一致。使用已配置的 SSH 身份，不把私钥、密码或真实主机信息写入公开脚本。
 
-tebi 是无 systemd 的 LXC 容器，持久卷在 `/personal`（阿里云 NAS），进程管理用 supervisor：
-
-```
-/personal/zcode-hub/                 # 代码 + venv + data/
-/etc/supervisor/conf.d/zcode-hub.conf
-[program:zcode-hub]
-directory=/personal/zcode-hub
-command=/personal/zcode-hub/.venv/bin/python main.py serve /personal/zcode-hub/config.yaml
-environment=TZ="Asia/Shanghai",ZCODE_DATA_DIR="/personal/zcode-hub/data",ZCODE_MASTER_SECRET="..."
-autorestart=true
-stdout_logfile=/personal/zcode-hub/logs/out.log
+```bash
+source .env.deploy.local
+bash scripts/deploy-backend.sh --dry-run
+bash scripts/deploy-frontend.sh --dry-run
+# 核对私有配置中的目标与同步清单，确认已有备份和上一版本记录后发布
+bash scripts/deploy-backend.sh
+bash scripts/deploy-frontend.sh
 ```
 
-常用操作：`supervisorctl reread && supervisorctl update && supervisorctl status zcode-hub`。
-发布流程：本地 `pytest` 全绿 → 构建/拉取镜像或 rsync 代码 → `supervisorctl restart zcode-hub` → 冒烟（`/health` + 一次真实 `/v1/messages`）。
+`--dry-run` 仍会通过 SSH 读取远端目录，但不写入或重启。脚本只同步 Git 已跟踪的发布文件：后端为 `app/`（不含旧 `statics/`）、`cli.py`、`requirements.txt` 与 Node 求解器源码、清单、锁文件；前端为 `frontend/`。账号数据、应用配置、虚拟环境、日志、Node 已安装依赖和本机未跟踪文件均不在同步范围内。
+
+依赖未变时后端脚本同步后重启已有 systemd 服务，并检查状态及 `/meta`；前端从磁盘热读，无需重启。依赖有变时，在维护窗口停服，先执行 `bash scripts/deploy-backend.sh --sync-only`，在远端原虚拟环境中安装 `requirements.txt`，按 Node 锁文件执行 `npm ci`，再执行正常后端发版。脚本不会自动升级依赖。
+
+脚本不删除远端文件；涉及源码删除或改名时，按差分单独处理对应代码文件，避免对项目根目录执行 `--delete`、`git clean` 或 `git reset --hard`。前端目标必须与服务实际读取目录一致。
+
+rsync 更新的是远端工作树，不会更新远端 Git HEAD。发布记录须关联本地代码版本与实际同步清单；不能只看远端提交号判断运行版本。后续使用 `git pull` 前，先核对远端工作树差分。
+
+发布验收：`/meta` 的版本、前端页面与 `frontend/version` 一致，再用实际客户端完成一次请求；仅探活成功不代表功能验收通过。回滚用发布前记录的代码版本与依赖恢复服务，保留账号数据；详细备份位置和真实操作记录不进公开仓库。
+
+### 公开仓库边界
+
+- `.env`、`.env.deploy.local`、`data/`、私钥与账号导出文件不入库；提交前检查所选文件与差分。
+- 公共示例只用占位符；真实域名、IP、SSH 别名、个人电脑路径和生产日志留在私有运维记录中。
+- 当前文件脱敏不会擦除旧提交中的信息；历史清理另行评估，保留上游署名与许可证义务。
 
 ## 6. 目录与命名
 
