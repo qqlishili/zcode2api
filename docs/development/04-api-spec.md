@@ -100,8 +100,9 @@
 |-----------|------|
 | `GET /admin/api/monitoring` | 内存环形请求日志（最新在前，KEEP=500，重启清零） |
 | `POST /admin/api/monitoring/clear` | 清空监控 |
-| `GET /admin/api/settings` | 不回明文密钥。返回 `admin_key_set` / `admin_key_masked` / `admin_key_is_default`、`gateway_key_set` / `gateway_key_masked`、`quota_refresh_interval`、`account_concurrency` |
-| `PUT /admin/api/settings` | 改密钥、刷新间隔、并发上限（改后即生效，落 meta 表；并发 0 = 不限）。前端回填的掩码（含 `…` 或 `••••`）忽略不覆盖；网关 key 传空字符串表示关闭校验 |
+| `GET /admin/api/settings` | 不回明文密钥。返回 `admin_key_set` / `admin_key_masked` / `admin_key_is_default`、`gateway_key_set` / `gateway_key_masked`、`quota_refresh_interval`、`account_concurrency`；另含 `bark_server_url`、`bark_device_key_set` / `bark_device_key_masked`、`sentinel_interval`、`sentinel_auto_claim` |
+| `PUT /admin/api/settings` | 改密钥、刷新间隔、并发上限（改后即生效，落 meta 表；并发 0 = 不限）；支持 `bark_server_url`、`bark_device_key`（裸 Key 或链接归一化）、`sentinel_interval`（0 停用）、`sentinel_auto_claim`。前端回填的掩码（含 `…` 或 `••••`）忽略不覆盖；网关 key 传空字符串表示关闭校验 |
+| `POST /admin/api/settings/bark/test` | 可选 `{device_key, server_url}` 测试推送，不保存配置；空或掩码 Key 沿用已存 Key，未传服务器沿用已存地址或 Key 链接中的地址。成功返回 `{ok: true, message}`；无 Key 返回 400，推送失败返回 502 |
 
 监控保留上游 `input_tokens` / `output_tokens`，另列可空的 `cache_read_input_tokens` / `cache_creation_input_tokens`。缺失或异常类型为 `null`，0 保留；SSE 累计更新不重复求和，不改变三协议客户端 usage 契约。页面显示已知 / 未知样本数；原始输入输出合计不代表完整输入或套餐扣费。
 
