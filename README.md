@@ -140,6 +140,7 @@ JWT 账号调用上游时需携带阿里云无痕验证参数（请求头 `X-Ali
 ## 鉴权
 
 - **后台鉴权**：所有 `/admin/api/*` 需 `Authorization: Bearer <后台密码>`（也支持 `?app_key=`），内置 IP 失败节流保护。
+- **客户端 IP**：使用 Uvicorn 处理后的连接信息，不直接采信 `CF-Connecting-IP` / `X-Real-IP`；反向代理的可信来源配置见 [开发指南 §5](docs/development/06-dev-guide.md#5-构建与部署)。
 - **网关鉴权（可选）**：在「设置」配置「网关 API Key」后，`/v1/messages` 与 `/v1/chat/completions` 须携带
   `Authorization: Bearer <key>` 或 `x-api-key: <key>`；留空则不校验。
 

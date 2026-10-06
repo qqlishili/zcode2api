@@ -9,6 +9,61 @@ import pytest
 
 @pytest.mark.integration
 class TestAdminAuthThrottle:
+    @pytest.mark.parametrize("header", ["cf-connecting-ip", "x-real-ip"])
+    async def test_spoofed_ip_header_cannot_bypass_lock(self, gateway_client, monkeypatch, header):
+        """ADM-001：同一来源换 IP 头不能重置失败计数。"""
+        from app import auth_admin
+
+        monkeypatch.setattr(auth_admin, "ADMIN_FAIL_LIMIT", 3)
+        auth_admin.reset_failures()
+        client, _ = gateway_client
+
+        for i in range(3):
+            res = await client.get("/admin/api/verify", headers={
+                "Authorization": "Bearer wrong-password",
+                header: f"198.51.100.{i + 1}",
+            })
+            assert res.status_code == 401
+
+        locked = await client.get("/admin/api/verify", headers={
+            "Authorization": "Bearer zcode",
+            header: "198.51.100.100",
+        })
+        assert locked.status_code == 429
+
+    @pytest.mark.parametrize("peer_ip", ["127.0.0.1", "203.0.113.10"])
+    async def test_forwarded_ip_respects_proxy_trust(self, fresh_app, monkeypatch, peer_ip):
+        """ADM-002：转发头仅经可信代理生效，锁定按客户端隔离。"""
+        from httpx import ASGITransport, AsyncClient
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+        from app import auth_admin
+        from app.main import create_app
+
+        monkeypatch.setattr(auth_admin, "ADMIN_FAIL_LIMIT", 3)
+        auth_admin.reset_failures()
+        app = ProxyHeadersMiddleware(create_app(), trusted_hosts="127.0.0.1")
+        transport = ASGITransport(app=app, client=(peer_ip, 12345))
+        headers = {
+            "Authorization": "Bearer wrong-password",
+            "x-forwarded-for": "198.51.100.10",
+            "cf-connecting-ip": "203.0.113.20",
+            "x-real-ip": "203.0.113.30",
+        }
+        async with AsyncClient(transport=transport, base_url="http://gateway.test") as client:
+            for _ in range(3):
+                res = await client.get("/admin/api/verify", headers=headers)
+                assert res.status_code == 401
+
+            headers["Authorization"] = "Bearer zcode"
+            headers["x-forwarded-for"] = "198.51.100.11"
+            other = await client.get("/admin/api/verify", headers=headers)
+            assert other.status_code == (200 if peer_ip == "127.0.0.1" else 429)
+
+            headers["x-forwarded-for"] = "198.51.100.10"
+            locked = await client.get("/admin/api/verify", headers=headers)
+            assert locked.status_code == 429
+
     async def test_failed_logins_lock_out(self, gateway_client, monkeypatch):
         from app import auth_admin
 

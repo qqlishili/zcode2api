@@ -77,6 +77,14 @@ WantedBy=multi-user.target
 
 新单元安装后执行 `systemctl daemon-reload`，再按实际服务名启用。运行状态与日志分别用 `systemctl status <SERVICE_NAME>`、`journalctl -u <SERVICE_NAME>` 查看。
 
+### 反向代理与登录锁定
+
+后台登录失败计数只使用 ASGI 的客户端地址（`request.client.host`），不直接读取 `CF-Connecting-IP` / `X-Real-IP`。直连部署沿用现有启动方式；反向代理的转发头由 Uvicorn 既有的可信来源机制处理，不在鉴权层重复解析。
+
+存在反向代理时，由代理生成或规范追加 `X-Forwarded-For`，在私有服务环境中用 `FORWARDED_ALLOW_IPS` 指定实际连接网关的可信代理地址。不要设为 `*` 或包含任意客户端的公网网段；真实代理地址不写入公开示例。
+
+代理来源未受信或未传有效转发头时，计数会按代理连接地址归组。发布前须核对代理与 Uvicorn 配置，并验证同一客户端换伪造头仍会锁定、不同客户端的失败计数相互隔离；仅探活成功不能证明该链路正确。
+
 ### 分开发版脚本
 
 操作者需要 Bash、Git、rsync、SSH，远端需有 rsync、systemctl、curl 与既有运行环境。两份脚本共用 `scripts/deploy-common.sh`，不会自动读取应用 `.env`。

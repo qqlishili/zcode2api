@@ -22,10 +22,7 @@ def reset_failures() -> None:
 
 
 def _client_ip(request: Request) -> str:
-    for header in ("cf-connecting-ip", "x-real-ip"):
-        val = (request.headers.get(header) or "").strip()
-        if val:
-            return val.split(",")[0].strip()
+    # 代理头由 Uvicorn 按可信来源处理，鉴权只使用 ASGI 客户端地址。
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
