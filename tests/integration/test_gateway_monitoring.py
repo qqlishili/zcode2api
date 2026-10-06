@@ -38,6 +38,45 @@ class TestMessagesBodyValidation:
 
 @pytest.mark.integration
 class TestMonitoringRecording:
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_cached_usage_recorded_without_changing_client_contract(
+        self, gateway_client, fresh_app, endpoint, stream,
+    ):
+        """USG-003：真实 Mock 上游的六条路径都采集原始缓存字段。"""
+        client, _ = gateway_client
+        from app import reqlog
+        from app.routes import gateway as gw
+        from tests.conftest import seed_account
+
+        seed_account(fresh_app, "hCache.eyJzdWIiOiJmIn0.sig", name="cache-fixture")
+        body = {"model": "GLM-5.3-Flash", "stream": stream, "max_tokens": 64}
+        if endpoint == "responses":
+            body["input"] = "usage fixture"
+            body["max_output_tokens"] = body.pop("max_tokens")
+        else:
+            body["messages"] = [{"role": "user", "content": "usage fixture"}]
+        response = await client.post("/v1/" + endpoint, json=body,
+                                     headers={"x-mock-scenario": "usage_cached"})
+        assert response.status_code == 200
+        entry = reqlog.snapshot()[0]
+        assert entry["ok"] is True
+        assert {k: entry[k] for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                     "cache_creation_input_tokens")} == {
+            "input_tokens": 0, "output_tokens": 5,
+            "cache_read_input_tokens": 60, "cache_creation_input_tokens": 8,
+        }
+        assert not gw._inflight
+        if not stream:
+            usage = response.json()["usage"]
+            key = "prompt_tokens" if endpoint == "chat/completions" else "input_tokens"
+            assert usage[key] == 0  # 本期仅旁路监控，不改客户端既有口径
+            if endpoint != "messages":
+                assert usage["total_tokens"] == 5
+        else:
+            assert ("response.completed" if endpoint == "responses" else
+                    "[DONE]" if endpoint == "chat/completions" else "message_stop") in response.text
+
     async def test_messages_success_recorded(self, gateway_client, fresh_app):
         client, mock = gateway_client
         from tests.conftest import seed_account
@@ -171,7 +210,7 @@ class TestMonitoringRecording:
         e = (await client.get("/admin/api/monitoring", headers=ADMIN_AUTH)).json()["entries"][0]
         assert e["ok"] is True and e["stream"] is True
         assert e["t_total"] is not None and e["t_first"] is not None
-        assert e["input_tokens"] is None  # 透传不解析 SSE，未知 ≠ 0
+        assert e["input_tokens"] is None  # mock 无 message_start usage，未知 ≠ 0
 
     async def test_openai_stream_tokens_recorded(self, gateway_client, fresh_app):
         """OpenAI 流式转换器带 usage（message_delta.output_tokens）→ 记录 completion tokens。"""

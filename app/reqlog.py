@@ -39,6 +39,8 @@ def begin(req_id: str, endpoint: str, model: str, stream: bool, preview: str = "
         "t_total": None,
         "input_tokens": None,
         "output_tokens": None,
+        "cache_read_input_tokens": None,
+        "cache_creation_input_tokens": None,
     }
     with _lock:
         _entries.append(entry)
@@ -54,9 +56,19 @@ def mark_account(req_id: str, account_name: str, mode: str) -> None:
             entry["mode"] = mode
 
 
+def extract_usage(usage: object, previous: dict | None = None) -> dict[str, int | None]:
+    """保留上游用量原值：缺失不归零，SSE 累计更新不相加。"""
+    values: dict[str, int | None] = {}
+    for key in ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"):
+        value = usage.get(key) if isinstance(usage, dict) else None
+        values[key] = value if type(value) is int and value >= 0 else (previous or {}).get(key)
+    return values
+
+
 def finish_ok(req_id: str, t_first: float | None = None,
               input_tokens: int | None = None, output_tokens: int | None = None,
-              status: int | None = None) -> None:
+              status: int | None = None, cache_read_input_tokens: int | None = None,
+              cache_creation_input_tokens: int | None = None) -> None:
     with _lock:
         entry = _inflight.pop(req_id, None)
         if entry is None:
@@ -65,8 +77,11 @@ def finish_ok(req_id: str, t_first: float | None = None,
         entry["status"] = status or 200
         entry["t_first"] = t_first
         entry["t_total"] = time.time() - entry["ts"]
-        entry["input_tokens"] = input_tokens
-        entry["output_tokens"] = output_tokens
+        entry.update(extract_usage({
+            "input_tokens": input_tokens, "output_tokens": output_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+        }))
 
 
 def finish_error(req_id: str, error: str, status: int | None = None,

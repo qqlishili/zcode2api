@@ -545,15 +545,15 @@ async def chat_completions(request: Request):
         return JSONResponse({"error": {"message": "上游响应格式异常", "type": "upstream_error"}}, status_code=502)
     usage = data.get("usage") or {}
     reqlog.finish_ok(req_id, t_first=result.t_first, status=result.resp.status_code,
-                     input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"))
+                     **reqlog.extract_usage(usage))
     return JSONResponse(anthropic_to_openai(data, model))
 
 
 def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> StreamingResponse:
     """把上游 Anthropic SSE 事件流转换为 OpenAI chunk 流。"""
     conv = StreamConverter(model)
-
     async def _iter():
+        usage = reqlog.extract_usage(None)
         try:
             yield conv.start()
             async for line in up.resp.aiter_lines():
@@ -564,13 +564,13 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
                     continue
                 evt = _safe_json(data_str)
                 if isinstance(evt, dict):
+                    usage = _extract_event_usage(evt, usage)
                     for out in conv.feed(evt):
                         yield out
             yield conv.done()
             logs.req_ok(req_id)
             reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
-                             input_tokens=conv.usage.get("prompt_tokens"),
-                             output_tokens=conv.usage.get("completion_tokens"))
+                             **usage)
         except asyncio.CancelledError:
             reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
             raise
@@ -653,7 +653,7 @@ async def responses_endpoint(request: Request):
         return JSONResponse({"error": {"message": "上游响应格式异常", "type": "upstream_error"}}, status_code=502)
     usage = data.get("usage") or {}
     reqlog.finish_ok(req_id, t_first=result.t_first, status=result.resp.status_code,
-                     input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"))
+                     **reqlog.extract_usage(usage))
     return JSONResponse(anthropic_to_responses(data, model, effort=effort))
 
 
@@ -665,8 +665,8 @@ def _responses_stream_response(
 ) -> StreamingResponse:
     """把上游 Anthropic SSE 事件流转换为 OpenAI Responses SSE 事件流。"""
     conv = ResponsesStreamConverter(model, effort=effort)
-
     async def _iter():
+        usage = reqlog.extract_usage(None)
         try:
             for out in conv.start():
                 yield out
@@ -678,6 +678,7 @@ def _responses_stream_response(
                     continue
                 evt = _safe_json(data_str)
                 if isinstance(evt, dict):
+                    usage = _extract_event_usage(evt, usage)
                     for out in conv.feed(evt):
                         yield out
                     if conv.is_finished:
@@ -686,14 +687,12 @@ def _responses_stream_response(
                 yield out
             logs.req_ok(req_id)
             reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
-                             input_tokens=conv.usage.get("input_tokens"),
-                             output_tokens=conv.usage.get("output_tokens"))
+                             **usage)
         except asyncio.CancelledError:
             if conv.is_finished:
                 logs.req_ok(req_id)
                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
-                                 input_tokens=conv.usage.get("input_tokens"),
-                                 output_tokens=conv.usage.get("output_tokens"))
+                                 **usage)
             else:
                 reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
             raise
@@ -970,43 +969,32 @@ def _limit() -> int:
     return store.account_concurrency()
 
 
-def _extract_usage_from_json_bytes(raw_bytes: bytes) -> tuple[int | None, int | None]:
+def _extract_usage_from_json_bytes(raw_bytes: bytes) -> dict[str, int | None]:
     data = _safe_json(raw_bytes.decode("utf-8", "ignore"))
-    if not isinstance(data, dict):
-        return None, None
-    usage = data.get("usage")
-    if not isinstance(usage, dict):
-        return None, None
-    in_tok = usage.get("input_tokens")
-    out_tok = usage.get("output_tokens")
-    return (
-        int(in_tok) if isinstance(in_tok, int) and not isinstance(in_tok, bool) else None,
-        int(out_tok) if isinstance(out_tok, int) and not isinstance(out_tok, bool) else None,
-    )
+    return reqlog.extract_usage(data.get("usage") if isinstance(data, dict) else None)
 
 
-def _extract_sse_line_usage(line_bytes: bytes, in_tok: int | None, out_tok: int | None) -> tuple[int | None, int | None]:
+def _extract_event_usage(evt: object, usage: dict) -> dict[str, int | None]:
+    """三协议共用原始事件用量，独立于客户端兼容转换。"""
+    if not isinstance(evt, dict):
+        return usage
+    if evt.get("type") == "message_start":
+        message = evt.get("message")
+        return reqlog.extract_usage(message.get("usage") if isinstance(message, dict) else None, usage)
+    if evt.get("type") == "message_delta":
+        return reqlog.extract_usage(evt.get("usage"), usage)
+    return usage
+
+
+def _extract_sse_line_usage(line_bytes: bytes, usage: dict) -> dict[str, int | None]:
     line = line_bytes.decode("utf-8", "ignore").strip()
     if not line.startswith("data:"):
-        return in_tok, out_tok
-    payload_str = line[5:].strip()
-    if not payload_str or payload_str == "[DONE]":
-        return in_tok, out_tok
-    if '"usage"' not in payload_str:
-        return in_tok, out_tok
-    evt = _safe_json(payload_str)
-    if not isinstance(evt, dict):
-        return in_tok, out_tok
-    etype = evt.get("type")
-    if etype == "message_start":
-        u = (evt.get("message") or {}).get("usage")
-        if isinstance(u, dict) and isinstance(u.get("input_tokens"), int):
-            in_tok = int(u["input_tokens"])
-    elif etype == "message_delta":
-        u = evt.get("usage")
-        if isinstance(u, dict) and isinstance(u.get("output_tokens"), int):
-            out_tok = int(u["output_tokens"])
-    return in_tok, out_tok
+        return usage
+    payload = line[5:].strip()
+    if '"usage"' not in payload:
+        return usage
+    evt = _safe_json(payload)
+    return _extract_event_usage(evt, usage)
 
 
 class _Upstream:
@@ -1052,15 +1040,14 @@ class _Upstream:
                 pass
 
     def to_streaming(self, req_id: str) -> StreamingResponse:
-        """原样透传（/v1/messages 直通路径），同时旁路提取 input/output tokens 供监控台统计。"""
+        """原样透传（/v1/messages 直通路径），旁路提取原始输入、输出及缓存用量。"""
         up = self
 
         async def _body_iter():
-            in_tok: int | None = None
-            out_tok: int | None = None
+            usage = reqlog.extract_usage(None)
             try:
                 if up.preloaded_bytes is not None:
-                    in_tok, out_tok = _extract_usage_from_json_bytes(up.preloaded_bytes)
+                    usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
                     yield up.preloaded_bytes
                 else:
                     line_buf = bytearray()
@@ -1071,14 +1058,14 @@ class _Upstream:
                             idx = line_buf.index(b"\n")
                             raw_line = bytes(line_buf[:idx])
                             del line_buf[:idx + 1]
-                            in_tok, out_tok = _extract_sse_line_usage(raw_line, in_tok, out_tok)
+                            usage = _extract_sse_line_usage(raw_line, usage)
                         if len(line_buf) > 65536:
                             line_buf.clear()
                     if line_buf:
-                        in_tok, out_tok = _extract_sse_line_usage(bytes(line_buf), in_tok, out_tok)
+                        usage = _extract_sse_line_usage(bytes(line_buf), usage)
                 logs.req_ok(req_id)
                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
-                                 input_tokens=in_tok, output_tokens=out_tok)
+                                 **usage)
             except asyncio.CancelledError:
                 reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
                 raise

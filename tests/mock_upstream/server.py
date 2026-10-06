@@ -184,7 +184,7 @@ def build_app() -> FastAPI:
         if stream:
             chunks = int(headers.get("x-mock-sse-chunks", 3))
             truncate_at = headers.get("x-mock-sse-truncate-at")
-            content = _sse_stream(chunks)
+            content = _sse_stream(chunks, resp_body["usage"] if scenario == "usage_cached" else None)
             if scenario == "sse_truncate" and truncate_at is not None:
                 cut = int(truncate_at)
                 content = content[:cut]
@@ -213,6 +213,9 @@ def build_app() -> FastAPI:
             "stop_reason": "end_turn",
             "usage": {"input_tokens": 10, "output_tokens": 5},
         }
+        if scenario == "usage_cached":
+            ok_body["usage"] = {"input_tokens": 0, "output_tokens": 5,
+                                "cache_read_input_tokens": 60, "cache_creation_input_tokens": 8}
         if scenario == "quota_exhausted":
             return 402, _error_body("insufficient balance"), {}
         if scenario == "quota_exhausted_400":
@@ -240,10 +243,14 @@ def build_app() -> FastAPI:
             return 200, "<html>not json</html>", {}
         return 200, ok_body, {}
 
-    def _sse_stream(chunks: int) -> str:
+    def _sse_stream(chunks: int, usage: dict | None = None) -> str:
         parts = [
             'event: message_start\ndata: {"type":"message_start","message":{"role":"assistant"}}\n\n'
         ]
+        if usage is not None:
+            start = {"type": "message_start", "message": {"id": "msg_mock_001",
+                     "role": "assistant", "content": [], "usage": {**usage, "output_tokens": 0}}}
+            parts[0] = "event: message_start\ndata: " + json.dumps(start) + "\n\n"
         for i in range(chunks):
             parts.append(SSE_EVENT.format(text=f"chunk-{i}"))
         parts.append(SSE_DONE)

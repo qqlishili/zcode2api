@@ -36,7 +36,7 @@
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">调用</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/></svg></span></div><div class="stat-num" id="s-calls">0</div><div class="stat-sub" id="s-calls-sub"></div><div id="s-calls-spark"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">成功率</div><span class="stat-icon" style="color:var(--mint)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.4 2.4 4.8-4.8"/></svg></span></div><div class="stat-num" id="s-rate" style="color:var(--mint)">—</div><div class="stat-sub" id="s-rate-sub"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">失败</div><span class="stat-icon" style="color:var(--red)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M15 9l-6 6"/><path d="M9 9l6 6"/></svg></span></div><div class="stat-num" id="s-fail" style="color:var(--red)">0</div><div class="stat-sub" id="s-fail-sub"></div></div>
-    <div class="stat-cell"><div class="stat-top"><div class="stat-label">Token 总量</div><span class="stat-icon" style="color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M21 8a9 3 0 0 1-18 0 9 3 0 0 1 18 0Z"/><path d="M3 8v8a9 3 0 0 0 18 0V8"/></svg></span></div><div class="stat-num" id="s-tok" style="color:var(--amber)">—</div><div class="stat-sub" id="s-tok-sub"></div></div>
+    <div class="stat-cell"><div class="stat-top"><div class="stat-label">已观测 Token</div><span class="stat-icon" style="color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M21 8a9 3 0 0 1-18 0 9 3 0 0 1 18 0Z"/><path d="M3 8v8a9 3 0 0 0 18 0V8"/></svg></span></div><div class="stat-num" id="s-tok" style="color:var(--amber)">—</div><div class="stat-sub" id="s-tok-sub"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">输入</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></span></div><div class="stat-num" id="s-in">—</div><div class="stat-sub" id="s-in-sub"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">输出</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg></span></div><div class="stat-num" id="s-out">—</div><div class="stat-sub" id="s-out-sub"></div></div>
     <div class="stat-cell"><div class="stat-top"><div class="stat-label">平均首字</div><span class="stat-icon" style="color:#6da8e8"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg></span></div><div class="stat-num" id="s-ttfb" style="color:#6da8e8">—</div><div class="stat-sub" id="s-ttfb-sub"></div></div>
@@ -126,8 +126,8 @@ function renderStats(list){
   const ok=list.filter(e=>e.ok===true).length;
   const fail=list.filter(e=>e.ok===false).length;
   const inflight=list.filter(e=>e.ok===null).length;
-  const tin=list.reduce((a,e)=>a+(e.input_tokens||0),0);
-  const tout=list.reduce((a,e)=>a+(e.output_tokens||0),0);
+  const tin=tokenSummary(list,'input_tokens');
+  const tout=tokenSummary(list,'output_tokens');
   const ttfbs=list.filter(e=>e.t_first!=null).map(e=>e.t_first);
   const ttfb=ttfbs.length?ttfbs.reduce((a,b)=>a+b,0)/ttfbs.length:null;
 
@@ -137,12 +137,12 @@ function renderStats(list){
   $('s-rate-sub').textContent=`成功 ${ok}`;
   $('s-fail').textContent=fail;
   $('s-fail-sub').textContent=fail?'点击「失败」筛选查看':'';
-  $('s-tok').textContent=(tin||tout)?fmtTok(tin+tout):'—';
-  $('s-tok-sub').textContent='仅非流式与 OpenAI 流可统计';
-  $('s-in').textContent=fmtTok(tin);
-  $('s-in-sub').textContent=`占比 ${tin+tout?Math.round(tin/(tin+tout)*100):0}%`;
-  $('s-out').textContent=fmtTok(tout);
-  $('s-out-sub').textContent=`占比 ${tin+tout?Math.round(tout/(tin+tout)*100):0}%`;
+  $('s-tok').textContent=tin.known+tout.known?fmtTok(tin.sum+tout.sum):'未知';
+  $('s-tok-sub').textContent=`原始输入/输出${tokenCoverage({known:tin.known+tout.known},total*2)} · 缓存另列，非计费`;
+  $('s-in').textContent=tokenText(tin);
+  $('s-in-sub').textContent=`${tokenCoverage(tin,total)} · ${cacheText(list)}`;
+  $('s-out').textContent=tokenText(tout);
+  $('s-out-sub').textContent=tokenCoverage(tout,total);
   $('s-ttfb').textContent=ttfb!=null?fmtSec(ttfb):'—';
   $('s-ttfb-sub').textContent=ttfbs.length?`样本 ${ttfbs.length}`:'';
 
@@ -156,6 +156,18 @@ function renderStats(list){
   }
   $('s-calls-spark').innerHTML=spark(buckets,'var(--amber)');
   $('live-count').textContent=total;
+}
+
+function tokenSummary(list,key){
+  const values=list.map(e=>e[key]).filter(v=>Number.isInteger(v)&&v>=0);
+  return {sum:values.reduce((a,v)=>a+v,0),known:values.length};
+}
+function tokenText(v){return v.known?fmtTok(v.sum):'未知';}
+function tokenCoverage(v,total){return `已知 ${v.known}/${total}${v.known<total?' · 不完整':''}`;}
+function cacheText(list){
+  const read=tokenSummary(list,'cache_read_input_tokens');
+  const write=tokenSummary(list,'cache_creation_input_tokens');
+  return `缓存读 ${tokenText(read)}（${read.known}/${list.length}） / 写 ${tokenText(write)}（${write.known}/${list.length}）`;
 }
 
 function statusCell(e){
@@ -174,17 +186,17 @@ function renderAgg(key){
   const map=new Map();
   for(const e of filtered()){
     const k=e[key]||'—';
-    if(!map.has(k))map.set(k,{name:k,items:[],ok:0,fail:0,inflight:0,tin:0,tout:0,ttfbs:[],last:null});
+    if(!map.has(k))map.set(k,{name:k,items:[],ok:0,fail:0,inflight:0,ttfbs:[],last:null});
     const g=map.get(k);
     g.items.push(e);
     if(e.ok===true)g.ok++;else if(e.ok===false)g.fail++;else g.inflight++;
-    g.tin+=e.input_tokens||0;g.tout+=e.output_tokens||0;
     if(e.t_first!=null)g.ttfbs.push(e.t_first);
     if(!g.last||e.ts>g.last)g.last=e.ts;
   }
   const rows=[...map.values()].sort((a,b)=>(b.ok+b.fail+b.inflight)-(a.ok+a.fail+a.inflight));
   const head=`<div class="mon-head mon-grid-agg"><span>${key==='account'?'账号':'模型'}</span><span>最近状态</span><span>成功率</span><span>调用</span><span>输入</span><span>输出</span><span>平均首字</span><span>最近请求</span></div>`;
   const body=rows.map(g=>{
+    const tin=tokenSummary(g.items,'input_tokens'),tout=tokenSummary(g.items,'output_tokens');
     const done=g.ok+g.fail;
     const rate=done?Math.round(g.ok/done*100)+'%':'—';
     const ttfb=g.ttfbs.length?fmtSec(g.ttfbs.reduce((a,b)=>a+b,0)/g.ttfbs.length):'—';
@@ -193,8 +205,8 @@ function renderAgg(key){
       <span>${tickbarHtml(g.items.slice(-20))}</span>
       <span class="mon-num">${rate}</span>
       <span class="mon-num">${g.ok+g.fail+g.inflight}</span>
-      <span class="mon-num">${fmtTok(g.tin)}</span>
-      <span class="mon-num">${fmtTok(g.tout)}</span>
+      <span class="mon-num" title="${esc(cacheText(g.items))}">${tokenText(tin)}<span class="stat-sub" style="display:block;white-space:normal">${tokenCoverage(tin,g.items.length)}</span></span>
+      <span class="mon-num">${tokenText(tout)}<span class="stat-sub" style="display:block;white-space:normal">${tokenCoverage(tout,g.items.length)}</span></span>
       <span class="mon-num">${ttfb}</span>
       <span class="mon-time">${fmtTs(g.last)}</span>
     </div>`;
@@ -212,8 +224,8 @@ function renderLive(){
       <span>${statusCell(e)}</span>
       <span class="mon-num">${fmtSec(e.t_first)}</span>
       <span class="mon-num">${fmtSec(e.t_total)}</span>
-      <span class="mon-num">${fmtTok(e.input_tokens)}</span>
-      <span class="mon-num">${fmtTok(e.output_tokens)}</span>
+      <span class="mon-num" title="${esc(cacheText([e]))}">${tokenText(tokenSummary([e],'input_tokens'))}</span>
+      <span class="mon-num">${tokenText(tokenSummary([e],'output_tokens'))}</span>
       <span class="mon-preview" title="${esc(e.error||e.preview||'')}">${e.ok===false&&e.error?`<span class="err-line">${esc(e.error)}</span>`:esc(e.preview||'—')}${e.stream?' <span class="mon-stream">流</span>':''}</span>
     </div>`).join('');
   $('list').innerHTML=filtered().length?`<div class="acct-table">${head}${body}</div>`:`<div class="empty-state">所选时间范围内没有请求</div>`;

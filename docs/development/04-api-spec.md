@@ -99,6 +99,8 @@
 | `GET /admin/api/settings` | 不回明文密钥。返回 `admin_key_set` / `admin_key_masked` / `admin_key_is_default`、`gateway_key_set` / `gateway_key_masked`、`quota_refresh_interval`、`account_concurrency` |
 | `PUT /admin/api/settings` | 改密钥、刷新间隔、并发上限（改后即生效，落 meta 表；并发 0 = 不限）。前端回填的掩码（含 `…` 或 `••••`）忽略不覆盖；网关 key 传空字符串表示关闭校验 |
 
+监控保留上游 `input_tokens` / `output_tokens`，另列可空的 `cache_read_input_tokens` / `cache_creation_input_tokens`。缺失或异常类型为 `null`，0 保留；SSE 累计更新不重复求和，不改变三协议客户端 usage 契约。页面显示已知 / 未知样本数；原始输入输出合计不代表完整输入或套餐扣费。
+
 ### 探活
 
 | 方法/路径 | 说明 |
