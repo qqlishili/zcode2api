@@ -2,11 +2,11 @@
 
 入站：OpenAI 请求体 → Anthropic messages 体（system/developer 提取为 system 参数、
 content 分块、tool_calls / tool_result / 图片(data URL) best-effort 映射、
-reasoning_effort / thinking / output_config 推理参数透传）。
+reasoning_effort / thinking / output_config 三档思考参数映射）。
 出站：Anthropic 响应（JSON 或 SSE 事件流）→ OpenAI 格式。
 
 与 body_transform 同一原则：对畸形输入保持宽容，映射不了的部件安静跳过，
-绝不放大请求失败。
+绝不放大请求失败；思考参数按免费模型契约校验。
 """
 
 from __future__ import annotations
@@ -76,36 +76,45 @@ def _blocks_from_user_content(content: object) -> list[dict]:
     return blocks or [{"type": "text", "text": ""}]
 
 
-def _apply_reasoning_params(payload: dict, body: dict) -> None:
-    """将 OpenAI 兼容端的 reasoning_effort / reasoning / thinking / output_config 映射到 Anthropic 体。"""
-    # 1) 直接透传客户端显式带的 thinking / output_config 字典
-    if isinstance(payload.get("thinking"), dict):
-        body["thinking"] = dict(payload["thinking"])
-    elif isinstance(payload.get("enable_thinking"), bool):
-        body["thinking"] = {"type": "enabled" if payload["enable_thinking"] else "disabled"}
+def _apply_reasoning_params(payload: dict, body: dict) -> str | None:
+    """校验免费 Flash 思考参数，并映射到 Anthropic 体；非法时返回错误信息。"""
+    for key in ("thinking", "output_config", "reasoning"):
+        if key in payload and not isinstance(payload[key], dict):
+            return f"{key} 必须是对象；思考等级仅支持 low/high/max"
 
-    if isinstance(payload.get("output_config"), dict):
-        body["output_config"] = dict(payload["output_config"])
+    thinking = payload.get("thinking")
+    out_cfg = payload.get("output_config")
+    if "enable_thinking" in payload and payload["enable_thinking"] is not True:
+        return "enable_thinking 仅支持 true；思考等级仅支持 low/high/max，不支持关闭"
+    if isinstance(thinking, dict) and thinking.get("type") not in ("enabled", "adaptive"):
+        return "thinking.type 仅支持 enabled/adaptive；思考等级仅支持 low/high/max，不支持关闭"
 
-    # 2) OpenAI reasoning_effort 或 reasoning.effort
-    effort = payload.get("reasoning_effort")
-    if effort is None and isinstance(payload.get("reasoning"), dict):
-        effort = payload["reasoning"].get("effort")
-    if isinstance(effort, str) and effort.strip():
-        eff_low = effort.strip().lower()
-        if eff_low in ("disabled", "none", "off"):
-            body["thinking"] = {"type": "disabled"}
-            if isinstance(body.get("output_config"), dict):
-                body["output_config"].pop("effort", None)
-                if not body["output_config"]:
-                    body.pop("output_config", None)
-        elif eff_low in ("minimal", "low", "medium", "high", "xhigh", "max"):
-            body["thinking"] = {"type": "enabled"}
-            out_cfg = dict(body.get("output_config")) if isinstance(body.get("output_config"), dict) else {}
-            out_cfg["effort"] = eff_low
-            body["output_config"] = out_cfg
-        elif eff_low in ("enabled", "adaptive", "auto"):
-            body["thinking"] = {"type": "enabled"}
+    # 先检查全部原始字段，避免转换覆盖非法值或冲突的档位。
+    efforts = []
+    if "reasoning_effort" in payload:
+        efforts.append(("reasoning_effort", payload["reasoning_effort"]))
+    for key in ("reasoning", "output_config"):
+        params = payload.get(key)
+        if isinstance(params, dict) and "effort" in params:
+            efforts.append((f"{key}.effort", params["effort"]))
+    for field, value in efforts:
+        if not isinstance(value, str) or value not in ("low", "high", "max"):
+            return f"{field} 仅支持 low/high/max"
+    if efforts and any(value != efforts[0][1] for _, value in efforts):
+        return "思考等级参数冲突；各字段须使用相同的 low/high/max"
+    if isinstance(thinking, dict) and "budget_tokens" in thinking and not efforts:
+        return "不支持仅设置 budget_tokens；请明确选择 low/high/max"
+
+    if isinstance(out_cfg, dict):
+        body["output_config"] = dict(out_cfg)
+    if efforts:
+        body.setdefault("output_config", {})["effort"] = efforts[0][1]
+    if efforts or thinking is not None or payload.get("enable_thinking") is True:
+        # 上游使用 enabled + effort，不发送 budget_tokens，也不推算默认档位。
+        body["thinking"] = {"type": "enabled"}
+    for key in ("reasoning_effort", "reasoning", "enable_thinking"):
+        body.pop(key, None)
+    return None
 
 
 def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
@@ -192,7 +201,9 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     if payload.get("stream"):
         body["stream"] = True
 
-    _apply_reasoning_params(payload, body)
+    err = _apply_reasoning_params(payload, body)
+    if err:
+        return None, err
 
     user_tag = payload.get("user")
     if isinstance(user_tag, str) and user_tag.strip():

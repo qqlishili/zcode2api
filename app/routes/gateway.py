@@ -23,7 +23,7 @@ from ..agent import build_request
 from ..auth_admin import verify_gateway_key
 from ..captcha import captcha_manager
 from ..models import Account, Status
-from ..openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
+from ..openai_compat import StreamConverter, _apply_reasoning_params, anthropic_to_openai, openai_to_anthropic
 from ..quota import fetch_quota
 from ..responses_compat import ResponsesStreamConverter, anthropic_to_responses, responses_to_anthropic
 from ..store import store
@@ -63,114 +63,12 @@ MODEL_NAME_MAP = constants.MODEL_NAME_MAP
 AVAILABLE_MODELS = constants.AVAILABLE_MODELS
 _EXHAUST_KEYWORDS = constants.EXHAUST_KEYWORDS
 
-# 对齐官方 ZCode zcode-builtin.json (rev 30) 与 model-execution.ts 的模型思考等级矩阵
-_EFFORT_MODELS_53 = {"GLM-5.3", "GLM-5.3-FLASH"}
-_EFFORT_MODELS_52 = {"GLM-5.2"}
-
 
 def _detect_provider(body: dict, headers) -> str:
     model = body.get("model") or ""
     if model.startswith("bigmodel/") or headers.get("x-provider") == "bigmodel":
         return "bigmodel"
     return "zai"
-
-
-def _normalize_thinking_for_model(body: dict, model: str | None) -> None:
-    """按官方 ZCode zcode-builtin.json 思考契约归一化 thinking 与 output_config.effort。
-
-    - GLM-5.3 / GLM-5.3-Flash：thinking_mode="effort"，仅支持 ["low", "high", "max"]
-      （客户端若发 "medium"/"minimal"/"xhigh" 或 budget_tokens，自动折叠到合法档位）
-    - GLM-5.2：thinking_mode="effort"，仅支持 ["disabled", "high", "max"]
-    - 其它 GLM 模型（GLM-5-Turbo / GLM-5.1 / GLM-4.7）：thinking_mode="enable"，
-      不支持 output_config.effort，剥离 effort 并转为 thinking.type = enabled/disabled。
-    """
-    if not isinstance(model, str):
-        return
-    model_up = model.strip().upper()
-    if not model_up.startswith("GLM-"):
-        return
-
-    thinking = body.get("thinking")
-    out_cfg = body.get("output_config")
-    effort: str | None = None
-    if isinstance(out_cfg, dict) and isinstance(out_cfg.get("effort"), str):
-        effort = out_cfg["effort"].strip().lower()
-
-    # Anthropic 标准 budget_tokens → 转换为 effort 档位并移除 budget_tokens（GLM 上游不支持 budget_tokens）
-    if isinstance(thinking, dict) and "budget_tokens" in thinking:
-        raw_bt = thinking.pop("budget_tokens", None)
-        try:
-            bt = int(float(raw_bt)) if raw_bt is not None and not isinstance(raw_bt, bool) else 0
-        except (TypeError, ValueError):
-            bt = 0
-        if effort is None and bt > 0:
-            if bt < 8192:
-                effort = "low"
-            elif bt <= 24576:
-                effort = "high"
-            else:
-                effort = "max"
-        if thinking.get("type") not in ("enabled", "disabled"):
-            thinking["type"] = "enabled"
-
-    if model_up in _EFFORT_MODELS_53:
-        if effort is not None:
-            if effort in ("disabled", "off"):
-                body["thinking"] = {"type": "disabled"}
-                if isinstance(out_cfg, dict):
-                    out_cfg.pop("effort", None)
-                    if not out_cfg:
-                        body.pop("output_config", None)
-                return
-            if effort in ("minimal", "none", "low"):
-                mapped = "low"
-            elif effort in ("xhigh", "max"):
-                mapped = "max"
-            else:
-                # medium / high / enabled / adaptive 统一归并到官方支持的 high
-                mapped = "high"
-            new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
-            new_cfg["effort"] = mapped
-            body["output_config"] = new_cfg
-            body["thinking"] = {"type": "enabled"}
-        elif isinstance(thinking, dict):
-            t_type = str(thinking.get("type") or "").lower()
-            if t_type == "disabled":
-                body["thinking"] = {"type": "disabled"}
-            elif t_type in ("enabled", "adaptive"):
-                body["thinking"] = {"type": "enabled"}
-    elif model_up in _EFFORT_MODELS_52:
-        if effort is not None:
-            if effort in ("disabled", "none", "off"):
-                body["thinking"] = {"type": "disabled"}
-                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
-                new_cfg["effort"] = "disabled"
-                body["output_config"] = new_cfg
-            else:
-                mapped = "max" if effort in ("xhigh", "max") else "high"
-                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
-                new_cfg["effort"] = mapped
-                body["output_config"] = new_cfg
-                body["thinking"] = {"type": "enabled"}
-        elif isinstance(thinking, dict):
-            t_type = str(thinking.get("type") or "").lower()
-            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
-    else:
-        # GLM-5-Turbo / GLM-5.1 / GLM-4.7：仅支持 thinking: {type: enabled|disabled}，剥离 output_config.effort
-        if isinstance(out_cfg, dict) and "effort" in out_cfg:
-            out_cfg = dict(out_cfg)
-            out_cfg.pop("effort", None)
-            if out_cfg:
-                body["output_config"] = out_cfg
-            else:
-                body.pop("output_config", None)
-        if effort is not None and not isinstance(thinking, dict):
-            body["thinking"] = {
-                "type": "disabled" if effort in ("disabled", "none", "off") else "enabled"
-            }
-        elif isinstance(thinking, dict):
-            t_type = str(thinking.get("type") or "").lower()
-            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
 
 
 def _normalize_body(body: dict) -> dict:
@@ -191,8 +89,6 @@ def _normalize_body(body: dict) -> dict:
             if clamped != mt:
                 logs.warn("gateway", f"max_tokens {mt} 超出上游范围 [1,{constants.MAX_TOKENS_LIMIT}]，钳制为 {clamped}")
             body["max_tokens"] = clamped
-
-    _normalize_thinking_for_model(body, model)
 
     messages = body.get("messages")
     if isinstance(messages, list):
@@ -447,6 +343,10 @@ async def messages(request: Request):
             {"error": {"message": "请求体必须是 JSON 对象", "type": "invalid_request_error"}},
             status_code=400,
         )
+
+    err = _apply_reasoning_params(body, body)
+    if err:
+        return JSONResponse({"error": {"message": err, "type": "invalid_request_error"}}, status_code=400)
 
     incoming_headers = dict(request.headers)
     provider = _detect_provider(body, request.headers)

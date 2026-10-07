@@ -36,6 +36,20 @@
 - `previous_response_id` 仅作会话亲和线索，无历史 LRU；缺少完整 `input` 时返回参数错误。
 - 流生命周期解耦与终态防护（499 误判根除）：上游发送 `message_stop` 并生成 `response.completed` 后，转换器置 `is_finished=True` 并主动 `break` 退出上游读取循环，避免上游 HTTP Keep-Alive 未断连接时下游 Codex 客户端主动断开导致 Uvicorn 注入 `asyncio.CancelledError` 误记录为 499；即使在产出终态后客户端立即掐断连接，网关依据 `conv.is_finished` 仍准确判定为 200 成功。
 
+### 1.5 思考等级
+
+免费模型 `GLM-5.3-Flash` 仅支持 `low` / `high` / `max`，合法档位原值映射到上游 `output_config.effort`，不折叠或降档。
+
+| 接口 | 思考等级字段 |
+|------|-------------|
+| Messages | `output_config.effort` |
+| Chat Completions | `reasoning_effort` |
+| Responses | `reasoning.effort` |
+
+省略等级沿用上游默认；`thinking.type=enabled/adaptive` 映射为 `enabled`。显式关闭、非法等级或参数形状、冲突等级、仅设置 `budget_tokens` 均在选号前返回 400 `invalid_request_error`，错误信息列出三档。多处等级须相同；明确等级附带预算时移除预算，不推算等级。
+
+pi 在该模型项设置 `thinkingLevelMap` 仅启用 `low/high/max`（其他档位为 `null`），并设 `compat.forceAdaptiveThinking=true`。这限制可用选项；强制非法 CLI 档位仍可能由 pi 自行钳制，网关校验实际收到的值。
+
 ### 1.6 错误格式
 
 ```json

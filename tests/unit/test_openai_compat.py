@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
+from app.responses_compat import responses_to_anthropic
 
 
 class TestOpenaiToAnthropic:
@@ -134,14 +137,49 @@ class TestOpenaiToAnthropic:
     def test_reasoning_effort_and_user_session_mapped(self):
         body, err = openai_to_anthropic({
             "model": "glm-5.3-flash",
-            "reasoning_effort": "medium",
+            "reasoning_effort": "high",
             "user": "sess-custom-42",
             "messages": [{"role": "user", "content": "hi"}],
         })
         assert err is None and body is not None
         assert body["thinking"] == {"type": "enabled"}
-        assert body["output_config"] == {"effort": "medium"}
+        assert body["output_config"] == {"effort": "high"}
         assert body["metadata"]["session_id"] == "sess-custom-42"
+
+
+class TestThinkingParams:
+    @pytest.mark.parametrize("convert", [openai_to_anthropic, responses_to_anthropic])
+    @pytest.mark.parametrize("effort", ["low", "high", "max"])
+    def test_explicit_effort_preserved(self, convert, effort):
+        payload = {
+            "model": "GLM-5.3-Flash", "messages": [{"role": "user", "content": "hi"}], "input": "hi",
+            "reasoning_effort": effort, "reasoning": {"effort": effort},
+            "output_config": {"effort": effort},
+            "thinking": {"type": "adaptive", "budget_tokens": 8192},
+        }
+        body, err = convert(payload)
+        assert err is None
+        assert body["output_config"] == {"effort": effort}
+        assert body["thinking"] == {"type": "enabled"}
+        assert payload["thinking"] == {"type": "adaptive", "budget_tokens": 8192}
+
+    @pytest.mark.parametrize("convert", [openai_to_anthropic, responses_to_anthropic])
+    @pytest.mark.parametrize("params", [
+        {"reasoning_effort": "medium"}, {"reasoning": {"effort": "none"}},
+        {"reasoning_effort": "max", "output_config": {"effort": "low"}},
+        {"reasoning_effort": "max", "reasoning": {"effort": "invalid"}},
+        {"reasoning_effort": "max", "enable_thinking": False},
+        {"reasoning_effort": "max", "thinking": {"type": "disabled"}},
+        {"reasoning_effort": "max", "output_config": {"effort": None}},
+        {"thinking": {"type": "enabled", "budget_tokens": 8192}},
+    ])
+    def test_invalid_original_params_rejected(self, convert, params):
+        body, err = convert({
+            "model": "GLM-5.3-Flash", "messages": [{"role": "user", "content": "hi"}], "input": "hi",
+            **params,
+        })
+        assert body is None
+        assert err is not None and all(level in err for level in ("low", "high", "max"))
 
 
 class TestAnthropicToOpenai:

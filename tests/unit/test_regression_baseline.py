@@ -12,12 +12,12 @@ import time
 import pytest
 
 from app.models import Account, Status
+from app.openai_compat import _apply_reasoning_params
 from app.routes.gateway import (
     _detect_provider,
     _is_captcha_error,
     _is_exhausted,
     _normalize_body,
-    _normalize_thinking_for_model,
 )
 
 
@@ -33,6 +33,7 @@ class TestNormalizeBody:
 
     def test_unknown_model_normalized_to_default_flash(self):
         body = {"model": "claude-3-5-sonnet", "output_config": {"effort": "high"}}
+        assert _apply_reasoning_params(body, body) is None
         norm = _normalize_body(body)
         assert norm["model"] == "GLM-5.3-Flash"
         assert norm["output_config"] == {"effort": "high"}
@@ -340,93 +341,36 @@ def fresh_account(secret: str) -> Account:
 
 # ── 思考档位与业务错误码归一（3.14.3 对齐）──────────────────────────────────
 class TestThinkingNormalization:
-    def test_glm53_coerces_medium_and_minimal_effort(self):
-        b1 = _normalize_body({
-            "model": "glm-5.3-flash",
-            "output_config": {"effort": "medium"},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b1["model"] == "GLM-5.3-Flash"
-        assert b1["output_config"] == {"effort": "high"}
-        assert b1["thinking"] == {"type": "enabled"}
-
-        b2 = _normalize_body({
-            "model": "GLM-5.3",
-            "output_config": {"effort": "minimal"},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b2["model"] == "GLM-5.3-Flash"
-        assert b2["output_config"] == {"effort": "low"}
-        assert b2["thinking"] == {"type": "enabled"}
-
-        b3 = _normalize_body({
-            "model": "GLM-5.3",
-            "output_config": {"effort": "xhigh"},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b3["model"] == "GLM-5.3-Flash"
-        assert b3["output_config"] == {"effort": "max"}
-
-    def test_glm53_disabled_effort_removes_output_config(self):
-        b = _normalize_body({
-            "model": "GLM-5.3-Flash",
-            "output_config": {"effort": "disabled"},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b["thinking"] == {"type": "disabled"}
-        assert "output_config" not in b
-
-    def test_glm52_coerces_low_to_high_and_keeps_disabled(self):
-        b1 = {
-            "model": "GLM-5.2",
-            "output_config": {"effort": "low"},
+    @pytest.mark.parametrize("effort", ["low", "high", "max"])
+    def test_free_model_keeps_explicit_effort(self, effort):
+        body = {
+            "model": "GLM-5.2", "output_config": {"effort": effort},
             "messages": [{"role": "user", "content": "hi"}],
         }
-        _normalize_thinking_for_model(b1, "GLM-5.2")
-        assert b1["output_config"] == {"effort": "high"}
-        assert b1["thinking"] == {"type": "enabled"}
+        assert _apply_reasoning_params(body, body) is None
+        assert _normalize_body(body)["model"] == "GLM-5.3-Flash"
+        assert body["output_config"] == {"effort": effort}
+        assert body["thinking"] == {"type": "enabled"}
 
-        b2 = {
-            "model": "GLM-5.2",
-            "output_config": {"effort": "disabled"},
-            "messages": [{"role": "user", "content": "hi"}],
-        }
-        _normalize_thinking_for_model(b2, "GLM-5.2")
-        assert b2["output_config"] == {"effort": "disabled"}
-        assert b2["thinking"] == {"type": "disabled"}
+    @pytest.mark.parametrize("params", [
+        {"output_config": {"effort": "medium"}},
+        {"output_config": {"effort": "minimal"}},
+        {"output_config": {"effort": "xhigh"}},
+        {"output_config": {"effort": "disabled"}},
+        {"thinking": {"type": "enabled", "budget_tokens": 16384}},
+    ])
+    def test_legacy_folding_and_budget_inference_rejected(self, params):
+        body = {"model": "GLM-5.3-Flash", **params}
+        before = json.dumps(body)
+        err = _apply_reasoning_params(body, body)
+        assert err is not None and "low/high/max" in err
+        assert json.dumps(body) == before
 
-    def test_glm5_turbo_strips_effort_and_uses_enable_mode(self):
-        b = {
-            "model": "GLM-5-Turbo",
-            "output_config": {"effort": "high"},
-            "messages": [{"role": "user", "content": "hi"}],
-        }
-        _normalize_thinking_for_model(b, "GLM-5-Turbo")
-        assert "output_config" not in b
-        assert b["thinking"] == {"type": "enabled"}
-
-    def test_budget_tokens_converted_to_effort(self):
-        b_low = _normalize_body({
-            "model": "GLM-5.3-Flash",
-            "thinking": {"type": "enabled", "budget_tokens": 4096},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert "budget_tokens" not in b_low["thinking"]
-        assert b_low["output_config"] == {"effort": "low"}
-
-        b_high = _normalize_body({
-            "model": "GLM-5.3",
-            "thinking": {"type": "enabled", "budget_tokens": 16384},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b_high["output_config"] == {"effort": "high"}
-
-        b_max = _normalize_body({
-            "model": "GLM-5.3",
-            "thinking": {"type": "enabled", "budget_tokens": 32768},
-            "messages": [{"role": "user", "content": "hi"}],
-        })
-        assert b_max["output_config"] == {"effort": "max"}
+    def test_omitted_thinking_not_injected(self):
+        body = {"model": "GLM-5.3-Flash"}
+        assert _apply_reasoning_params(body, body) is None
+        _normalize_body(body)
+        assert "thinking" not in body and "output_config" not in body
 
 
 class TestBusinessErrorClassification:

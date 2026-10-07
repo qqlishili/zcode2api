@@ -12,6 +12,24 @@ import pytest
 
 _GOOD_JWT = "hO.eyJzdWIiOiJvIn0.sig"
 
+_THINKING_ENDPOINTS = ["/v1/messages", "/v1/chat/completions", "/v1/responses"]
+
+
+def _thinking_payload(endpoint, effort=None):
+    payload = {"model": "GLM-5.3-Flash", "max_tokens": 64}
+    if endpoint == "/v1/responses":
+        payload["input"] = "hi"
+        if effort is not None:
+            payload["reasoning"] = {"effort": effort}
+    else:
+        payload["messages"] = [{"role": "user", "content": "hi"}]
+        if effort is not None:
+            if endpoint == "/v1/messages":
+                payload["output_config"] = {"effort": effort}
+            else:
+                payload["reasoning_effort"] = effort
+    return payload
+
 
 @pytest.mark.integration
 class TestChatCompletions:
@@ -151,3 +169,112 @@ class TestChatCompletions:
             assert res.status_code == 503  # 鉴权通过，进入调度（无账号）
         finally:
             fresh_app.set_setting("gateway_key", "")
+
+
+@pytest.mark.integration
+class TestThinkingLevels:
+    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
+    @pytest.mark.parametrize("effort", ["low", "high", "max"])
+    @pytest.mark.parametrize("stream", [False, True])
+    async def test_effort_reaches_upstream_unchanged(self, gateway_client, fresh_app, endpoint, effort, stream):
+        client, mock = gateway_client
+        from tests.conftest import seed_account
+
+        seed_account(fresh_app, _GOOD_JWT)
+        res = await client.post(endpoint, json={**_thinking_payload(endpoint, effort), "stream": stream})
+        assert res.status_code == 200
+        upstream = json.loads(mock.state.calls[-1][3])
+        assert upstream["output_config"] == {"effort": effort}
+        assert upstream["thinking"] == {"type": "enabled"}
+        if stream:
+            events = [json.loads(line[6:]) for line in res.text.splitlines()
+                      if line.startswith("data: ") and line != "data: [DONE]"]
+            if endpoint == "/v1/responses":
+                completed = next(evt for evt in events if evt.get("type") == "response.completed")
+                assert completed["response"]["reasoning"] == {"effort": effort}
+            elif endpoint == "/v1/chat/completions":
+                assert "data: [DONE]" in res.text
+            else:
+                assert any(evt.get("type") == "message_stop" for evt in events)
+        elif endpoint == "/v1/responses":
+            assert res.json()["reasoning"] == {"effort": effort}
+
+    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
+    @pytest.mark.parametrize("params", [{}, {"thinking": {"type": "enabled"}},
+                                        {"thinking": {"type": "adaptive"}}, {"enable_thinking": True}])
+    async def test_omitted_effort_uses_upstream_default(self, gateway_client, fresh_app, endpoint, params):
+        client, mock = gateway_client
+        from tests.conftest import seed_account
+
+        seed_account(fresh_app, _GOOD_JWT)
+        res = await client.post(endpoint, json={**_thinking_payload(endpoint), **params})
+        assert res.status_code == 200
+        upstream = json.loads(mock.state.calls[-1][3])
+        assert "effort" not in upstream.get("output_config", {})
+        if not params:
+            assert "thinking" not in upstream
+        else:
+            assert upstream["thinking"] == {"type": "enabled"}
+
+    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
+    @pytest.mark.parametrize("effort", ["minimal", "medium", "xhigh", "none", "off", "disabled",
+                                        "unknown", "", "HIGH", " low ", None, False, 1, [], {}])
+    async def test_invalid_effort_rejected_before_selection(self, gateway_client, fresh_app, monkeypatch,
+                                                           endpoint, effort):
+        params = {"output_config": {"effort": effort}}
+        if endpoint == "/v1/chat/completions":
+            params = {"reasoning_effort": effort}
+        elif endpoint == "/v1/responses":
+            params = {"reasoning": {"effort": effort}}
+        await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+
+    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
+    @pytest.mark.parametrize("params", [
+        {"enable_thinking": False}, {"thinking": {"type": "disabled"}},
+        {"thinking": {"type": "enabled", "budget_tokens": 8192}},
+        {"reasoning_effort": "high", "output_config": {"effort": "low"}},
+        {"reasoning_effort": "high", "reasoning": {"effort": "invalid"}},
+        {"reasoning_effort": "high", "thinking": {"type": "disabled"}},
+        {"reasoning_effort": "high", "enable_thinking": False},
+        {"reasoning_effort": "high", "output_config": {"effort": None}},
+        {"thinking": None}, {"thinking": {"type": "auto"}}, {"thinking": {}},
+        {"reasoning": []}, {"output_config": "high"}, {"enable_thinking": "true"},
+    ])
+    async def test_unsupported_or_conflicting_params_rejected(self, gateway_client, fresh_app, monkeypatch,
+                                                            endpoint, params):
+        await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+
+    async def _assert_rejected(self, gateway_client, fresh_app, monkeypatch, endpoint, params):
+        client, mock = gateway_client
+        selected = []
+        original_select = fresh_app.select
+
+        def select(*args, **kwargs):
+            selected.append(True)
+            return original_select(*args, **kwargs)
+
+        monkeypatch.setattr(fresh_app, "select", select)
+        calls_before = len(mock.state.calls)
+        res = await client.post(endpoint, json={**_thinking_payload(endpoint), **params})
+        assert res.status_code == 400
+        error = res.json()["error"]
+        assert error["type"] == "invalid_request_error"
+        assert all(level in error["message"] for level in ("low", "high", "max"))
+        assert selected == []
+        assert len(mock.state.calls) == calls_before
+
+    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
+    async def test_same_efforts_with_budget_keep_explicit_level(self, gateway_client, fresh_app, endpoint):
+        client, mock = gateway_client
+        from tests.conftest import seed_account
+
+        seed_account(fresh_app, _GOOD_JWT)
+        res = await client.post(endpoint, json={
+            **_thinking_payload(endpoint, "max"), "reasoning_effort": "max",
+            "reasoning": {"effort": "max"}, "output_config": {"effort": "max"},
+            "thinking": {"type": "adaptive", "budget_tokens": 1024},
+        })
+        assert res.status_code == 200
+        upstream = json.loads(mock.state.calls[-1][3])
+        assert upstream["output_config"] == {"effort": "max"}
+        assert upstream["thinking"] == {"type": "enabled"}

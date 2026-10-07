@@ -260,7 +260,9 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     if payload.get("stream"):
         body["stream"] = True
 
-    _apply_reasoning_params(payload, body)
+    err = _apply_reasoning_params(payload, body)
+    if err:
+        return None, err
 
     # 会话亲和：优先取 prompt_cache_key / conversation / previous_response_id / user
     for sk in ("prompt_cache_key", "conversation", "previous_response_id", "user"):
