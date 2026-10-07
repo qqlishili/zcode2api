@@ -184,7 +184,8 @@ def build_app() -> FastAPI:
         if stream:
             chunks = int(headers.get("x-mock-sse-chunks", 3))
             truncate_at = headers.get("x-mock-sse-truncate-at")
-            content = _sse_stream(chunks, resp_body["usage"] if scenario == "usage_cached" else None)
+            content = _sse_stream(chunks, resp_body["usage"] if scenario == "usage_cached" else None,
+                                  error_scenario=scenario if scenario.startswith("sse_error_") else None)
             if scenario == "sse_truncate" and truncate_at is not None:
                 cut = int(truncate_at)
                 content = content[:cut]
@@ -243,7 +244,7 @@ def build_app() -> FastAPI:
             return 200, "<html>not json</html>", {}
         return 200, ok_body, {}
 
-    def _sse_stream(chunks: int, usage: dict | None = None) -> str:
+    def _sse_stream(chunks: int, usage: dict | None = None, *, error_scenario: str | None = None) -> str:
         parts = [
             'event: message_start\ndata: {"type":"message_start","message":{"role":"assistant"}}\n\n'
         ]
@@ -251,9 +252,27 @@ def build_app() -> FastAPI:
             start = {"type": "message_start", "message": {"id": "msg_mock_001",
                      "role": "assistant", "content": [], "usage": {**usage, "output_tokens": 0}}}
             parts[0] = "event: message_start\ndata: " + json.dumps(start) + "\n\n"
-        for i in range(chunks):
-            parts.append(SSE_EVENT.format(text=f"chunk-{i}"))
-        parts.append(SSE_DONE)
+        if error_scenario in ("sse_error_first", "sse_error_missing"):
+            parts.clear()
+        elif error_scenario == "sse_error_tool":
+            events = [
+                {"type": "content_block_start", "index": 0, "content_block": {
+                    "type": "tool_use", "id": "tool_fixture", "name": "fixture_tool", "input": {}}},
+                {"type": "content_block_delta", "index": 0, "delta": {
+                    "type": "input_json_delta", "partial_json": '{"city":'}},
+            ]
+            for event in events:
+                parts.append("data: " + json.dumps(event) + "\n\n")
+        else:
+            for i in range(chunks):
+                parts.append(SSE_EVENT.format(text=f"chunk-{i}"))
+        if error_scenario:
+            event = {"type": "error", "error": {"type": "overloaded_error", "message": "fixture failure"}}
+            if error_scenario == "sse_error_missing":
+                event["error"] = None
+            parts.append("event: error\ndata: " + json.dumps(event) + "\n\n")
+        else:
+            parts.append(SSE_DONE)
         return "".join(parts)
 
     async def _billing_current(request: Request) -> Response:

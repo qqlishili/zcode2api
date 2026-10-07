@@ -39,6 +39,43 @@ class TestMessagesBodyValidation:
 @pytest.mark.integration
 class TestMonitoringRecording:
     @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("scenario", ["sse_error_first", "sse_error_text", "sse_error_tool",
+                                          "sse_error_missing"])
+    async def test_stream_error_is_not_success(self, gateway_client, fresh_app, endpoint, scenario):
+        """三协议流内报错：不补正常终态、不重发、账号结果与监控一致。"""
+        client, mock = gateway_client
+        from app import reqlog
+        from app.routes import gateway as gw
+        from tests.conftest import seed_account
+
+        account = seed_account(fresh_app, "hStreamError.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="stream-error")
+        seed_account(fresh_app, "hStandby.eyJzdWIiOiJzdGFuZGJ5In0.sig", name="standby")
+        fresh_app.set_setting("account_concurrency", "1")
+        start = len(mock.state.calls)
+        body = {"model": "GLM-5.3-Flash", "stream": True}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
+        )
+        response = await client.post("/v1/" + endpoint, json=body,
+                                     headers={"x-mock-scenario": scenario})
+        assert response.status_code == 200  # 流式响应头已发送，失败在协议内表达
+        entry = reqlog.snapshot()[0]
+        assert entry["ok"] is False and entry["status"] == 200
+        assert entry["error"] and entry["t_total"] is not None
+        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is False
+        assert not gw._inflight
+        calls = [call for call in mock.state.calls[start:] if call[0] == "POST" and call[1].endswith("/messages")]
+        assert len(calls) == 1
+        assert all(frame not in response.text for frame in ("message_stop", "[DONE]", "response.completed"))
+        assert ('"type": "error"' in response.text if endpoint == "messages" else
+                '"error"' in response.text if endpoint == "chat/completions" else
+                response.text.count("event: response.failed\n") == 1)
+        if scenario == "sse_error_text":
+            assert "chunk-0" in response.text
+        if scenario == "sse_error_tool":
+            assert "fixture_tool" in response.text
+
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
     @pytest.mark.parametrize("stream", [False, True])
     async def test_cached_usage_recorded_without_changing_client_contract(
         self, gateway_client, fresh_app, endpoint, stream,
@@ -49,7 +86,7 @@ class TestMonitoringRecording:
         from app.routes import gateway as gw
         from tests.conftest import seed_account
 
-        seed_account(fresh_app, "hCache.eyJzdWIiOiJmIn0.sig", name="cache-fixture")
+        account = seed_account(fresh_app, "hCache.eyJzdWIiOiJmIn0.sig", name="cache-fixture")
         body = {"model": "GLM-5.3-Flash", "stream": stream, "max_tokens": 64}
         if endpoint == "responses":
             body["input"] = "usage fixture"
@@ -61,6 +98,7 @@ class TestMonitoringRecording:
         assert response.status_code == 200
         entry = reqlog.snapshot()[0]
         assert entry["ok"] is True
+        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is True
         assert {k: entry[k] for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
                                      "cache_creation_input_tokens")} == {
             "input_tokens": 0, "output_tokens": 5,

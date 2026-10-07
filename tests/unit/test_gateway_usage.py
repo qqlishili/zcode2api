@@ -11,6 +11,93 @@ from app import reqlog
 from app.routes import gateway as gw
 
 
+@pytest.fixture
+def error_stream():
+    """合成错误流，验证实际生成器的分块、取消与关闭。"""
+    reqlog.clear()
+
+    def _build(protocol, size=65536, on_result=None):
+        raw = b'data: {"type":"error","error":{"message":"fixture"}}\n\n'
+        closed = []
+
+        class Response:
+            status_code = 200
+            headers = {"content-type": "text/event-stream"}
+
+            async def aiter_bytes(self):
+                for i in range(0, len(raw), size):
+                    yield raw[i:i + size]
+
+            async def aiter_lines(self):
+                for line in raw.decode().splitlines():
+                    yield line
+
+        class Context:
+            async def __aexit__(self, *args):
+                closed.append("context")
+
+        reqlog.begin("error", protocol, "GLM-5.3-Flash", True)
+        up = gw._Upstream(Response(), Context(), None, on_close=lambda: closed.append("slot"),
+                          on_result=on_result)
+        response = (up.to_streaming("error") if protocol == "messages" else
+                    gw._openai_stream_response(up, "GLM-5.3-Flash", "error") if protocol == "chat" else
+                    gw._responses_stream_response(up, "GLM-5.3-Flash", "error"))
+        return up, response.body_iterator, closed, raw
+
+    yield _build
+    reqlog.clear()
+
+
+@pytest.mark.parametrize("size", [1, 7, 65536])
+async def test_error_frame_cross_chunks_is_preserved(error_stream, size):
+    up, iterator, closed, raw = error_stream("messages", size=size)
+    assert b"".join([chunk async for chunk in iterator]) == raw
+    await up.close()
+    assert reqlog.snapshot()[0]["ok"] is False
+    assert closed == ["context", "slot"]
+
+
+@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
+async def test_cancel_at_error_frame_preserves_failure(error_stream, protocol):
+    results = []
+    up, iterator, closed, _ = error_stream(protocol, on_result=lambda ok, detail: results.append(ok))
+    try:
+        async for chunk in iterator:
+            text = chunk.decode() if isinstance(chunk, bytes) else chunk
+            if ("event: response.failed" in text if protocol == "responses" else '"error"' in text):
+                with pytest.raises(asyncio.CancelledError):
+                    await iterator.athrow(asyncio.CancelledError())
+                break
+        entry = reqlog.snapshot()[0]
+        assert entry["ok"] is False and entry["status"] == 200
+        await up.close()
+        assert results == [False] and closed == ["context", "slot"]
+    finally:
+        await iterator.aclose()
+
+
+@pytest.mark.parametrize("change", ["credential", "removed", "disabled"])
+def test_stream_result_respects_current_account(fresh_app, change):
+    from app.models import Status
+    from tests.conftest import seed_account
+
+    account = seed_account(fresh_app, "hRecorder.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="recorder")
+    credential = (account.mode, account.jwt_token, account.api_key)
+    record = gw._make_result_recorder(account, credential)
+    if change == "credential":
+        account.jwt_token = "hNew.eyJzdWIiOiJuZXcifQ.sig"
+    elif change == "removed":
+        fresh_app.remove_account("zai", account.id)
+    else:
+        fresh_app.set_enabled("zai", account.id, False)
+    record(False, "上游流式响应报错")
+    if change in ("credential", "removed"):
+        assert not account.recent_results
+    else:
+        assert account.status == Status.DISABLED
+        assert account.recent_results[-1]["ok"] is False
+
+
 @pytest.mark.parametrize("value, expected", [(0, 0), (17, 17), (None, None),
                                                 (True, None), (-1, None), ("17", None), (1.5, None)])
 def test_usage_values_preserve_zero_and_unknown(value, expected):

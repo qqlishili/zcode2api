@@ -564,17 +564,26 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
                     continue
                 evt = _safe_json(data_str)
                 if isinstance(evt, dict):
+                    _check_stream_error(evt)
                     usage = _extract_event_usage(evt, usage)
                     for out in conv.feed(evt):
                         yield out
             yield conv.done()
+            up.finish_result(True, "HTTP 200 · 流式完成")
             logs.req_ok(req_id)
             reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
                              **usage)
         except asyncio.CancelledError:
+            up.finish_result(False, "客户端断开")
             reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
             raise
+        except _UpstreamStreamError as err:
+            up.finish_result(False, str(err))
+            logs.req_err(req_id, str(err))
+            reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
+            yield "data: " + json.dumps({"error": {"type": "upstream_error", "message": str(err)}}) + "\n\n"
         except Exception as err:  # noqa: BLE001
+            up.finish_result(False, f"流传输中断: {err}")
             logs.req_err(req_id, f"流传输中断: {err}")
             reqlog.finish_error(req_id, f"流传输中断: {err}", t_first=up.t_first)
         finally:
@@ -678,6 +687,7 @@ def _responses_stream_response(
                     continue
                 evt = _safe_json(data_str)
                 if isinstance(evt, dict):
+                    _check_stream_error(evt)
                     usage = _extract_event_usage(evt, usage)
                     for out in conv.feed(evt):
                         yield out
@@ -685,22 +695,32 @@ def _responses_stream_response(
                         break
             for out in conv.done():
                 yield out
+            up.finish_result(True, "HTTP 200 · 流式完成")
             logs.req_ok(req_id)
             reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
                              **usage)
         except asyncio.CancelledError:
             if conv.is_finished:
+                up.finish_result(True, "HTTP 200 · 流式完成")
                 logs.req_ok(req_id)
                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
                                  **usage)
             else:
+                up.finish_result(False, "客户端断开")
                 reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
             raise
-        except Exception as err:  # noqa: BLE001
-            for out in conv.fail(f"流传输中断: {err}"):
+        except _UpstreamStreamError as err:
+            up.finish_result(False, str(err))
+            logs.req_err(req_id, str(err))
+            reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
+            for out in conv.fail(str(err)):
                 yield out
+        except Exception as err:  # noqa: BLE001
+            up.finish_result(False, f"流传输中断: {err}")
             logs.req_err(req_id, f"流传输中断: {err}")
             reqlog.finish_error(req_id, f"流传输中断: {err}", t_first=up.t_first)
+            for out in conv.fail(f"流传输中断: {err}"):
+                yield out
         finally:
             await up.close()
 
@@ -997,10 +1017,28 @@ def _extract_sse_line_usage(line_bytes: bytes, usage: dict) -> dict[str, int | N
     if not line.startswith("data:"):
         return usage
     payload = line[5:].strip()
-    if '"usage"' not in payload:
-        return usage
     evt = _safe_json(payload)
+    _check_stream_error(evt)
     return _extract_event_usage(evt, usage)
+
+
+class _UpstreamStreamError(RuntimeError):
+    """HTTP 200 流内失败，不把上游事件或凭据写入日志。"""
+
+
+def _check_stream_error(evt: object) -> None:
+    if isinstance(evt, dict) and evt.get("type") == "error":
+        raise _UpstreamStreamError("上游流式响应报错")
+
+
+def _make_result_recorder(account: Account, credential: tuple):
+    def _record(ok: bool, detail: str) -> None:
+        live = store.find(account.provider, account.id)
+        if live is not account or (live.mode, live.jwt_token, live.api_key) != credential:
+            return
+        live.record_result(ok, detail)
+        store.update_account(live)
+    return _record
 
 
 class _Upstream:
@@ -1008,13 +1046,13 @@ class _Upstream:
 
     __slots__ = (
         "resp", "cm", "client", "t_first", "account_name", "mode",
-        "on_close", "preloaded_bytes", "_cm_closed", "_closed",
+        "on_close", "on_result", "preloaded_bytes", "_cm_closed", "_closed",
     )
 
     def __init__(self, resp: httpx.Response, cm, client: httpx.AsyncClient,
                  t_first: float | None = None, account_name: str = "", mode: str = "",
                  on_close=None, preloaded_bytes: bytes | None = None,
-                 cm_closed: bool = False) -> None:
+                 cm_closed: bool = False, on_result=None) -> None:
         self.resp = resp
         self.cm = cm
         self.client = client
@@ -1022,6 +1060,7 @@ class _Upstream:
         self.account_name = account_name
         self.mode = mode
         self.on_close = on_close
+        self.on_result = on_result
         self.preloaded_bytes = preloaded_bytes
         self._cm_closed = cm_closed
         self._closed = False
@@ -1030,6 +1069,13 @@ class _Upstream:
         if self.preloaded_bytes is not None:
             return self.preloaded_bytes
         return await self.resp.aread()
+
+    def finish_result(self, ok: bool, detail: str) -> None:
+        """账号终态只记录一次，取消或重复关闭不得覆盖已确认结果。"""
+        callback = self.on_result
+        self.on_result = None
+        if callback is not None:
+            callback(ok, detail)
 
     async def close(self) -> None:
         """幂等关闭：释放上游流与并发槽位（on_close），重复调用安全。"""
@@ -1051,6 +1097,8 @@ class _Upstream:
 
         async def _body_iter():
             usage = reqlog.extract_usage(None)
+            pending_chunk = None
+            stream_error = None
             try:
                 if up.preloaded_bytes is not None:
                     usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
@@ -1058,24 +1106,46 @@ class _Upstream:
                 else:
                     line_buf = bytearray()
                     async for chunk in up.resp.aiter_bytes():
-                        yield chunk
+                        pending_chunk = chunk
                         line_buf.extend(chunk)
                         while b"\n" in line_buf:
                             idx = line_buf.index(b"\n")
                             raw_line = bytes(line_buf[:idx])
                             del line_buf[:idx + 1]
-                            usage = _extract_sse_line_usage(raw_line, usage)
+                            try:
+                                usage = _extract_sse_line_usage(raw_line, usage)
+                            except _UpstreamStreamError as err:
+                                stream_error = err
+                                up.finish_result(False, str(err))
+                                reqlog.finish_error(req_id, str(err), status=up.resp.status_code,
+                                                    t_first=up.t_first)
+                            # 错误帧的空行也要透传，SSE 客户端收到完整帧才会处理。
+                            if stream_error is not None and not raw_line.strip():
+                                raise stream_error
                         if len(line_buf) > 65536:
                             line_buf.clear()
+                        pending_chunk = None
+                        yield chunk
                     if line_buf:
                         usage = _extract_sse_line_usage(bytes(line_buf), usage)
+                    if stream_error is not None:
+                        raise stream_error
+                up.finish_result(True, "HTTP 200 · 流式完成")
                 logs.req_ok(req_id)
                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
                                  **usage)
             except asyncio.CancelledError:
+                up.finish_result(False, "客户端断开")
                 reqlog.finish_error(req_id, "客户端断开", status=499, t_first=up.t_first)
                 raise
+            except _UpstreamStreamError as err:
+                up.finish_result(False, str(err))
+                logs.req_err(req_id, str(err))
+                reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
+                if pending_chunk is not None:
+                    yield pending_chunk
             except Exception as err:  # noqa: BLE001
+                up.finish_result(False, f"流传输中断: {err}")
                 logs.req_err(req_id, f"流传输中断: {err}")
                 reqlog.finish_error(req_id, f"流传输中断: {err}", t_first=up.t_first)
             finally:
@@ -1116,6 +1186,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 return _NEXT_ACCOUNT
 
         try:
+            credential = (account.mode, account.jwt_token, account.api_key)
             url, headers, payload = build_request(account, attempt_body, verify_param,
                                                   incoming_headers, verify_region,
                                                   force_fallback=force_fallback)
@@ -1327,7 +1398,9 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
         # 成功：记录用量并把打开的上游流交给调用方
         account.use_count += 1
         account.last_used_at = time.time()
-        account.record_result(True, f"HTTP 200 · {model_name} · {time.time() - attempt_t0:.1f}s")
+        is_stream = bool(body.get("stream")) and "event-stream" in content_type
+        if not is_stream:
+            account.record_result(True, f"HTTP 200 · {model_name} · {time.time() - attempt_t0:.1f}s")
         # API Key 回退成功不得把废 JWT / 风控禁用洗成 active，也不得清风控计数
         if account.status not in (Status.INVALID, Status.DISABLED):
             account.risk_strikes = 0
@@ -1339,8 +1412,9 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
         _spawn_bg(_safe_refresh(account))
 
         return _Upstream(resp, cm, client, t_first=time.time() - attempt_t0,
-                         account_name=account.name, mode=account.mode,
-                         preloaded_bytes=preloaded_bytes, cm_closed=cm_closed)
+                          account_name=account.name, mode=account.mode,
+                          preloaded_bytes=preloaded_bytes, cm_closed=cm_closed,
+                          on_result=_make_result_recorder(account, credential) if is_stream else None)
 
 
 def _safe_json(text: str):
