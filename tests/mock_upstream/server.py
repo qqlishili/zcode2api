@@ -191,6 +191,18 @@ def build_app() -> FastAPI:
                 content = content[:cut]
             elif scenario == "sse_truncate":
                 content = content[: len(content) // 2]
+            elif scenario == "sse_empty":
+                content = ""
+            elif scenario in ("sse_eof_text", "sse_eof_tool", "sse_eof_stop", "sse_eof_malformed"):
+                if scenario == "sse_eof_tool":
+                    content = _sse_stream(chunks, error_scenario="sse_error_tool").split("event: error")[0]
+                else:
+                    content = content.split("event: message_stop" if scenario == "sse_eof_stop" else
+                                            "event: message_delta")[0]
+                    if scenario == "sse_eof_malformed":
+                        content += 'event: message_stop\ndata: {"type":"message_stop"'
+            elif scenario == "sse_max_tokens":
+                content = content.replace('"stop_reason":"end_turn"', '"stop_reason":"max_tokens"')
             return Response(
                 content, status_code=200, media_type="text/event-stream",
                 headers={"x-mock-call-index": str(n), "cache-control": "no-cache"},

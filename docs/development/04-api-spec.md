@@ -55,6 +55,8 @@
 
 HTTP 200 SSE 中的 `type: error` 仍为失败：Messages 透传完整错误帧，Chat 返回错误帧且不补 `[DONE]`，Responses 返回 `response.failed`。请求监控和账号最近结果记为失败；已输出内容不重发，连接与并发槽正常释放。
 
+SSE 在未收到有效 `message_stop` 时结束也记为失败：Messages 保留原字节并追加独立错误帧，Chat / Responses 沿用上述失败收口，不补成功终态。正常终态（含输出上限）、完整 JSON 尾行与非 SSE 响应保持兼容。
+
 ## 2. 管理端点（对内，均挂 `/admin/api/*` 且需后台密钥）
 
 ### 账号池

@@ -554,6 +554,7 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
     conv = StreamConverter(model)
     async def _iter():
         usage = reqlog.extract_usage(None)
+        completed = False
         try:
             yield conv.start()
             async for line in up.resp.aiter_lines():
@@ -565,9 +566,12 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
                 evt = _safe_json(data_str)
                 if isinstance(evt, dict):
                     _check_stream_error(evt)
+                    completed = completed or evt.get("type") == "message_stop"
                     usage = _extract_event_usage(evt, usage)
                     for out in conv.feed(evt):
                         yield out
+            if not completed and "event-stream" in up.resp.headers.get("content-type", "").lower():
+                raise _UpstreamStreamIncomplete()
             yield conv.done()
             up.finish_result(True, "HTTP 200 · 流式完成")
             logs.req_ok(req_id)
@@ -693,6 +697,8 @@ def _responses_stream_response(
                         yield out
                     if conv.is_finished:
                         break
+            if not conv.is_finished and "event-stream" in up.resp.headers.get("content-type", "").lower():
+                raise _UpstreamStreamIncomplete()
             for out in conv.done():
                 yield out
             up.finish_result(True, "HTTP 200 · 流式完成")
@@ -1012,18 +1018,23 @@ def _extract_event_usage(evt: object, usage: dict) -> dict[str, int | None]:
     return usage
 
 
-def _extract_sse_line_usage(line_bytes: bytes, usage: dict) -> dict[str, int | None]:
+def _extract_sse_line_event(line_bytes: bytes) -> object:
     line = line_bytes.decode("utf-8", "ignore").strip()
     if not line.startswith("data:"):
-        return usage
+        return None
     payload = line[5:].strip()
-    evt = _safe_json(payload)
-    _check_stream_error(evt)
-    return _extract_event_usage(evt, usage)
+    return _safe_json(payload)
 
 
 class _UpstreamStreamError(RuntimeError):
     """HTTP 200 流内失败，不把上游事件或凭据写入日志。"""
+
+
+class _UpstreamStreamIncomplete(_UpstreamStreamError):
+    """上游静默 EOF，复用流内失败收口。"""
+
+    def __init__(self) -> None:
+        super().__init__("上游流式响应未正常结束")
 
 
 def _check_stream_error(evt: object) -> None:
@@ -1099,6 +1110,7 @@ class _Upstream:
             usage = reqlog.extract_usage(None)
             pending_chunk = None
             stream_error = None
+            completed = False
             try:
                 if up.preloaded_bytes is not None:
                     usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
@@ -1113,7 +1125,10 @@ class _Upstream:
                             raw_line = bytes(line_buf[:idx])
                             del line_buf[:idx + 1]
                             try:
-                                usage = _extract_sse_line_usage(raw_line, usage)
+                                evt = _extract_sse_line_event(raw_line)
+                                _check_stream_error(evt)
+                                completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
+                                usage = _extract_event_usage(evt, usage)
                             except _UpstreamStreamError as err:
                                 stream_error = err
                                 up.finish_result(False, str(err))
@@ -1127,9 +1142,14 @@ class _Upstream:
                         pending_chunk = None
                         yield chunk
                     if line_buf:
-                        usage = _extract_sse_line_usage(bytes(line_buf), usage)
+                        evt = _extract_sse_line_event(bytes(line_buf))
+                        _check_stream_error(evt)
+                        completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
+                        usage = _extract_event_usage(evt, usage)
                     if stream_error is not None:
                         raise stream_error
+                    if "event-stream" in up.resp.headers.get("content-type", "").lower() and not completed:
+                        raise _UpstreamStreamIncomplete()
                 up.finish_result(True, "HTTP 200 · 流式完成")
                 logs.req_ok(req_id)
                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
@@ -1144,6 +1164,9 @@ class _Upstream:
                 reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
                 if pending_chunk is not None:
                     yield pending_chunk
+                if isinstance(err, _UpstreamStreamIncomplete):
+                    event = {"type": "error", "error": {"type": "upstream_error", "message": str(err)}}
+                    yield b"\n\nevent: error\ndata: " + json.dumps(event).encode() + b"\n\n"
             except Exception as err:  # noqa: BLE001
                 up.finish_result(False, f"流传输中断: {err}")
                 logs.req_err(req_id, f"流传输中断: {err}")

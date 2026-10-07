@@ -39,6 +39,70 @@ class TestMessagesBodyValidation:
 @pytest.mark.integration
 class TestMonitoringRecording:
     @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("scenario", ["sse_empty", "sse_eof_text", "sse_eof_tool",
+                                          "sse_eof_stop", "sse_eof_malformed", "sse_truncate"])
+    async def test_silent_eof_is_not_success(self, gateway_client, fresh_app, endpoint, scenario):
+        """静默 EOF 不补成功终态、不重发，失败记录与资源释放一致。"""
+        client, mock = gateway_client
+        from app import reqlog
+        from app.routes import gateway as gw
+        from tests.conftest import seed_account
+
+        account = seed_account(fresh_app, "hEof.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="eof")
+        seed_account(fresh_app, "hEofStandby.eyJzdWIiOiJzdGFuZGJ5In0.sig", name="eof-standby")
+        fresh_app.set_setting("account_concurrency", "1")
+        start = len(mock.state.calls)
+        body = {"model": "GLM-5.3-Flash", "stream": True}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
+        )
+        response = await client.post("/v1/" + endpoint, json=body,
+                                     headers={"x-mock-scenario": scenario})
+        assert response.status_code == 200
+        entry = reqlog.snapshot()[0]
+        assert entry["ok"] is False and entry["status"] == 200
+        assert "未正常结束" in entry["error"] and entry["t_total"] is not None
+        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is False
+        assert not gw._inflight
+        calls = [call for call in mock.state.calls[start:] if call[0] == "POST" and call[1].endswith("/messages")]
+        assert len(calls) == 1
+        assert all(frame not in response.text for frame in ("[DONE]", "response.completed", "response.incomplete"))
+        if endpoint == "messages":
+            assert response.text.count("event: error\n") == 1
+            assert '\n\nevent: error\ndata: {"type": "error"' in response.text
+        elif endpoint == "chat/completions":
+            assert response.text.count('"type": "upstream_error"') == 1
+        else:
+            assert response.text.count("event: response.failed\n") == 1
+        if scenario in ("sse_eof_text", "sse_eof_stop", "sse_eof_malformed"):
+            assert "chunk-0" in response.text
+        if scenario == "sse_eof_tool":
+            assert "fixture_tool" in response.text
+
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    async def test_max_tokens_with_message_stop_is_complete(self, gateway_client, fresh_app, endpoint):
+        """达到输出上限但收到 message_stop，仍按正常协议收口。"""
+        client, _ = gateway_client
+        from app import reqlog
+        from tests.conftest import seed_account
+
+        account = seed_account(fresh_app, "hLimit.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="limit")
+        body = {"model": "GLM-5.3-Flash", "stream": True}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
+        )
+        response = await client.post("/v1/" + endpoint, json=body,
+                                     headers={"x-mock-scenario": "sse_max_tokens"})
+        assert response.status_code == 200 and reqlog.snapshot()[0]["ok"] is True
+        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is True
+        if endpoint == "responses":
+            assert response.text.count("event: response.incomplete\n") == 1
+            assert '"reason": "max_output_tokens"' in response.text
+            assert "response.failed" not in response.text
+        else:
+            assert ("message_stop" if endpoint == "messages" else "[DONE]") in response.text
+
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
     @pytest.mark.parametrize("scenario", ["sse_error_first", "sse_error_text", "sse_error_tool",
                                           "sse_error_missing"])
     async def test_stream_error_is_not_success(self, gateway_client, fresh_app, endpoint, scenario):

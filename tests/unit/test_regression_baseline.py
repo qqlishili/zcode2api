@@ -602,6 +602,7 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
             b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n'
             b'event: message_delta\n'
             b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":19}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
         )
 
         class _ChunkedResp:
