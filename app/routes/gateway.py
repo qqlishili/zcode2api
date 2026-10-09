@@ -10,9 +10,12 @@ import asyncio
 import copy
 import hashlib
 import json
+import math
 import secrets
 import time
 import weakref
+from dataclasses import dataclass, field
+from email.utils import parsedate_to_datetime
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -776,6 +779,8 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
     进入 _try_account 的次数）。全满/无号 → 503。
     """
     tried: set[str] = set()
+    observations: dict = {}
+    failures: dict = {}
     limit = _limit()
     attempts = 0
     req_model = str(body.get("model") or "").strip() if isinstance(body, dict) else ""
@@ -792,11 +797,13 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
         if attempts == 0 and prefer_sticky:
             account = _get_sticky_account(provider, affinity_key, tried, limit, model=req_model)
         if account is None:
-            account = store.select(provider, skip_ids=tried, model=req_model, avoid_id=avoid_id)
+            account = store.select(provider, skip_ids=tried, model=req_model, avoid_id=avoid_id,
+                                   observations=observations)
         if account is None:
             break
         tried.add(account.id)
         if limit > 0 and _inflight.get(account.id, 0) >= limit:
+            failures[account.id] = _AccountFailure("local_concurrency_limit", "local_scheduler")
             logs.warn(req_id, f"账号 {account.name} 并发已满（{_inflight.get(account.id, 0)}/{limit}），切换下一个")
             continue
         attempts += 1
@@ -815,7 +822,8 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
                 _release_slot(slot_box[0])
                 slot_box[0] = None
             raise
-        if result is _NEXT_ACCOUNT:
+        if isinstance(result, _AccountFailure):
+            failures[account.id] = result
             if slot_box[0] is not None:
                 _release_slot(slot_box[0])
                 slot_box[0] = None
@@ -835,11 +843,13 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
         return result
 
     logs.req_err(req_id, "无可用账号 / 额度均已耗尽 / 并发已满")
-    reqlog.finish_error(req_id, "无可用账号 / 额度均已耗尽 / 并发已满", status=503)
-    return JSONResponse(
-        {"error": {"message": "所有账号均不可用、额度已用完或并发已满，请在后台检查账号状态", "type": "no_available_account"}},
-        status_code=503,
-    )
+    error, diagnostics = _unavailability(req_id, provider, req_model, observations,
+                                        failures, attempts >= MAX_ACCOUNT_ATTEMPTS)
+    reqlog.finish_error(req_id, "无可用账号 / 额度均已耗尽 / 并发已满", status=503, diagnostics=diagnostics)
+    headers = {"X-Request-Id": req_id}
+    if error["retry_after"] is not None:
+        headers["Retry-After"] = str(error["retry_after"])
+    return JSONResponse({"error": error}, status_code=503, headers=headers)
 
 
 def _release_slot(account_id: str) -> None:
@@ -877,7 +887,171 @@ def _make_slot_releaser(account_id: str):
     return _release
 
 
-_NEXT_ACCOUNT = object()
+@dataclass
+class _AccountFailure:
+    """换号证据，不携带账号身份或上游原文。"""
+
+    code: str | None
+    origin: str
+    stage: str = "dispatch"
+    at: float = field(default_factory=time.time)
+    raw_http_status: int | None = None
+    effective_status: int | None = None
+    business_code: str | None = None
+    deadline: float | None = None
+    state_code: str | None = None
+    history: list = field(default_factory=list)
+    history_truncated: int = 0
+
+
+_HARD_UNAVAILABILITY = {"pool_empty", "account_disabled", "credential_invalid", "quota_exhausted",
+                        "model_quota_exhausted", "account_risk_blocked"}
+_TEMP_UNAVAILABILITY = {"account_cooling", "local_concurrency_limit", "upstream_concurrency_limit",
+                        "upstream_rate_limited", "upstream_transport_error", "upstream_server_error"}
+
+
+def _retry_deadline(headers, now: float) -> float | None:
+    """对外等待保留绝对期限，不使用内部等待封顶。"""
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (ValueError, TypeError):
+        try:
+            target = parsedate_to_datetime(value)
+            if target.tzinfo is None:
+                return None
+            reference = headers.get("date")
+            if reference:
+                reference = parsedate_to_datetime(reference)
+                if reference.tzinfo is None:
+                    return None
+                return now + max(0, target.timestamp() - reference.timestamp())
+            return max(now, target.timestamp())
+        except (ValueError, TypeError, OverflowError):
+            return None
+    target = now + seconds
+    return target if math.isfinite(seconds) and seconds >= 0 and math.isfinite(target) else None
+
+
+def _safe_business_code(value) -> str | None:
+    if value is None:
+        return None
+    value = str(value)
+    known = (constants.EXHAUST_BUSINESS_CODES + constants.AUTH_INVALID_BUSINESS_CODES
+             + constants.CAPTCHA_BUSINESS_CODES + constants.RATE_LIMIT_BUSINESS_CODES
+             + constants.SERVER_ERROR_BUSINESS_CODES)
+    return value if value in known or (value.isascii() and value.isdigit() and 1 <= len(value) <= 6) else None
+
+
+def _unavailability(req_id, provider, model, observations, failures, attempt_limit):
+    """一次构造公开终因与后台证据；终止快照不推进选号游标。"""
+    snapshot = store.selection_snapshot(provider, model)
+    now = time.time()
+    causes: set[tuple[str, str]] = set()
+    evidence = []
+    evidence_count = 0
+    candidates = []
+    unresolved = 0
+    ordinals = {account_id: i + 1 for i, account_id in enumerate(snapshot)}
+
+    def observe(account_id, failure):
+        nonlocal evidence_count
+        evidence_count += 1
+        if len(evidence) >= 32:
+            return
+        evidence.append({"candidate": ordinals.get(account_id), "stage": failure.stage, "at": failure.at,
+                         "code": failure.code, "origin": failure.origin,
+                         "raw_http_status": failure.raw_http_status,
+                         "effective_status": failure.effective_status,
+                         "business_code": _safe_business_code(failure.business_code)})
+
+    for account_id, state in snapshot.items():
+        blocked = state["code"] or state["model_code"]
+        failure = failures.get(account_id)
+        evidence_count += failure.history_truncated if failure else 0
+        old = observations.get(account_id)
+        for historic in (failure.history if failure else []):
+            observe(account_id, historic)
+        if failure:
+            observe(account_id, failure)
+        elif old:
+            observe(account_id, _AccountFailure(old["code"], "account_state", "selection", old["at"]))
+        codes = []
+        deadlines = []
+        unknown = False
+        # 终止时旧状态或满槽已解除，旧证据不能再解释无候选。
+        recovered = (failure and failure.state_code and failure.state_code != state["code"]) or (
+            failure and failure.code == "local_concurrency_limit"
+            and (_limit() <= 0 or _inflight.get(account_id, 0) < _limit()))
+        if recovered or (old and not blocked and not failure):
+            unknown = True
+        elif failure:
+            if failure.code:
+                codes.append((failure.code, failure.origin))
+            else:
+                unknown = True
+            if failure.deadline is not None:
+                deadlines.append(failure.deadline)
+            if failure.origin in ("upstream", "transport"):
+                deadlines.extend(h.deadline for h in failure.history if h.deadline is not None)
+        elif blocked:
+            if blocked == "unknown_unavailability":
+                unknown = True
+            else:
+                codes.append((blocked, "account_state"))
+                observe(account_id, _AccountFailure(blocked, "account_state", "terminal_selection", state["at"]))
+        else:
+            unknown = True
+        # 冷却/上游临时错误不能掩盖同账号的模型硬障碍。
+        if state["model_code"] and not any(c in _HARD_UNAVAILABILITY for c, _ in codes):
+            codes.append((state["model_code"], "account_state"))
+        # 已观测到的硬状态也会阻止临时错误恢复，不能因状态未变而省略。
+        if failure and state["code"] in _HARD_UNAVAILABILITY and (
+            state["code"] != failure.state_code or failure.code not in _HARD_UNAVAILABILITY
+        ):
+            codes.append((state["code"], "account_state"))
+        if state["code"] == "account_cooling":
+            if math.isfinite(state["cooling_until"]):
+                deadlines.append(state["cooling_until"])
+        if state["code"] == "unknown_unavailability":
+            unknown = True
+        causes.update(codes)
+        hard = any(c in _HARD_UNAVAILABILITY for c, _ in codes)
+        temporary = any(c in _TEMP_UNAVAILABILITY or (c == "upstream_429_unknown" and deadlines)
+                        for c, _ in codes)
+        uncertain = unknown or any(c in {"captcha_retry_exhausted", "upstream_429_unknown"}
+                                  and not (c == "upstream_429_unknown" and deadlines) for c, _ in codes)
+        if unknown:
+            unresolved += 1
+        candidates.append((hard, temporary, uncertain, max(deadlines) if deadlines else None))
+    if not snapshot:
+        causes.add(("pool_empty", "local_scheduler"))
+        candidates.append((True, False, False, None))
+    # 删除/新增等请求间变动同样导致覆盖缺口。
+    unresolved += len((set(failures) | set(observations)) - set(snapshot))
+    complete = unresolved == 0
+    distinct = {code for code, _ in causes}
+    code = ("dispatch_attempt_limit" if attempt_limit else "unknown_unavailability" if not complete or not distinct
+            else next(iter(distinct)) if len(distinct) == 1 else "mixed_unavailability")
+    recoverable = [c for c in candidates if not c[0] and c[1] and not c[2]]
+    retryable = (None if attempt_limit else True if recoverable else
+                 False if complete and all(c[0] for c in candidates) else None)
+    retry_after = None
+    if retryable is True and all(c[3] is not None for c in recoverable) and not any(
+        not c[0] and c[2] for c in candidates
+    ):
+        retry_after = max(0, math.ceil(min(c[3] for c in recoverable) - now))
+    public_causes = [{"code": c, "origin": o} for c, o in sorted(causes)]
+    error = {"message": "所有账号均不可用、额度已用完或并发已满，请在后台检查账号状态",
+             "type": "no_available_account", "code": code, "causes": public_causes,
+             "retryable": retryable, "retry_after": retry_after, "request_id": req_id}
+    diagnostics = {"error_code": code, "error_causes": public_causes, "retryable": retryable,
+                   "retry_after": retry_after, "stop_reason": "attempt_limit" if attempt_limit else "no_candidate",
+                   "coverage_complete": complete and not attempt_limit, "unresolved_count": unresolved,
+                   "evidence": evidence, "evidence_truncated": max(0, evidence_count - 32)}
+    return error, diagnostics
 
 
 # fire-and-forget 后台任务强引用：事件循环对 task 只持弱引用，裸 create_task
@@ -1089,7 +1263,33 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
     retried_thinking_strip = False
     attempt_body = body
     model_name = str(body.get("model") or "-")
+    history = []
+    history_truncated = 0
+    wait_deadline = None
+    raw_status = effective_status = business_code = deadline = None
+
+    def next_account(code, origin="upstream", stage="upstream"):
+        return _AccountFailure(code, origin, stage, raw_http_status=raw_status,
+                               effective_status=effective_status, business_code=business_code,
+                               deadline=max(d for d in (deadline, wait_deadline) if d is not None)
+                               if origin in ("upstream", "transport") and (deadline is not None or wait_deadline is not None) else None,
+                               state_code=account.selection_exclusion(), history=list(history),
+                               history_truncated=history_truncated)
+
+    def remember(code):
+        nonlocal history_truncated, wait_deadline
+        event = next_account(code)
+        event.history = []
+        event.history_truncated = 0
+        if deadline is not None:
+            wait_deadline = max(wait_deadline or deadline, deadline)
+        if len(history) < 32:
+            history.append(event)
+        else:
+            history_truncated += 1
+
     while True:
+        raw_status = effective_status = business_code = deadline = None
         attempt_t0 = time.time()
         reqlog.mark_account(req_id, account.name, account.mode)
         verify_param = verify_region = None
@@ -1106,7 +1306,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 )
             if not _reacquire_slot(account, slot_box):
                 logs.warn(req_id, f"账号 {account.name} 验证码等待后并发已满，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("local_concurrency_limit", "local_scheduler", "captcha_reacquire")
 
         try:
             credential = (account.mode, account.jwt_token, account.api_key)
@@ -1117,7 +1317,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             account.record_result(False, f"凭证无效: {err}")
             _mark(account, Status.INVALID, str(err))
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
-            return _NEXT_ACCOUNT
+            return next_account("credential_invalid", "local_scheduler", "credential")
 
         client = _get_shared_client()
         cm = client.stream("POST", url, headers=headers, content=payload)
@@ -1131,9 +1331,11 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             else:
                 _mark(account, Status.COOLING, f"连接失败: {err}")
             logs.warn(req_id, f"账号 {account.name} 连接失败，切换下一个")
-            return _NEXT_ACCOUNT
+            return next_account("upstream_transport_error", "transport", "connect")
 
         status_code = resp.status_code
+        received_at = time.time()
+        raw_status = status_code
         content_type = (resp.headers.get("content-type") or "").lower()
         preloaded_bytes: bytes | None = None
         cm_closed = False
@@ -1151,13 +1353,16 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 else:
                     _mark(account, Status.COOLING, f"读取响应失败: {err}")
                 logs.warn(req_id, f"账号 {account.name} 读取响应失败，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("upstream_transport_error", "transport", "read")
             await cm.__aexit__(None, None, None)
             cm_closed = True
             text = preloaded_bytes.decode("utf-8", "ignore")
             status_code, _biz_code, is_concurrency_limit = _classify_business_error(
                 status_code, resp, text,
             )
+            business_code = _biz_code
+        effective_status = status_code
+        deadline = _retry_deadline(resp.headers, received_at)
 
         if status_code >= 400:
             # 验证码挑战：三形态任一命中即清池重试（不改账号状态）
@@ -1168,7 +1373,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                 if captcha_retries >= MAX_CAPTCHA_RETRIES:
                     account.record_result(False, "验证码挑战连续失败")
                     logs.warn(req_id, f"账号 {account.name} 验证码连续失败，切换下一个")
-                    return _NEXT_ACCOUNT
+                    return next_account("captcha_retry_exhausted")
                 logs.warn(req_id, f"账号 {account.name} 验证码挑战（{challenge}），刷新重试")
                 continue  # 同账号重建请求重试
 
@@ -1196,7 +1401,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     f"账号 {account.name} 命中风控 HTTP {status_code}，已禁用"
                     f"（累计第 {account.risk_strikes} 次），切换下一个",
                 )
-                return _NEXT_ACCOUNT
+                return next_account("account_risk_blocked")
 
             if _is_exhausted(status_code, text):
                 account.record_result(False, f"额度用完 HTTP {status_code}")
@@ -1206,7 +1411,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     _mark(account, Status.EXHAUSTED, "额度已用完")
                     _spawn_bg(_safe_refresh(account))
                 logs.warn(req_id, f"账号 {account.name} 额度用完，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("quota_exhausted")
 
             if status_code == 401:
                 account.record_result(False, "鉴权失败 HTTP 401")
@@ -1217,7 +1422,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     force_fallback = True
                     continue
                 logs.warn(req_id, f"账号 {account.name} 鉴权失败 401，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("credential_invalid")
 
             if status_code == 403:
                 # 403 已排除挑战形态（上方 challenge 分支），此处为真实鉴权拒绝
@@ -1229,9 +1434,12 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     force_fallback = True
                     continue
                 logs.warn(req_id, f"账号 {account.name} 鉴权失败 403，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("credential_invalid")
 
             if status_code == 429:
+                reason_code = ("upstream_concurrency_limit" if is_concurrency_limit else
+                               "upstream_rate_limited" if business_code in constants.RATE_LIMIT_BUSINESS_CODES
+                               else "upstream_429_unknown")
                 # 并发上限类错误码（3008/3009/3010）：立即走 API Key 回退或换下一个账号，不在原地干等
                 if not is_concurrency_limit and retries_429 < settings.RETRY_429_TIMES:
                     retries_429 += 1
@@ -1242,10 +1450,11 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                         f"（{retries_429}/{settings.RETRY_429_TIMES}）",
                     )
                     _park_slot(slot_box)
+                    remember(reason_code)
                     await _sleep(wait)
                     if not _reacquire_slot(account, slot_box):
                         logs.warn(req_id, f"账号 {account.name} 429 等待后并发已满，切换下一个")
-                        return _NEXT_ACCOUNT
+                        return next_account("local_concurrency_limit", "local_scheduler", "retry_reacquire")
                     continue
                 if needs_captcha and account.has_apikey_fallback():
                     account.record_result(False, "Plan 通道 429 耗尽，切 API Key 回退")
@@ -1263,7 +1472,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     req_id,
                     f"账号 {account.name} {reason_msg}，切换下一个（账号保持可用）",
                 )
-                return _NEXT_ACCOUNT
+                return next_account(reason_code)
 
             if status_code >= 500:
                 # 一般性上游错误：重试，耗尽才冷却账号并换号
@@ -1275,10 +1484,11 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                         f"{settings.RETRY_5XX_WAIT}s 后重试（{retries_5xx}/{settings.RETRY_5XX_TIMES}）",
                     )
                     _park_slot(slot_box)
+                    remember("upstream_server_error")
                     await _sleep(settings.RETRY_5XX_WAIT)
                     if not _reacquire_slot(account, slot_box):
                         logs.warn(req_id, f"账号 {account.name} 5xx 等待后并发已满，切换下一个")
-                        return _NEXT_ACCOUNT
+                        return next_account("local_concurrency_limit", "local_scheduler", "retry_reacquire")
                     continue
                 account.record_result(False, f"HTTP {status_code} 重试 {settings.RETRY_5XX_TIMES} 次耗尽，冷却")
                 if account.status in (Status.INVALID, Status.DISABLED):
@@ -1292,7 +1502,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
                     account.last_error = f"上游 HTTP {status_code} 重试 {settings.RETRY_5XX_TIMES} 次耗尽，冷却"
                     store.update_account(account)
                     logs.warn(req_id, f"账号 {account.name} 上游 {status_code} 重试耗尽，冷却 {cool}s，切换下一个")
-                return _NEXT_ACCOUNT
+                return next_account("upstream_server_error")
 
             # 历史 assistant 消息 thinking 签名/格式不兼容（400）：自动剥离历史 thinking 块重试一次
             if not retried_thinking_strip and _is_thinking_signature_rejection(status_code, text):

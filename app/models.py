@@ -127,16 +127,23 @@ class Account:
 
         JWT 失效 / 风控禁用 / 额度耗尽 / 手动停用 均不可选；冷却期满后自动恢复可选。
         """
+        return self.selection_exclusion(now) is None
+
+    def selection_exclusion(self, now: float | None = None) -> str | None:
+        """与健康筛选共用的决定性排除码；未知截止不推测为仍在冷却。"""
         if not self.enabled:
-            return False
+            return "account_disabled"
         if self.status == Status.EXHAUSTED:
-            return False
-        if self.status in (Status.INVALID, Status.DISABLED):
-            return self.has_apikey_fallback()
+            return "quota_exhausted"
+        if self.status in (Status.INVALID, Status.DISABLED) and not self.has_apikey_fallback():
+            return "credential_invalid" if self.status == Status.INVALID else "account_disabled"
         if self.status == Status.COOLING:
             now = now or time.time()
-            return bool(self.cooling_until and now >= self.cooling_until)
-        return True
+            if not self.cooling_until:
+                return "unknown_unavailability"
+            if not now >= self.cooling_until:
+                return "account_cooling" if now < self.cooling_until else "unknown_unavailability"
+        return None
 
     def has_model_quota(self, model: str | None) -> bool:
         """检查当前账号对指定模型是否仍有可用额度（大小写无关，冷启动空配额默认放行）。
@@ -145,16 +152,20 @@ class Account:
         - 若 quota 中存在同名模型窗口，则要求 remaining > 0（或 remaining 为 None）；
         - 若 quota 非空但未包含该模型窗口，返回 True（由 store.select 优先挑选显式包含该模型余量的账号）。
         """
+        return self.model_quota_exclusion(model) is None
+
+    def model_quota_exclusion(self, model: str | None) -> str | None:
+        """仅同名窗口的实际零余量排除；缺失与未知窗口放行。"""
         if not model or not self.quota or not isinstance(self.quota, dict):
-            return True
+            return None
         target = model.strip().lower()
         if not target:
-            return True
+            return None
         for k, win in self.quota.items():
             if isinstance(k, str) and k.strip().lower() == target and isinstance(win, dict):
                 rem = win.get("remaining")
-                return rem is None or rem > 0
-        return True
+                return None if rem is None or rem > 0 else "model_quota_exhausted"
+        return None
 
     def explicitly_supports_model(self, model: str | None) -> bool:
         """账号是否处于冷启动（未拉配额）或显式持有目标模型的正余量窗口。"""

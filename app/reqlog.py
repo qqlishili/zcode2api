@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from collections import deque
@@ -85,7 +86,7 @@ def finish_ok(req_id: str, t_first: float | None = None,
 
 
 def finish_error(req_id: str, error: str, status: int | None = None,
-                 t_first: float | None = None) -> None:
+                 t_first: float | None = None, diagnostics: dict | None = None) -> None:
     with _lock:
         entry = _inflight.pop(req_id, None)
         if entry is None:
@@ -95,12 +96,14 @@ def finish_error(req_id: str, error: str, status: int | None = None,
         entry["error"] = (error or "")[:200]
         entry["t_first"] = t_first
         entry["t_total"] = time.time() - entry["ts"]
+        if diagnostics is not None:
+            entry.update(copy.deepcopy(diagnostics))
 
 
 def snapshot() -> list[dict]:
     """全部条目，最新在前（含在途）。"""
     with _lock:
-        return [dict(e) for e in reversed(_entries)]
+        return [copy.deepcopy(e) for e in reversed(_entries)]
 
 
 def clear() -> None:

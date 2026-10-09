@@ -38,6 +38,21 @@ class TestMessagesBodyValidation:
 
 @pytest.mark.integration
 class TestMonitoringRecording:
+    async def test_final_503_matches_admin_monitoring(self, gateway_client):
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        assert response.status_code == 503
+        error = response.json()["error"]
+        monitoring = await client.get("/admin/api/monitoring", headers=ADMIN_AUTH)
+        assert monitoring.status_code == 200
+        payload = monitoring.json()
+        entries = payload if isinstance(payload, list) else payload["entries"]
+        entry = next(e for e in entries if e["req_id"] == error["request_id"])
+        assert entry["error_code"] == error["code"]
+        assert entry["error_causes"] == error["causes"]
+        assert entry["retryable"] is error["retryable"]
+        assert entry["retry_after"] == error["retry_after"]
+
     @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
     @pytest.mark.parametrize("scenario", ["sse_empty", "sse_eof_text", "sse_eof_tool",
                                           "sse_eof_stop", "sse_eof_malformed", "sse_truncate"])

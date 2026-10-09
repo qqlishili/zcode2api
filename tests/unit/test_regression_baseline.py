@@ -575,7 +575,7 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
         self, fresh_app, monkeypatch
     ):
         from app.routes import gateway as gateway_module
-        from app.routes.gateway import _NEXT_ACCOUNT, _try_account, _Upstream
+        from app.routes.gateway import _AccountFailure, _try_account, _Upstream
 
         acc1 = fresh_app.add_account("zai", "acc-200-exhaust", "h1.eyJzdWIiOiIxIn0.sig")
         acc2 = fresh_app.add_account("zai", "acc-3008-conc", "h2.eyJzdWIiOiIyIn0.sig")
@@ -624,13 +624,15 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
 
         responses.append((200, {"code": 1005, "msg": "package expired"}))
         r1 = await _try_account("r1", acc1, {"model": "GLM-5.3", "messages": []}, {}, 3000, False)
-        assert r1 is _NEXT_ACCOUNT
+        assert isinstance(r1, _AccountFailure)
+        assert r1.code == "quota_exhausted" and r1.origin == "upstream"
         assert acc1.status == Status.EXHAUSTED
 
         sleep_calls.clear()
         responses.append((200, {"code": 3008, "msg": "concurrency limit"}))
         r2 = await _try_account("r2", acc2, {"model": "GLM-5.3", "messages": []}, {}, 3000, False)
-        assert r2 is _NEXT_ACCOUNT
+        assert isinstance(r2, _AccountFailure)
+        assert r2.code == "upstream_concurrency_limit" and r2.origin == "upstream"
         assert sleep_calls == []
         assert acc2.status == Status.ACTIVE
 

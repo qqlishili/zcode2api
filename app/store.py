@@ -317,6 +317,7 @@ class Store:
         skip_ids: set[str] | None = None,
         model: str | None = None,
         avoid_id: str | None = None,
+        observations: dict | None = None,
     ) -> Account | None:
         """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量的自动跳过。
 
@@ -326,10 +327,17 @@ class Store:
         skip_ids = skip_ids or set()
         now = time.time()
         with self._lock:
-            pool = [
-                a for a in self._accounts.get(provider, [])
-                if a.is_selectable(now) and a.id not in skip_ids and a.has_model_quota(model)
-            ]
+            pool = []
+            for a in self._accounts.get(provider, []):
+                reason = a.selection_exclusion(now)
+                if reason is None and a.id in skip_ids:
+                    continue
+                reason = reason or a.model_quota_exclusion(model)
+                if reason:
+                    if observations is not None:
+                        observations[a.id] = {"code": reason, "at": now}
+                else:
+                    pool.append(a)
             if not pool:
                 return None
             if model:
@@ -343,6 +351,15 @@ class Store:
             account = pool[cursor % len(pool)]
             self._rotation[provider] = (cursor + 1) % 1_000_000
             return account
+
+    def selection_snapshot(self, provider: str, model: str | None = None) -> dict:
+        """锁内只读筛选快照，不推进轮询游标或刷新账号。"""
+        now = time.time()
+        with self._lock:
+            return {a.id: {"code": a.selection_exclusion(now),
+                           "model_code": a.model_quota_exclusion(model),
+                           "cooling_until": a.cooling_until, "at": now}
+                    for a in self._accounts.get(provider, [])}
 
     # ── 导入 / 导出 ─────────────────────────────────────────────────────────
     def export(self) -> dict:

@@ -17,6 +17,17 @@ def _clean():
 
 
 class TestRingBuffer:
+    def test_diagnostics_are_copied_on_write_and_snapshot(self):
+        reqlog.begin("diag", "messages", "GLM-5.3-Flash", False)
+        data = {"error_causes": [{"code": "pool_empty", "origin": "local_scheduler"}],
+                "evidence": [{"candidate": None, "business_code": None}]}
+        reqlog.finish_error("diag", "展示文案", 503, diagnostics=data)
+        data["error_causes"][0]["code"] = "changed"
+        snapshot = reqlog.snapshot()
+        snapshot[0]["evidence"][0]["business_code"] = "changed"
+        assert reqlog.snapshot()[0]["error_causes"][0]["code"] == "pool_empty"
+        assert reqlog.snapshot()[0]["evidence"][0]["business_code"] is None
+
     def test_begin_finish_ok_lifecycle(self):
         reqlog.begin("r1", "messages", "GLM-5.3-Flash", True, "你好")
         reqlog.mark_account("r1", "acc-1", "jwt")

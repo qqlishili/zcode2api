@@ -65,6 +65,33 @@ pi 在该模型项设置 `thinkingLevelMap` 仅启用 `low/high/max`（其他档
 | 502 | upstream_error | 上游响应无法读取或格式异常 |
 | 503 | no_available_account | 池空 / 全部不可用 / 并发已满 |
 
+共享最终503（含三协议 `stream=true/false`）增加 `error.code`、`causes:[{code,origin}]`、`retryable`、`retry_after`、`request_id`；`X-Request-Id` 与监控 `req_id` 一致。`message` 仅供展示，不是分类依据。此契约不改变独立错误与流内错误。
+
+| 原子原因码 | 来源 `origin` | 判定 |
+|------------|---------------|------|
+| pool_empty | local_scheduler | 当前 provider 无配置账号 |
+| account_disabled | account_state | 未启用或禁用状态 |
+| credential_invalid | account_state / local_scheduler / upstream | 失效状态、构建凭证失败或鉴权拒绝 |
+| quota_exhausted | account_state / upstream | 耗尽状态或已有额度分类命中 |
+| model_quota_exhausted | account_state | 同名模型窗口余量≤0；缺失/null不归零 |
+| account_cooling | account_state | 有效未来冷却截止；缺失截止保留未知 |
+| local_concurrency_limit | local_scheduler | 满槽或等待后重占失败 |
+| upstream_concurrency_limit | upstream | 明确3008/3009/3010 |
+| upstream_rate_limited | upstream | 明确普通限流码且内部重试耗尽 |
+| upstream_429_unknown | upstream | 其它429；含额度字样也不据此踢号 |
+| upstream_transport_error | transport | 连接或预读取失败 |
+| upstream_server_error | upstream | 服务器错误重试耗尽 |
+| captcha_retry_exhausted | upstream | 验证码挑战连续失败；求解异常仍独立500 |
+| account_risk_blocked | upstream | 本次明确风控；历史禁用不反推风控 |
+
+`causes` 按 `(code,origin)` 去重排序。覆盖完整时，单个不同原子码直接作为 `code`，多个为 `mixed_unavailability`（同码不同来源仍是单因）；未知或旧阻塞已解除但未重试时为 `unknown_unavailability`。达到尝试上限为 `dispatch_attempt_limit`，不表示全池耗尽。后续换号成功不附这些终态字段。
+
+`retryable=true` 表示至少一条无硬/未知障碍的临时恢复路径，`false` 表示完整覆盖且均需配置、启用、凭证或额度变化，`null` 表示无法判断（尝试上限固定为null）。冷却同时零额度不建议自动重试；未知429仅有可靠等待要求时可为true。此建议不是完整系统健康快照，也不代表客户端会自动消费。
+
+只有true且有可靠时点才给非负整数 `retry_after` 和一致的 `Retry-After` 头。上游秒数/HTTP-date转绝对截止，扣除已等待时间后向上取整，不使用内部等待封顶；同候选取最大截止、候选间取最早截止。存在缺少时点的潜在恢复路径则不编造秒数。本地并发无释放时点；额度 `expires_at` 不是重置时间。
+
+请求监控同源增加 `error_code/error_causes/retryable/retry_after/stop_reason`、`coverage_complete/unresolved_count`，及最多32条匿名 `evidence` 与 `evidence_truncated`。证据只含候选序号、阶段、时间、原因/来源、原始/有效HTTP码和白名单业务码（未取得为null）；不含新增账号身份、额度、凭据或原文。沿用内存500条保留范围，不额外刷新账号或写库。
+
 账号级上游错误在**故障转移耗尽后**回传时：保留上游 status 与 content-type，body 为上游错误原文（转 JSON 失败则 500 字符截断文本）。
 
 HTTP 200 SSE 中的 `type: error` 仍为失败：Messages 透传完整错误帧，Chat 返回错误帧且不补 `[DONE]`，Responses 返回 `response.failed`。请求监控和账号最近结果记为失败；已输出内容不重发，连接与并发槽正常释放。
