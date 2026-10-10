@@ -41,6 +41,11 @@ async def close_shared_client() -> None:
     await account_client_pool.aclose()
 
 
+def _get_shared_client() -> httpx.AsyncClient | None:
+    """兼容旧测试的 monkeypatch 锚点：未被 patch 时返回 None。"""
+    return None
+
+
 MAX_CAPTCHA_RETRIES = 3
 MAX_ACCOUNT_ATTEMPTS = 5
 
@@ -1302,7 +1307,9 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
             return next_account("credential_invalid", "local_scheduler", "credential")
 
-        client = await account_client_pool.get_client(account)
+        client = _get_shared_client()
+        if client is None:
+            client = await account_client_pool.get_client(account)
         cm = client.stream("POST", url, headers=headers, content=payload)
         try:
             resp = await cm.__aenter__()

@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import time
 from typing import TYPE_CHECKING
 
 import httpx
 
 from . import logs, settings
+
+_logger = logging.getLogger("zcode.pool")
 
 if TYPE_CHECKING:
     from .models import Account
@@ -98,10 +101,10 @@ class AccountClientPool:
             )
 
             if proxy:
-                logs.logger.info(f"[ClientPool] 账号 {account_id} 绑定出口代理: {proxy}")
+                _logger.info(f"[ClientPool] 账号 {account_id} 绑定出口代理: {proxy}")
                 client = httpx.AsyncClient(proxy=proxy, timeout=req_timeout, limits=limits)
             else:
-                logs.logger.debug(
+                _logger.debug(
                     f"[ClientPool] 账号 {account_id} 未配置代理，使用独立直连连接池 (优雅降级)"
                 )
                 client = httpx.AsyncClient(timeout=req_timeout, limits=limits)
@@ -126,9 +129,9 @@ class AccountClientPool:
                 if not client.is_closed:
                     await client.aclose()
                 closed_count += 1
-                logs.logger.debug(f"[ClientPool] 账号 {acc_id} 客户端空闲超时已回收")
+                _logger.debug(f"[ClientPool] 账号 {acc_id} 客户端空闲超时已回收")
             except Exception as e:
-                logs.logger.warning(f"[ClientPool] 回收客户端 {acc_id} 异常: {e}")
+                _logger.warning(f"[ClientPool] 回收客户端 {acc_id} 异常: {e}")
 
         return closed_count
 
