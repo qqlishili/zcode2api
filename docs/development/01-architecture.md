@@ -49,6 +49,7 @@ zcode-hub/
 │   ├── settings.py        # 环境变量（.env）
 │   ├── models.py          # Account、Status；选号/回退/billing 门在账号对象上
 │   ├── store.py           # SQLite WAL：账号 CRUD、round-robin select、设置 KV
+│   ├── client_pool.py     # 账号专属独立 AsyncClient 连接池与多出口哈希路由
 │   ├── routes/gateway.py  # /v1/messages + /v1/chat/completions 调度与错误分类
 │   ├── routes/admin_api.py
 │   ├── routes/pages.py

@@ -71,6 +71,20 @@ WantedBy=multi-user.target
 
 新单元安装后执行 `systemctl daemon-reload`，再按实际服务名启用。运行状态与日志分别用 `systemctl status <SERVICE_NAME>`、`journalctl -u <SERVICE_NAME>` 查看。
 
+### 多出口代理与账号连接池隔离
+
+为了避免多账号集中使用单一机房出口 IP 触发上游风控（HTTP 405 / 3012），系统支持通过 `ZCODE_PROXIES` 配置多出口中继代理池（逗号分隔）：
+
+```env
+ZCODE_PROXIES=http://127.0.0.1:21081,http://127.0.0.1:21082,http://127.0.0.1:21083,http://127.0.0.1:21084
+CLIENT_IDLE_TIMEOUT=300
+```
+
+- **物理隔离**：每个账号独占专属独立的 `httpx.AsyncClient`，连接池完全切分，互不干扰；
+- **哈希绑定**：按 `account_id` MD5 一致性哈希分散到配置的代理端口，同一账号的出口 IP 保持持久固定；
+- **优雅降级**：未配置 `ZCODE_PROXIES` 时，自动降级为单账号独立直连 Client，保障业务 100% 走通；
+- **资源回收**：单账号 Client 空闲超过 `CLIENT_IDLE_TIMEOUT`（默认 300 秒）后自动安全关闭与回收。
+
 ### 反向代理与登录锁定
 
 后台登录失败计数只使用 ASGI 的客户端地址（`request.client.host`），不直接读取 `CF-Connecting-IP` / `X-Real-IP`。直连部署沿用现有启动方式；反向代理的转发头由 Uvicorn 既有的可信来源机制处理，不在鉴权层重复解析。
