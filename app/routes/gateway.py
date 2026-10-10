@@ -13,6 +13,7 @@ import json
 import math
 import secrets
 import time
+import weakref
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 
@@ -34,16 +35,34 @@ from ..store import store
 _sleep = asyncio.sleep  # 模块级引用：测试可 patch 此名而免污染全局 asyncio
 
 router = APIRouter()
+_SHARED_CLIENTS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _default_get_shared_client() -> httpx.AsyncClient:
+    """获取事件循环绑定的客户端实例（生命周期与兼容性锚点）。"""
+    loop = asyncio.get_running_loop()
+    client = _SHARED_CLIENTS.get(loop)
+    if client is None or getattr(client, "is_closed", False):
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=30.0, read=None, write=120.0, pool=30.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=120.0),
+        )
+        _SHARED_CLIENTS[loop] = client
+    return client
+
+
+_get_shared_client = _default_get_shared_client
 
 
 async def close_shared_client() -> None:
-    """生命周期收尾：释放并关闭全部账号独立客户端。"""
+    """生命周期收尾：释放事件循环客户端与全部账号独立客户端。"""
+    loop = asyncio.get_running_loop()
+    client = _SHARED_CLIENTS.pop(loop, None)
+    if client is not None and not getattr(client, "is_closed", False):
+        await client.aclose()
     await account_client_pool.aclose()
-
-
-def _get_shared_client() -> httpx.AsyncClient | None:
-    """兼容旧测试的 monkeypatch 锚点：未被 patch 时返回 None。"""
-    return None
 
 
 MAX_CAPTCHA_RETRIES = 3
@@ -1307,8 +1326,9 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
             return next_account("credential_invalid", "local_scheduler", "credential")
 
-        client = _get_shared_client()
-        if client is None:
+        if _get_shared_client is not _default_get_shared_client:
+            client = _get_shared_client()
+        else:
             client = await account_client_pool.get_client(account)
         cm = client.stream("POST", url, headers=headers, content=payload)
         try:

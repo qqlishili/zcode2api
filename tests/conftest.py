@@ -29,6 +29,9 @@ from tests.mock_upstream import server as mock_server_module
 # 代理转译成 502。测试进程内全局屏蔽代理，保证网关→Mock 走真实 TCP。
 os.environ.setdefault("NO_PROXY", "*")
 os.environ.setdefault("no_proxy", "*")
+os.environ["ZCODE_PROXIES"] = ""
+os.environ["ZCODE_ADMIN_KEY"] = "zcode"
+settings.DEFAULT_ADMIN_KEY = "zcode"
 
 # 底座中绑定了 store 名字的全部模块 —— 新增导入点时必须同步加入
 _STORE_BINDING_MODULES = (
