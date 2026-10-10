@@ -1,7 +1,7 @@
 """页面路由：登录、账号管理、设置。
 
 前端文件来自独立部署目录（settings.FRONTEND_DIR，前后端分离）——
-改前端只需 rsync 该目录，无需重启后端。
+更新前端文件无需重启后端；发布步骤见开发指南。
 """
 
 from __future__ import annotations

@@ -62,12 +62,14 @@ async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, c
     (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
     (429, None, "upstream_429_unknown", None)])
 async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+    import json
+
+    from fastapi import Response
+    from fastapi.routing import APIRoute
+
     from app import reqlog, settings
     from app.routes import gateway
     from tests.conftest import seed_account
-    from fastapi import Response
-    from fastapi.routing import APIRoute
-    import json
 
     async def no_wait(_):
         pass
@@ -144,6 +146,7 @@ async def test_credential_build_failure(gateway_client, fresh_app):
     ("missing_cooling", {}, "unknown_unavailability", None)])
 async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, retry):
     import time
+
     from tests.conftest import seed_account
 
     account = seed_account(fresh_app, "cooling.fixture.sig")
@@ -242,6 +245,7 @@ async def test_failure_then_success(gateway_client, fresh_app):
 @pytest.mark.integration
 async def test_pre_read_failure_and_captcha_exception(gateway_client, fresh_app, monkeypatch):
     import httpx
+
     from app import reqlog
     from app.routes import gateway
     from tests.conftest import seed_account
@@ -277,8 +281,10 @@ async def test_pre_read_failure_and_captcha_exception(gateway_client, fresh_app,
 @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
 async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
     import json
+
     from fastapi import Response
     from fastapi.routing import APIRoute
+
     from app import reqlog, settings
     from app.routes import gateway
     from tests.conftest import seed_account
@@ -335,8 +341,10 @@ async def test_captcha_reacquire_failure(gateway_client, fresh_app, monkeypatch)
 @pytest.mark.parametrize("stream", [True, False])
 async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
     import json
+
     from fastapi import Response
     from fastapi.routing import APIRoute
+
     from app import reqlog, settings
     from tests.conftest import seed_account
 
