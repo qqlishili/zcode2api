@@ -83,7 +83,7 @@ class AccountClientPool:
             # 检查现有活跃客户端
             if account_id in self._clients:
                 client, _ = self._clients[account_id]
-                if not client.is_closed:
+                if not getattr(client, "is_closed", False):
                     self._clients[account_id] = (client, time.time())
                     return client
 
@@ -126,7 +126,7 @@ class AccountClientPool:
         closed_count = 0
         for acc_id, client in to_close:
             try:
-                if not client.is_closed:
+                if not getattr(client, "is_closed", False) and hasattr(client, "aclose"):
                     await client.aclose()
                 closed_count += 1
                 _logger.debug(f"[ClientPool] 账号 {acc_id} 客户端空闲超时已回收")
@@ -142,7 +142,7 @@ class AccountClientPool:
 
         if pair:
             client, _ = pair
-            if not client.is_closed:
+            if not getattr(client, "is_closed", False) and hasattr(client, "aclose"):
                 await client.aclose()
 
     async def aclose(self) -> None:
@@ -153,7 +153,7 @@ class AccountClientPool:
 
         for client, _ in pairs:
             try:
-                if not client.is_closed:
+                if not getattr(client, "is_closed", False) and hasattr(client, "aclose"):
                     await client.aclose()
             except Exception:
                 pass
