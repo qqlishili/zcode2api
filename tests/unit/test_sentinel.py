@@ -474,7 +474,7 @@ async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatc
         return {"code": 3012, "msg": "request has been blocked"}
 
     class _DummyCaptcha:
-        async def get_verify_param(self):
+        async def get_verify_param(self, *args, **kwargs):
             return "v-param", "cn"
 
         async def fetch_config(self):

@@ -97,7 +97,7 @@ class _StubCaptcha:
     def __init__(self) -> None:
         self.invalidated = 0
 
-    async def get_verify_param(self, port: int | None = None) -> tuple[str, str | None]:
+    async def get_verify_param(self, port: int | None = None, *args, **kwargs) -> tuple[str, str | None]:
         return "mock-verify-param", None
 
     def invalidate(self) -> None:

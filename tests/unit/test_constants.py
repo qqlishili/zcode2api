@@ -121,3 +121,16 @@ def test_retry_settings_defaults():
     assert settings.RETRY_5XX_TIMES == 3
     assert settings.RETRY_5XX_WAIT == 5
     assert settings.COOLING_SECONDS == 300
+
+
+def test_regions_and_port_tiers():
+    assert constants.REGIONS == ("HK", "TW", "JP", "SG", "US", "KR", "EU", "OTHER")
+    assert constants.REGION_PORT_TIERS["HK"] == (21100, 21199)
+    assert constants.REGION_PORT_TIERS["TW"] == (21200, 21299)
+    assert constants.REGION_PORT_TIERS["JP"] == (21300, 21399)
+    assert constants.REGION_PORT_TIERS["SG"] == (21400, 21499)
+    assert constants.REGION_PORT_TIERS["US"] == (21500, 21599)
+    assert constants.REGION_PORT_TIERS["KR"] == (21600, 21699)
+    assert constants.REGION_PORT_TIERS["EU"] == (21700, 21799)
+    assert constants.REGION_PORT_TIERS["OTHER"] == (21800, 21899)
+

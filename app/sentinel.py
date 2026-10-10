@@ -177,13 +177,20 @@ class Sentinel:
 
     @staticmethod
     def _billable_candidates(*, include_claim_blocked: bool = False) -> list[Account]:
-        """筛选可计费 JWT 账号，同优先级随机打散并按 ACTIVE 优先排序。"""
+        """筛选可计费 JWT 账号，同优先级随机打散，健康大区优先，同大区内 ACTIVE 优先。"""
+        from .client_pool import account_client_pool
+
         candidates = [
             a for a in store.list_accounts("zai")
             if a.allows_billing() and (include_claim_blocked or not a.is_claim_blocked())
         ]
         random.shuffle(candidates)
-        candidates.sort(key=lambda a: 0 if a.status == Status.ACTIVE else 1)
+        candidates.sort(
+            key=lambda a: (
+                0 if account_client_pool.is_region_healthy(getattr(a, "assigned_region", None)) else 1,
+                0 if a.status == Status.ACTIVE else 1,
+            )
+        )
         return candidates
 
     async def _probe_upstream_plans(self, candidates: list[Account]) -> list[dict] | None:
@@ -230,6 +237,10 @@ class Sentinel:
                 ]
                 if not pending_pids:
                     continue
+                from .client_pool import account_client_pool
+                if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None)):
+                    catchup_reports.append({"name": acc.name, "result": "大区离线避让"})
+                    continue
                 try:
                     await asyncio.sleep(random.uniform(0.6, 1.5))
                     outcomes = await auto_claim_all_plans(acc)
@@ -266,6 +277,10 @@ class Sentinel:
         for acc in all_jwt:
             if acc.is_claim_blocked():
                 claim_reports.append({"name": acc.name, "result": "1005避让中"})
+                continue
+            from .client_pool import account_client_pool
+            if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None)):
+                claim_reports.append({"name": acc.name, "result": "大区离线避让"})
                 continue
             try:
                 await asyncio.sleep(random.uniform(0.6, 1.5))

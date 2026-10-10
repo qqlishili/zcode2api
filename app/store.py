@@ -60,12 +60,18 @@ class Store:
                     status      TEXT,
                     enabled     INTEGER NOT NULL DEFAULT 1,
                     created_at  REAL,
-                    data        TEXT NOT NULL
+                    data        TEXT NOT NULL,
+                    assigned_region TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_acc_provider ON {_TBL} (provider);
                 CREATE INDEX IF NOT EXISTS idx_acc_status   ON {_TBL} (status);
                 """
             )
+            try:
+                conn.execute(f"ALTER TABLE {_TBL} ADD COLUMN assigned_region TEXT")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_acc_region ON {_TBL} (assigned_region)")
             conn.execute(
                 f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('admin_key', ?)",
                 (settings.DEFAULT_ADMIN_KEY,),
@@ -118,11 +124,13 @@ class Store:
 
             self._accounts = {p: [] for p in PROVIDERS}
             rows = conn.execute(
-                f"SELECT data FROM {_TBL} ORDER BY created_at ASC"
+                f"SELECT data, assigned_region FROM {_TBL} ORDER BY created_at ASC"
             ).fetchall()
             for row in rows:
                 try:
                     account = Account.from_dict(json.loads(row["data"]))
+                    if row["assigned_region"]:
+                        account.assigned_region = row["assigned_region"]
                 except (json.JSONDecodeError, TypeError):
                     continue
                 if account.provider in self._accounts:
@@ -130,14 +138,28 @@ class Store:
 
     def _persist_account(self, account: Account) -> None:
         with closing(self._connect()) as conn:
+            data_dict = account.to_dict()
+            if account.assigned_region:
+                data_dict["assigned_region"] = account.assigned_region
             conn.execute(
-                f"""INSERT OR REPLACE INTO {_TBL}
-                    (id, provider, name, mode, status, enabled, created_at, data)
-                    VALUES (?,?,?,?,?,?,?,?)""",
+                f"""INSERT INTO {_TBL}
+                    (id, provider, name, mode, status, enabled, created_at, data, assigned_region)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        provider = excluded.provider,
+                        name = excluded.name,
+                        mode = excluded.mode,
+                        status = excluded.status,
+                        enabled = excluded.enabled,
+                        created_at = excluded.created_at,
+                        data = excluded.data,
+                        assigned_region = COALESCE(excluded.assigned_region, {_TBL}.assigned_region)
+                """,
                 (
                     account.id, account.provider, account.name, account.mode,
                     account.status, 1 if account.enabled else 0, account.created_at,
-                    json.dumps(account.to_dict(), ensure_ascii=False),
+                    json.dumps(data_dict, ensure_ascii=False),
+                    account.assigned_region,
                 ),
             )
             conn.commit()
@@ -242,6 +264,23 @@ class Store:
                         return a
         return None
 
+    def get_accounts_by_region(self, provider: str, region: str) -> list[Account]:
+        """获取指定提供商和指定大区的全部账号。"""
+        with self._lock:
+            return [
+                a for a in self._accounts.get(provider, [])
+                if getattr(a, "assigned_region", None) == region
+            ]
+
+    def get_region_distribution(self, provider: str) -> dict[str, int]:
+        """统计当前提供商各已绑定大区的账号数量分布。"""
+        with self._lock:
+            dist: dict[str, int] = {}
+            for a in self._accounts.get(provider, []):
+                r = getattr(a, "assigned_region", None) or "UNASSIGNED"
+                dist[r] = dist.get(r, 0) + 1
+            return dist
+
     def _find_locked(self, provider: str, id_or_name: str) -> Account | None:
         for a in self._accounts.get(provider, []):
             if a.id == id_or_name or a.name == id_or_name:
@@ -318,11 +357,13 @@ class Store:
         model: str | None = None,
         avoid_id: str | None = None,
         observations: dict | None = None,
+        healthy_regions: set[str] | None = None,
     ) -> Account | None:
-        """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量的自动跳过。
+        """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量 / 大区无出口的自动跳过。
 
         若指定了 model 且池内存在显式持有该模型正余量的账号（或尚未拉取配额的冷启动新号），
         优先在该子集中轮询（例如请求 GLM-5.3 时精准路由给持有 GLM-5.3 额度的账号）。
+        若指定了 healthy_regions 且账号已绑定大区，当且仅当其大区无活跃出口时前置避让（不消耗尝试次数）。
         """
         skip_ids = skip_ids or set()
         now = time.time()
@@ -333,6 +374,9 @@ class Store:
                 if reason is None and a.id in skip_ids:
                     continue
                 reason = reason or a.model_quota_exclusion(model)
+                if reason is None and healthy_regions is not None and a.assigned_region:
+                    if a.assigned_region not in healthy_regions:
+                        reason = "region_egress_offline"
                 if reason:
                     if observations is not None:
                         observations[a.id] = {"code": reason, "at": now}

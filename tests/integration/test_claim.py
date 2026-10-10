@@ -26,7 +26,7 @@ def claim_env(gateway_client, fresh_app, monkeypatch):
             self.solve_count = 0
             self.invalidated = 0
 
-        async def get_verify_param(self, port=None):
+        async def get_verify_param(self, port=None, *args, **kwargs):
             self.solve_count += 1
             return "stub-verify-param", "sgp"
 

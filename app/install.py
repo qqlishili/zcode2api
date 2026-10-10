@@ -33,11 +33,17 @@ from . import constants, logs, telemetry
 _CLIENT_TIMEOUT = 15
 
 
-async def _fetch_client_configs() -> dict:
-    """第 1 步：client/configs（免鉴权）。HTTP / 业务码任一失败抛异常。"""
+async def _fetch_client_configs(client: httpx.AsyncClient | None = None) -> dict:
+    """第 1 步：client/configs（免鉴权）。优先复用 client 或使用健康大区代理。"""
     url = f"{constants.CLIENT_CONFIGS_URL}?app_version={constants.BILLING_APP_VERSION}"
-    async with httpx.AsyncClient(timeout=_CLIENT_TIMEOUT) as client:
-        res = await client.get(url, headers={"User-Agent": f"ZCode/{constants.BILLING_APP_VERSION}"})
+    headers = {"User-Agent": f"ZCode/{constants.BILLING_APP_VERSION}"}
+    if client is not None:
+        res = await client.get(url, headers=headers)
+    else:
+        from .client_pool import account_client_pool
+        healthy_proxy = account_client_pool.get_any_healthy_proxy()
+        async with httpx.AsyncClient(proxy=healthy_proxy, timeout=_CLIENT_TIMEOUT) as fallback_client:
+            res = await fallback_client.get(url, headers=headers)
     res.raise_for_status()
     body = res.json()  # 非 JSON 由调用方按 ValueError 容错
     if telemetry.business_code(body) != 0:
@@ -66,6 +72,7 @@ async def run_install_sequence_for_account(account) -> dict:
     任何失败都不抛出，errors 留痕（同 run_install_sequence 约定）。
     """
     from .claim import jwt_user_id
+    from .client_pool import account_client_pool
     from .fingerprint import profile_for
     from .store import store
 
@@ -79,7 +86,13 @@ async def run_install_sequence_for_account(account) -> dict:
     user_id = jwt_user_id(account) or ""
 
     try:
-        await _fetch_client_configs()
+        client = await account_client_pool.get_client(account)
+    except Exception as err:
+        result["errors"].append(f"获取账号大区代理客户端失败: {err}")
+        return result
+
+    try:
+        await _fetch_client_configs(client=client)
         result["configs_fetched"] = True
     except (httpx.HTTPError, RuntimeError, ValueError) as err:
         result["errors"].append(f"client/configs 失败: {err}")
@@ -87,6 +100,7 @@ async def run_install_sequence_for_account(account) -> dict:
     for element in constants.ACTIVATION_ELEMENTS:
         try:
             await telemetry.post_activation_event(profile, user_id, element,
+                                                  client=client,
                                                   timeout=_CLIENT_TIMEOUT)
             result["events_reported"].append(element)
         except (httpx.HTTPError, RuntimeError) as err:
@@ -115,6 +129,7 @@ async def run_install_sequence() -> dict:
     进程级安装序只拉 configs / 报日活，不得把部署机云内核上报成用户设备；
     每账号安装序才使用该号自己的生成 SKU。任何失败都不抛出。
     """
+    from .client_pool import account_client_pool
     from .fingerprint import DeviceProfile
     from .quota import device_mid
 
@@ -130,20 +145,23 @@ async def run_install_sequence() -> dict:
         device_mid=device_mid(),
     )
 
-    try:
-        configs = await _fetch_client_configs()
-        result["configs_fetched"] = True
-        result["captcha_enabled"] = _captcha_enabled(configs)
-    except (httpx.HTTPError, RuntimeError, ValueError) as err:
-        result["errors"].append(f"client/configs 失败: {err}")
-
-    for element in constants.ACTIVATION_ELEMENTS:
+    healthy_proxy = account_client_pool.get_any_healthy_proxy()
+    async with httpx.AsyncClient(proxy=healthy_proxy, timeout=_CLIENT_TIMEOUT) as client:
         try:
-            await telemetry.post_activation_event(profile, "", element,
-                                                  timeout=_CLIENT_TIMEOUT)
-            result["events_reported"].append(element)
-        except (httpx.HTTPError, RuntimeError) as err:
-            result["errors"].append(str(err))
+            configs = await _fetch_client_configs(client=client)
+            result["configs_fetched"] = True
+            result["captcha_enabled"] = _captcha_enabled(configs)
+        except (httpx.HTTPError, RuntimeError, ValueError) as err:
+            result["errors"].append(f"client/configs 失败: {err}")
+
+        for element in constants.ACTIVATION_ELEMENTS:
+            try:
+                await telemetry.post_activation_event(profile, "", element,
+                                                      client=client,
+                                                      timeout=_CLIENT_TIMEOUT)
+                result["events_reported"].append(element)
+            except (httpx.HTTPError, RuntimeError) as err:
+                result["errors"].append(str(err))
 
     if result["errors"]:
         logs.warn("install", f"安装初始化部分失败: {'; '.join(result['errors'])}")

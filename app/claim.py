@@ -22,7 +22,7 @@ import httpx
 
 from . import constants, logs, settings
 from .captcha import captcha_manager
-from .client_pool import account_client_pool
+from .client_pool import RegionOfflineError, account_client_pool
 from .models import Account, Status
 
 _TZ_BEIJING = timezone(timedelta(hours=8))
@@ -190,6 +190,8 @@ async def _billing_request(account: Account, method: str, path: str, **kwargs) -
             method, f"{settings.ZCODE_BILLING_BASE}{path}",
             headers=headers, **kwargs,
         )
+    except RegionOfflineError as err:
+        raise ClaimError(f"账号大区出口离线: {err}") from err
     except httpx.HTTPError as err:
         # 连接/超时等网络故障统一转业务错误：路由层只需面对 ClaimError 一种失败
         raise ClaimError(f"上游网络错误: {err}") from err
@@ -233,6 +235,7 @@ async def report_activation_events(account: Account) -> str | None:
     请求无 Authorization（上游事件端点不校验）；任何失败仅返回文案，不阻断
     preview，首个失败即中止（日活键在上游按 device_mid+日期去重，重试无意义）。
     """
+    from .client_pool import account_client_pool
     from .fingerprint import profile_for
     from .telemetry import post_activation_event
 
@@ -240,9 +243,13 @@ async def report_activation_events(account: Account) -> str | None:
     user_id = jwt_user_id(account)
     if not user_id:
         return "JWT 无 user_id，跳过激活上报"
+    try:
+        client = await account_client_pool.get_client(account)
+    except Exception as err:
+        return f"获取账号大区代理客户端失败: {err}"
     for element in constants.ACTIVATION_ELEMENTS:
         try:
-            await post_activation_event(profile, user_id, element)
+            await post_activation_event(profile, user_id, element, client=client)
         except (httpx.HTTPError, RuntimeError) as err:
             return f"激活事件 {element} 上报失败: {err}"
     return None
@@ -672,7 +679,7 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
             await report_activation_events(account)
         except Exception as act_err:
             logs.warn("claim", f"账号 {account.name} 领取前激活上报跳过: {act_err}")
-    verify_param, verify_region = await captcha_manager.get_verify_param()
+    verify_param, verify_region = await captcha_manager.get_verify_param(account=account)
     config = await captcha_manager.fetch_config()
     headers = _claim_headers(account, verify_param, verify_region or config.get("region"))
     try:

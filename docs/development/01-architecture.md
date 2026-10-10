@@ -49,7 +49,7 @@ zcode-hub/
 │   ├── settings.py        # 环境变量（.env）
 │   ├── models.py          # Account、Status；选号/回退/billing 门在账号对象上
 │   ├── store.py           # SQLite WAL：账号 CRUD、round-robin select、设置 KV
-│   ├── client_pool.py     # 账号专属独立 AsyncClient 连接池与多出口哈希路由
+│   ├── client_pool.py     # 账号专属独立 AsyncClient 连接池与大区固定出口路由（RegionOfflineError 熔断）
 │   ├── routes/gateway.py  # /v1/messages + /v1/chat/completions 调度与错误分类
 │   ├── routes/admin_api.py
 │   ├── routes/pages.py
@@ -57,10 +57,10 @@ zcode-hub/
 │   ├── agent.py           # 上游请求构建（身份头 / 透传头过滤 / 通道选择）
 │   ├── identity.py        # 身份头仿真（每账号 DeviceProfile）
 │   ├── fingerprint.py     # 每账号成套桌面 SKU（一号一台生成设备）
-│   ├── install.py         # 全局 + 按账号安装序
+│   ├── install.py         # 全局 + 按账号安装序（全程透传账号 Client）
 │   ├── quota.py           # billing/current+balance+usage 刷新
 │   ├── claim.py           # billing/preview + claim
-│   ├── captcha.py         # 求解器编排 + 预热池
+│   ├── captcha.py         # 求解器编排 + 预热池（Token 大区亲和性隔离 + Node 代理注入）
 │   ├── oauth.py           # zai server-mediated CLI 流
 │   ├── auth_admin.py      # 后台 / 网关鉴权（后台失败节流）
 │   └── reqlog.py          # 内存环形请求日志
@@ -182,6 +182,13 @@ Sentinel 后台巡检循环（默认 1800 秒 ± 10% 抖动，具备北京时间
 | JSON 导入 | `GET/POST /admin/api/export|import` 或 `cli.py export/import`（明文 name/mode/secret） |
 
 入池后：按账号安装序（configs + 激活事件，批量入池经 `_install_lock` 串行错峰 `0.3~0.8s`）+ JWT 自动领取（经 `_auto_claim_lock` 串行错峰 `0.6~1.5s`）。CLI 与 Web 同序。官方 callback 在 `zcode.z.ai`，hub 只 poll 结果，收不到授权 code。
+
+### 4.7 全生命周期账号网络出口归一化（Egress Convergence）
+
+- **第一性原理实体映射**：将「1 个账号」严格锚定为「1 台物理设备 + 1 个固定的物理大区代理出口」。彻底杜绝同账号在业务调用、日活上报、验证码求解时出现跨国 IP 撕裂或机房原生出网。
+- **大区离线熔断栅栏（Fence Principle）**：当账号绑定的大区在代理池中无健康节点时，`account_client_pool.get_client` 显式抛出 `RegionOfflineError`，网关层立即捕获并切换下一个账号，严禁降级为直连出网（宁停勿泄）。
+- **验证码 Token 大区亲和性隔离**：`captcha_manager` 为每枚 Token 记录生成时的出口 `proxy`。消费端（网关/领取）按账号大区代理精确匹配同大区 Token；若未命中同大区有效 Token，立即以该账号大区代理触发 On-Demand 同步现解，杜绝异地 Token 污染。
+- **求解器子进程代理注入**：Node 求解器依赖显式引入 `undici`，在子进程拉起时强注入 `HTTP_PROXY` / `HTTPS_PROXY`，从底层网络驱动彻底消除原生机房外呼。
 
 ## 5. 与来源项目的边界
 

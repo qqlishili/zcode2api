@@ -143,3 +143,17 @@ RISK_CONTROL_MARKERS = (
     '"code":3012', '"code": 3012', '"code":"3012"', '"code": "3012"',
     "unusual activity",
 )
+
+# ── 大区规范与百位端口段（单一事实源，对齐 OpenSpec geo-pinned-egress-ports）────────
+REGIONS: tuple[str, ...] = ("HK", "TW", "JP", "SG", "US", "KR", "EU", "OTHER")
+REGION_PORT_TIERS: dict[str, tuple[int, int]] = {
+    "HK": (21100, 21199),
+    "TW": (21200, 21299),
+    "JP": (21300, 21399),
+    "SG": (21400, 21499),
+    "US": (21500, 21599),
+    "KR": (21600, 21699),
+    "EU": (21700, 21799),
+    "OTHER": (21800, 21899),
+}
+

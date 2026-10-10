@@ -504,19 +504,47 @@ function cookiesFromSetCookie(list, url) {
 // cb)`，Node 26 下直接 TypeError（URL 为 undefined 时 opts 被当 listener）。
 // 拦截器对 sync 请求永不返回 null：缓存未命中时用下面这个正确的子进程拉取。
 function syncFetchBody(url, headers) {
+  const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY || "";
   const script = `
-const http = require("http"), https = require("https");
 const u = new URL(${JSON.stringify(url)});
-const mod = u.protocol === "https:" ? https : http;
-const req = mod.request(u, { method: "GET", headers: ${JSON.stringify(headers || {})}, rejectUnauthorized: false }, (res) => {
-  const chunks = [];
-  res.on("data", (c) => chunks.push(c));
-  res.on("end", () => console.log(JSON.stringify({ error: null, status: res.statusCode, b64: Buffer.concat(chunks).toString("base64") })));
-});
-req.on("error", (e) => console.log(JSON.stringify({ error: e.message })));
-req.end();`;
+const proxy = ${JSON.stringify(proxy)};
+const headers = ${JSON.stringify(headers || {})};
+
+async function fetchSync() {
+  if (proxy) {
+    try {
+      const { ProxyAgent, request } = require("undici");
+      const res = await request(u, {
+        method: "GET",
+        headers,
+        dispatcher: new ProxyAgent(proxy),
+      });
+      const chunks = [];
+      for await (const chunk of res.body) {
+        chunks.push(chunk);
+      }
+      const b64 = Buffer.concat(chunks).toString("base64");
+      console.log(JSON.stringify({ error: null, status: res.statusCode, b64 }));
+      return;
+    } catch (e) {
+      // fallback to native http below
+    }
+  }
+  const http = require("http"), https = require("https");
+  const mod = u.protocol === "https:" ? https : http;
+  const req = mod.request(u, { method: "GET", headers, rejectUnauthorized: false }, (res) => {
+    const chunks = [];
+    res.on("data", (c) => chunks.push(c));
+    res.on("end", () => console.log(JSON.stringify({ error: null, status: res.statusCode, b64: Buffer.concat(chunks).toString("base64") })));
+  });
+  req.on("error", (e) => console.log(JSON.stringify({ error: e.message })));
+  req.end();
+}
+fetchSync();`;
   try {
     const out = require("node:child_process").execFileSync(process.argv[0], ["-e", script], {
+      cwd: __dirname,
+      env: process.env,
       encoding: "buffer",
       timeout: 20000,
       maxBuffer: 256 * 1024 * 1024,

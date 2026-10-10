@@ -25,7 +25,7 @@ from .. import constants, logs, reqlog, settings
 from ..agent import build_request
 from ..auth_admin import verify_gateway_key
 from ..captcha import captcha_manager
-from ..client_pool import account_client_pool
+from ..client_pool import RegionOfflineError, account_client_pool
 from ..models import Account, Status
 from ..openai_compat import StreamConverter, _apply_reasoning_params, anthropic_to_openai, openai_to_anthropic
 from ..quota import fetch_quota
@@ -752,6 +752,9 @@ def _get_sticky_account(
             for other in store.list_accounts(provider)
         ):
             return None
+    if acc.assigned_region and hasattr(account_client_pool, "is_region_healthy"):
+        if not account_client_pool.is_region_healthy(acc.assigned_region):
+            return None
     if limit > 0 and _inflight.get(acc.id, 0) >= limit:
         return None
     return acc
@@ -804,8 +807,19 @@ async def _dispatch(req_id, body, incoming_headers, port, provider):
         if attempts == 0 and prefer_sticky:
             account = _get_sticky_account(provider, affinity_key, tried, limit, model=req_model)
         if account is None:
-            account = store.select(provider, skip_ids=tried, model=req_model, avoid_id=avoid_id,
-                                   observations=observations)
+            healthy_regs = (
+                account_client_pool.get_healthy_regions()
+                if hasattr(account_client_pool, "get_healthy_regions")
+                else None
+            )
+            account = store.select(
+                provider,
+                skip_ids=tried,
+                model=req_model,
+                avoid_id=avoid_id,
+                observations=observations,
+                healthy_regions=healthy_regs,
+            )
         if account is None:
             break
         tried.add(account.id)
@@ -1303,7 +1317,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
         if needs_captcha:
             _park_slot(slot_box)
             try:
-                verify_param, verify_region = await captcha_manager.get_verify_param(port)
+                verify_param, verify_region = await captcha_manager.get_verify_param(port=port, account=account)
             except Exception as err:  # noqa: BLE001
                 logs.req_err(req_id, f"人机校验失败: {err}")
                 reqlog.finish_error(req_id, f"人机校验失败: {err}", status=500)
@@ -1326,10 +1340,14 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
             return next_account("credential_invalid", "local_scheduler", "credential")
 
-        if _get_shared_client is not _default_get_shared_client:
-            client = _get_shared_client()
-        else:
-            client = await account_client_pool.get_client(account)
+        try:
+            if _get_shared_client is not _default_get_shared_client:
+                client = _get_shared_client()
+            else:
+                client = await account_client_pool.get_client(account)
+        except RegionOfflineError as err:
+            logs.warn(req_id, f"账号 {account.name} 大区离线熔断，切换下一个: {err}")
+            return next_account("region_offline", "network_routing", "region")
         cm = client.stream("POST", url, headers=headers, content=payload)
         try:
             resp = await cm.__aenter__()

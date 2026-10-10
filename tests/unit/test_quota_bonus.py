@@ -586,7 +586,7 @@ class TestSmoothPollingAndStagger:
         async def _fake_config() -> dict:
             return {"sceneId": "s", "region": "sgp", "prefix": "p"}
 
-        async def _fake_solve(cfg: dict) -> _Token:
+        async def _fake_solve(cfg: dict, *args, **kwargs) -> _Token:
             return _Token("param-ok", "sgp")
 
         monkeypatch.setattr(cap_mod, "_sleep", _fake_sleep)

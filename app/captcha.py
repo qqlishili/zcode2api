@@ -15,13 +15,18 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 
 from . import constants, logs, settings
 from .store import store
+
+if TYPE_CHECKING:
+    from .models import Account
 
 _sleep = asyncio.sleep
 
@@ -39,11 +44,12 @@ class CaptchaSolveError(Exception):
 
 
 class _Token:
-    __slots__ = ("param", "region", "born_at")
+    __slots__ = ("param", "region", "proxy", "born_at")
 
-    def __init__(self, param: str, region: str | None) -> None:
+    def __init__(self, param: str, region: str | None, proxy: str | None = None) -> None:
         self.param = param
         self.region = region
+        self.proxy = proxy
         self.born_at = time.monotonic()
 
     def expired(self) -> bool:
@@ -74,7 +80,9 @@ class CaptchaManager:
             if self._config_cache and time.time() * 1000 - self._config_cache_at < settings.CAPTCHA_CONFIG_CACHE_TTL:
                 return self._config_cache
             try:
-                async with httpx.AsyncClient(timeout=15) as client:
+                from .client_pool import account_client_pool
+                healthy_proxy = account_client_pool.get_any_healthy_proxy()
+                async with httpx.AsyncClient(proxy=healthy_proxy, timeout=15) as client:
                     res = await client.get(
                         f"{constants.CLIENT_CONFIGS_URL}?{constants.CLIENT_CONFIGS_QUERY}"
                     )
@@ -137,18 +145,20 @@ class CaptchaManager:
                 await asyncio.sleep(5)
 
     async def _refill_batch(self, need: int = 1) -> None:
-        """串行补充（求解有 CPU 开销，避免并发爆 Node 进程）。"""
+        """串行补充（求解有 CPU 开销，避免并发爆 Node 进程；使用健康大区代理）。"""
         if self._refilling:
             return
         self._refilling = True
         try:
             config = await self.fetch_config()
+            from .client_pool import account_client_pool
+            healthy_proxy = account_client_pool.get_any_healthy_proxy()
             solved = 0
             while self._pool_size < POOL_MAX and (self._pool_size < POOL_MIN or solved < need):
                 if solved > 0:
                     # 多枚连解之间注入微抖动，避免同秒连续拉起子进程冲击 o.alicdn.com
                     await _sleep(random.uniform(0.4, 1.0))
-                token = await self._solve_one(config)
+                token = await self._solve_one(config, proxy=healthy_proxy)
                 if token is None:
                     break
                 self._put(token)
@@ -182,53 +192,70 @@ class CaptchaManager:
             self._put(token)
         return oldest_age_ms
 
-    async def get_verify_param(self, port: int | None = None) -> tuple[str, str | None]:
-        """取一枚可用 token：优先池内现成的（跳过过期），池空才同步现解。
-
-        返回 (verify_param, region)。region 可为 None（旧求解器无 region 概念）。
+    async def get_verify_param(
+        self,
+        port: int | None = None,
+        account: Account | None = None,
+        proxy: str | None = None,
+    ) -> tuple[str, str | None]:
+        """按账号大区亲和性获取验证码 Token：
+        - 优先从池中提取与目标账号代理出口严格同一的有效 Token；
+        - 若池中无同代理 Token，立即以目标代理触发 On-Demand 同步现解（严禁跨区混用！）。
         """
-        # 1) 池内直取
+        from .client_pool import account_client_pool
+
+        expected_proxy = proxy
+        if expected_proxy is None and account is not None:
+            expected_proxy = account_client_pool.resolve_proxy(account)
+        if expected_proxy is None and port is not None:
+            expected_proxy = f"http://127.0.0.1:{port}"
+
+        # 1) 池内查找匹配亲和代理的 Token（严格亲和性匹配，杜绝跨区混用）
+        kept: list[_Token] = []
+        matched_token: _Token | None = None
+
         while self._pool_size > 0:
             try:
-                token = self._pool.get_nowait()
+                t = self._pool.get_nowait()
             except asyncio.QueueEmpty:
                 break
             self._pool_size = max(0, self._pool_size - 1)
-            if not token.expired():
-                # 触发后台补货（fire-and-forget；_refilling 防重入，强引用防 GC）
-                task = asyncio.create_task(self._refill_batch(1))
-                self._bg_tasks.add(task)
-                task.add_done_callback(self._bg_tasks.discard)
-                return token.param, token.region
+            if t.expired():
+                continue
+            # 亲和匹配：若指定了 expected_proxy，必须 t.proxy == expected_proxy
+            if matched_token is None and (expected_proxy is None or t.proxy == expected_proxy):
+                matched_token = t
+            else:
+                kept.append(t)
 
-        # 2) 池空/全过期：同步现解一次（等待后台正在进行的单次求解或自行求解）
+        # 重新放回未消耗的有效 Token
+        for t in kept:
+            self._put(t)
+
+        if matched_token is not None:
+            task = asyncio.create_task(self._refill_batch(1))
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+            return matched_token.param, matched_token.region
+
+        # 2) 未命中同代理 Token / 池空：同步现解一次（On-Demand Solve 绑定 expected_proxy）
         config = await self.fetch_config()
         async with self._solve_lock:
-            while self._pool_size > 0:
-                try:
-                    pooled = self._pool.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                self._pool_size = max(0, self._pool_size - 1)
-                if not pooled.expired():
-                    task = asyncio.create_task(self._refill_batch(1))
-                    self._bg_tasks.add(task)
-                    task.add_done_callback(self._bg_tasks.discard)
-                    return pooled.param, pooled.region
-            token = await self._solve_one_unlocked(config)
+            token = await self._solve_one_unlocked(config, proxy=expected_proxy)
         if token is None:
             raise CaptchaSolveError(f"验证码求解失败: {self._last_error or '多次重试无结果'}")
+
         task = asyncio.create_task(self._refill_batch(1))
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
         return token.param, token.region
 
     # ── 求解 ─────────────────────────────────────────────────────────────────
-    async def _solve_one(self, config: dict) -> _Token | None:
+    async def _solve_one(self, config: dict, proxy: str | None = None) -> _Token | None:
         async with self._solve_lock:
-            return await self._solve_one_unlocked(config)
+            return await self._solve_one_unlocked(config, proxy=proxy)
 
-    async def _solve_one_unlocked(self, config: dict) -> _Token | None:
+    async def _solve_one_unlocked(self, config: dict, proxy: str | None = None) -> _Token | None:
         scene = config.get("sceneId") or constants.CAPTCHA_DEFAULTS["sceneId"]
         region = config.get("region") or constants.CAPTCHA_DEFAULTS["region"]
         prefix = config.get("prefix") or constants.CAPTCHA_DEFAULTS["prefix"]
@@ -236,26 +263,31 @@ class CaptchaManager:
         last_err: str | None = None
         for attempt in range(1, settings.CAPTCHA_SOLVE_RETRIES + 1):
             try:
-                param = await self._run_solver(scene, region, prefix)
+                param = await self._run_solver(scene, region, prefix, proxy=proxy)
             except Exception as err:  # noqa: BLE001
                 last_err = str(err)
                 param = None
             if param:
                 if attempt > 1:
                     logs.ok("captcha", f"求解成功（第 {attempt} 次尝试）")
-                return _Token(param, region)
+                return _Token(param, region, proxy=proxy)
             self._last_error = last_err
             logs.warn("captcha", f"第 {attempt}/{settings.CAPTCHA_SOLVE_RETRIES} 次求解未果，重试…")
 
         logs.warn("captcha", f"求解失败: {last_err or '多次重试无结果'}")
         return None
 
-    async def _run_solver(self, scene: str, region: str, prefix: str) -> str | None:
+    async def _run_solver(self, scene: str, region: str, prefix: str, proxy: str | None = None) -> str | None:
         solver = settings.CAPTCHA_SOLVER_JS
         if not solver.exists():
             raise RuntimeError(
                 f"未找到求解器 {solver}，请先在 captcha_node 下执行 npm install"
             )
+        env = dict(os.environ)
+        if proxy:
+            env["HTTP_PROXY"] = proxy
+            env["HTTPS_PROXY"] = proxy
+
         proc = await asyncio.create_subprocess_exec(
             settings.NODE_PATH,
             "--dns-result-order=ipv4first",
@@ -264,6 +296,7 @@ class CaptchaManager:
             cwd=str(settings.CAPTCHA_SOLVER_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            env=env,
         )
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=settings.CAPTCHA_SOLVE_TIMEOUT)

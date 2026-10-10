@@ -54,16 +54,21 @@ def business_code(body) -> int:
 
 
 async def post_activation_event(profile, user_id: str, element: str,
+                                client: httpx.AsyncClient | None = None,
                                 timeout: float = _TIMEOUT) -> None:
     """单条激活事件上报（无 Authorization，官方端点不校验登录态）。
 
+    优先复用外部传入的 client（与账号绑定大区代理出口同源）；未传入时降级创建临时客户端。
     HTTP >= 400 或业务码非 0 抛 RuntimeError，文案含定位信息（"HTTP 500" /
     "业务码异常"）；httpx.HTTPError 原样上抛 —— 容错策略（中止/继续）由调用方定。
     """
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        res = await client.post(settings.ZCODE_EVENT_REPORT_URL,
-                                headers={"Content-Type": "application/json"},
-                                json=build_activation_event_body(element, profile, user_id))
+    body = build_activation_event_body(element, profile, user_id)
+    headers = {"Content-Type": "application/json"}
+    if client is not None:
+        res = await client.post(settings.ZCODE_EVENT_REPORT_URL, headers=headers, json=body)
+    else:
+        async with httpx.AsyncClient(timeout=timeout) as fallback_client:
+            res = await fallback_client.post(settings.ZCODE_EVENT_REPORT_URL, headers=headers, json=body)
     if res.status_code >= 400:
         raise RuntimeError(f"event/report {element} HTTP {res.status_code}: {res.text[:120]}")
     try:

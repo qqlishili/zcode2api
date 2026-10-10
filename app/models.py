@@ -6,7 +6,11 @@ import secrets
 import time
 from dataclasses import asdict, dataclass, field
 
+from .constants import REGIONS
+
 PROVIDERS = ("zai", "bigmodel")
+
+__all__ = ["Account", "Status", "PROVIDERS", "REGIONS"]
 
 
 class Status:
@@ -63,6 +67,8 @@ class Account:
     installed_at: float | None = None  # 按账号安装序完成时间；None = 未安装
     # 专属代理：为空时回退全局 ZCODE_PROXIES 一致性哈希，若均无则降级直连
     proxy: str | None = None
+    # 永久绑定的大区标识（HK/TW/JP/SG/US/KR/EU/OTHER），落库后终身不变
+    assigned_region: str | None = None
 
     @staticmethod
     def create(provider: str, name: str, secret: str) -> Account:
@@ -267,6 +273,8 @@ class Account:
             "fingerprint": self.fingerprint_view(),
             "install_id": self.install_id,
             "installed_at": self.installed_at,
+            "assigned_region": self.assigned_region,
+            "proxy": self.proxy,
         }
 
     def effective_status(self, now: float | None = None) -> str:
