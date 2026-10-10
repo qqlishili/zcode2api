@@ -61,6 +61,8 @@ class Account:
     # 安装身份：入池分配的稳定安装令牌（hub 内部，跨账号不重复，导出时剥离）
     install_id: str | None = None
     installed_at: float | None = None  # 按账号安装序完成时间；None = 未安装
+    # 专属代理：为空时回退全局 ZCODE_PROXIES 一致性哈希，若均无则降级直连
+    proxy: str | None = None
 
     @staticmethod
     def create(provider: str, name: str, secret: str) -> Account:

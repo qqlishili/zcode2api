@@ -22,6 +22,7 @@ import httpx
 
 from . import constants, logs, settings
 from .captcha import captcha_manager
+from .client_pool import account_client_pool
 from .models import Account, Status
 
 _TZ_BEIJING = timezone(timedelta(hours=8))
@@ -184,11 +185,11 @@ def parse_plan(raw: dict) -> dict | None:
 async def _billing_request(account: Account, method: str, path: str, **kwargs) -> dict:
     headers = dict(kwargs.pop("headers"))
     try:
-        async with httpx.AsyncClient(timeout=25) as client:
-            res = await client.request(
-                method, f"{settings.ZCODE_BILLING_BASE}{path}",
-                headers=headers, **kwargs,
-            )
+        client = await account_client_pool.get_client(account)
+        res = await client.request(
+            method, f"{settings.ZCODE_BILLING_BASE}{path}",
+            headers=headers, timeout=25, **kwargs,
+        )
     except httpx.HTTPError as err:
         # 连接/超时等网络故障统一转业务错误：路由层只需面对 ClaimError 一种失败
         raise ClaimError(f"上游网络错误: {err}") from err

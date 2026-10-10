@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from . import constants, logs, settings
+from .client_pool import account_client_pool
 from .models import Account, Status
 from .store import store
 
@@ -310,18 +311,19 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
     base = settings.ZCODE_BILLING_BASE
     result: dict = {}
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        async def _get(path: str):
-            try:
-                return await client.get(f"{base}{path}", headers=headers)
-            except httpx.HTTPError:
-                return None
+    client = await account_client_pool.get_client(account)
 
-        billing_res, balance_res, usage_res = await asyncio.gather(
-            _get("/billing/current"),
-            _get("/billing/balance"),
-            _get("/usage"),
-        )
+    async def _get(path: str):
+        try:
+            return await client.get(f"{base}{path}", headers=headers, timeout=20)
+        except httpx.HTTPError:
+            return None
+
+    billing_res, balance_res, usage_res = await asyncio.gather(
+        _get("/billing/current"),
+        _get("/billing/balance"),
+        _get("/usage"),
+    )
 
     live = store.find(account.provider, account.id)
     if live is None:

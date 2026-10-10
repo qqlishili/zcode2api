@@ -111,6 +111,16 @@ ZCODE_EVENT_REPORT_URL = os.getenv("ZCODE_EVENT_REPORT_URL", constants.EVENT_REP
 OAUTH_API_BASE = os.getenv("ZCODE_OAUTH_API_BASE", constants.ZCODE_ORIGIN + "/api/v1")
 ZAI_EXCHANGE_ORIGIN = os.getenv("ZCODE_EXCHANGE_ORIGIN", constants.ZAI_API_ORIGIN)
 
+# ── 多出口代理池 ─────────────────────────────────────────────────────────────
+# 全局多出口代理列表（英文逗号分隔，如 "http://127.0.0.1:21081,http://127.0.0.1:21082"）
+# 未配置时自动回落为账号专属直连 Client（优雅降级）
+def get_global_proxies() -> list[str]:
+    raw = os.getenv("ZCODE_PROXIES", "").strip()
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+ZCODE_PROXIES = get_global_proxies()
+CLIENT_IDLE_TIMEOUT = _int("ZCODE_CLIENT_IDLE_TIMEOUT", 300)
+
 USER_AGENT = os.getenv("UPSTREAM_USER_AGENT", constants.USER_AGENT)
 APP_VERSION = "2.6.6"
 

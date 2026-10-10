@@ -13,7 +13,6 @@ import json
 import math
 import secrets
 import time
-import weakref
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
 
@@ -25,6 +24,7 @@ from .. import constants, logs, reqlog, settings
 from ..agent import build_request
 from ..auth_admin import verify_gateway_key
 from ..captcha import captcha_manager
+from ..client_pool import account_client_pool
 from ..models import Account, Status
 from ..openai_compat import StreamConverter, _apply_reasoning_params, anthropic_to_openai, openai_to_anthropic
 from ..quota import fetch_quota
@@ -34,28 +34,11 @@ from ..store import store
 _sleep = asyncio.sleep  # 模块级引用：测试可 patch 此名而免污染全局 asyncio
 
 router = APIRouter()
-_SHARED_CLIENTS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient] = (
-    weakref.WeakKeyDictionary()
-)
-
-
-def _get_shared_client() -> httpx.AsyncClient:
-    loop = asyncio.get_running_loop()
-    client = _SHARED_CLIENTS.get(loop)
-    if client is None or client.is_closed:
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=30.0, read=None, write=120.0, pool=30.0),
-            limits=httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=120.0),
-        )
-        _SHARED_CLIENTS[loop] = client
-    return client
 
 
 async def close_shared_client() -> None:
-    loop = asyncio.get_running_loop()
-    client = _SHARED_CLIENTS.pop(loop, None)
-    if client is not None and not client.is_closed:
-        await client.aclose()
+    """生命周期收尾：释放并关闭全部账号独立客户端。"""
+    await account_client_pool.aclose()
 
 
 MAX_CAPTCHA_RETRIES = 3
@@ -1319,7 +1302,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             logs.warn(req_id, f"账号 {account.name} 凭证无效，切换下一个")
             return next_account("credential_invalid", "local_scheduler", "credential")
 
-        client = _get_shared_client()
+        client = await account_client_pool.get_client(account)
         cm = client.stream("POST", url, headers=headers, content=payload)
         try:
             resp = await cm.__aenter__()
