@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from . import logs, settings
+from . import settings
 
 _logger = logging.getLogger("zcode.pool")
 

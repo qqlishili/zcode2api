@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+
 import pytest
 
 from app.client_pool import AccountClientPool
