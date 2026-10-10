@@ -315,7 +315,7 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
 
     async def _get(path: str):
         try:
-            return await client.get(f"{base}{path}", headers=headers, timeout=20)
+            return await client.get(f"{base}{path}", headers=headers)
         except httpx.HTTPError:
             return None
 

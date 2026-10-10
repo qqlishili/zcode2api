@@ -185,10 +185,10 @@ def parse_plan(raw: dict) -> dict | None:
 async def _billing_request(account: Account, method: str, path: str, **kwargs) -> dict:
     headers = dict(kwargs.pop("headers"))
     try:
-        client = await account_client_pool.get_client(account)
+        client = await account_client_pool.get_client(account, timeout=25.0)
         res = await client.request(
             method, f"{settings.ZCODE_BILLING_BASE}{path}",
-            headers=headers, timeout=25, **kwargs,
+            headers=headers, **kwargs,
         )
     except httpx.HTTPError as err:
         # 连接/超时等网络故障统一转业务错误：路由层只需面对 ClaimError 一种失败
