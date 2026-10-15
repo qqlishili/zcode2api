@@ -1,0 +1,3 @@
+[submodule "vendor/magpie-plugins"]
+	path = vendor/magpie-plugins
+	url = https://github.com/magpie-community/plugins.git

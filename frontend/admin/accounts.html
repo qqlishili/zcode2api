@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>zcode-hub · 账号池</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css"></noscript>
+  <link href="/static/css/app.css?v={{APP_VERSION}}" rel="stylesheet">
+</head>
+<body>
+<div id="admin-header" data-active="/admin/accounts" data-version="v{{APP_VERSION}}"></div>
+
+<main class="admin-main">
+  <div class="page-hd">
+    <div>
+      <div class="page-title">账号池</div>
+      <div class="page-sub">多账号轮询 · 额度用完自动切换下一个账号 · 实时用量监控</div>
+    </div>
+    <div class="page-actions">
+      <span class="live-dot" id="live-dot">实时监控中</span>
+      <button onclick="openImport()" class="page-action-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        导入
+      </button>
+      <button onclick="doExport()" class="page-action-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        导出
+      </button>
+      <button onclick="refreshAll()" class="page-action-btn" id="btn-refresh-all">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
+        刷新额度
+      </button>
+      <button onclick="claimAll()" class="page-action-btn" id="btn-claim-all">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>
+        一键领取
+      </button>
+      <button onclick="openAdd()" class="page-action-btn page-action-btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新增
+      </button>
+    </div>
+  </div>
+
+  <!-- 批量操作全局进度条（Antigravity 沉浸式风格） -->
+  <div class="batch-progress-wrap" id="batch-progress-wrap" style="display:none">
+    <div class="batch-progress-info">
+      <span class="batch-progress-text">
+        <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
+        <span id="batch-progress-msg">正在处理…</span>
+      </span>
+      <span class="batch-progress-count" id="batch-progress-count">0 / 0 (0%)</span>
+    </div>
+    <div class="batch-progress-track">
+      <div class="batch-progress-fill" id="batch-progress-fill" style="width:0%"></div>
+    </div>
+  </div>
+
+  <div class="section-head"><div class="section-title">账户概览</div></div>
+  <div class="stat-grid">
+    <div class="stat-cell"><div class="stat-top"><div class="stat-label">账户总数</div><span class="stat-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M4 19a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4"/><circle cx="12" cy="8" r="4"/></svg></span></div><div class="stat-num" id="s-total">0</div></div>
+    <div class="stat-cell"><div class="stat-top"><div class="stat-label">正常</div><span class="stat-icon" style="color:var(--mint)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.4 2.4 4.8-4.8"/></svg></span></div><div class="stat-num" id="s-active" style="color:var(--mint)">0</div></div>
+    <div class="stat-cell"><div class="stat-top"><div class="stat-label">额度用完</div><span class="stat-icon" style="color:#b78ae0"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M6 19h12"/><path d="M12 16V9"/></svg></span></div><div class="stat-num" id="s-exhausted" style="color:#b78ae0">0</div></div>
+    <div class="stat-cell"><div class="stat-top"><div class="stat-label">总额度（剩余）</div><span class="stat-icon" style="color:var(--amber)"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg></span></div><div class="stat-num" id="s-quota" style="color:var(--amber)">0</div></div>
+  </div>
+
+  <div class="section-head">
+    <div class="section-title">账户明细 <span class="section-count-badge" id="tbl-count">0</span></div>
+    <div class="section-meta" id="last-updated"></div>
+  </div>
+
+  <div class="filter-bar" id="filter-bar"></div>
+
+  <div class="acct-list" id="acct-list"></div>
+</main>
+
+<!-- Add modal -->
+<div class="modal-overlay" id="modal-add">
+  <div class="modal">
+    <div class="modal-title">新增账号</div>
+    <div class="filter-bar" style="margin-bottom:16px">
+      <button class="filter-chip active" id="tab-paste" onclick="switchAddTab('paste')">粘贴凭证</button>
+      <button class="filter-chip" id="tab-login" onclick="switchAddTab('login')">授权登录</button>
+    </div>
+
+    <!-- 粘贴凭证 -->
+    <div id="add-pane-paste">
+      <div class="dialog-body">
+        <div>
+          <div class="dialog-help">每行一个 Coding Plan JWT 或 API Key，已存在的会自动跳过</div>
+          <textarea class="input" id="add-tokens" rows="7" placeholder="粘贴 JWT / API Key，每行一个..."></textarea>
+        </div>
+        <div class="dialog-field">
+          <span class="dialog-label">提供商</span>
+          <select class="input" id="add-provider"><option value="zai">Z.AI (Coding Plan)</option><option value="bigmodel">BigModel</option></select>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button onclick="closeModal('modal-add')" class="dialog-btn">取消</button>
+        <button onclick="doAdd()" class="dialog-btn dialog-btn-primary">添加</button>
+      </div>
+    </div>
+
+    <!-- 授权登录 -->
+    <div id="add-pane-login" style="display:none">
+      <div class="dialog-body">
+        <div class="dialog-help">通过 Z.AI 官方 OAuth 授权登录，授权成功后自动导入到账号池（含 Coding Plan 额度）。链接约 5 分钟内有效，换设备打开亦可。</div>
+        <div id="login-idle">
+          <input class="input" id="login-label" placeholder="账号备注（可选，如 acct-1）" maxlength="32" style="margin-bottom:10px">
+          <button onclick="startLogin()" id="login-start-btn" class="dialog-btn dialog-btn-primary w-full" style="height:40px">生成授权链接</button>
+
+          <div style="margin-top:14px;padding:10px 12px;background:var(--panel-2);border:1px solid var(--hairline);border-radius:var(--radius);font-size:12px;color:var(--ink-mute);line-height:1.6">
+            <div style="font-weight:600;color:var(--ink);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+              <span style="color:var(--amber)">💡</span><span>海外邮箱 / Google 账号登录说明</span>
+            </div>
+            <div>上游官方授权页默认仅展示国内手机号登录。如使用海外邮箱或 Google 账号，请按以下两步操作：</div>
+            <div style="margin-top:6px;display:grid;gap:4px">
+              <div>1. 先在同一浏览器中打开 👉 <a href="https://chat.z.ai/auth?redirect_uri=https://z.ai/" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:underline;font-weight:500">海外邮箱/Google 预登录入口</a> 完成登录。</div>
+              <div>2. 登录成功后，点击上方「生成授权链接」并打开授权，即可秒级自动入池。</div>
+            </div>
+          </div>
+        </div>
+        <div id="login-active" style="display:none">
+          <div class="dialog-help" style="margin-bottom:6px">在任意浏览器打开下面的链接完成授权（本页保持打开即自动入池）：</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="input" id="login-url" readonly style="font-size:12px">
+            <button onclick="copyLoginUrl()" class="dialog-btn">复制</button>
+            <button onclick="openLoginUrl()" class="dialog-btn dialog-btn-primary">打开授权</button>
+          </div>
+          <div class="live-dot" id="login-status" style="margin-top:16px">等待授权中…</div>
+
+          <div style="margin-top:14px;padding:10px 12px;background:var(--panel-2);border:1px solid var(--hairline);border-radius:var(--radius);font-size:12px;color:var(--ink-mute);line-height:1.6">
+            <div style="color:var(--ink);font-weight:600;margin-bottom:2px">⚠️ 提示：若打开后未见邮箱/Google登录选项</div>
+            <div>上游官方前端默认仅展示手机登录。若需海外邮箱/Google登录：请先打开 <a href="https://chat.z.ai/auth?redirect_uri=https://z.ai/" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:underline;font-weight:500">邮箱/Google 预登录入口</a> 登录账号，再点击上方「打开授权」即可秒级入池。</div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button onclick="cancelLogin()" class="dialog-btn">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal-overlay" id="modal-edit">
+  <div class="modal">
+    <div class="modal-title">编辑账号</div>
+    <div class="dialog-body">
+      <div class="dialog-field"><span class="dialog-label">名称</span><input class="input" id="edit-name"></div>
+      <div class="dialog-field"><span class="dialog-label">Token</span><input class="input" id="edit-token" placeholder="留空则不修改"></div>
+    </div>
+    <div class="dialog-actions">
+      <button onclick="closeModal('modal-edit')" class="dialog-btn">取消</button>
+      <button onclick="doEdit()" class="dialog-btn dialog-btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 手动领取弹窗：浏览器内完成阿里人机验证 → verifyParam 提交 hub 转发领取 -->
+<div class="modal-overlay" id="modal-claim">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title">手动领取活动套餐</div>
+    <div class="dialog-body">
+      <div class="dialog-help" id="claim-help">完成下方人机验证后自动提交领取。活动套餐列表为空时，也可直接输入活动 plan_id 领取。</div>
+      <div class="dialog-field">
+        <span class="dialog-label">账号</span>
+        <select class="input" id="claim-account"></select>
+      </div>
+      <div class="dialog-field">
+        <span class="dialog-label">活动套餐</span>
+        <select class="input" id="claim-plan"><option value="">自动选择（可领套餐中优先级最高）</option></select>
+        <input class="input" id="claim-plan-id" placeholder="或直接填活动 plan_id（如 zcode-v3-start-plan-xxxx）" style="margin-top:8px;font-size:12px">
+      </div>
+      <div id="claim-captcha-box" style="min-height:80px;margin:12px 0 4px;display:flex;align-items:center;justify-content:center"></div>
+      <div class="dialog-help" id="claim-status" style="min-height:18px"></div>
+    </div>
+    <div class="dialog-actions">
+      <button onclick="closeClaimModal()" class="dialog-btn">关闭</button>
+      <button onclick="submitManualClaim()" class="dialog-btn dialog-btn-primary" id="claim-submit">领取</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm modal -->
+<div class="modal-overlay" id="modal-confirm">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-title" id="confirm-title">确认</div>
+    <div id="confirm-body" class="dialog-help"></div>
+    <div class="dialog-actions">
+      <button onclick="closeModal('modal-confirm')" class="dialog-btn">取消</button>
+      <button onclick="_cb&&_cb()" class="dialog-btn dialog-btn-danger">确认</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="import-file" accept=".json" style="display:none" onchange="onImportFile(event)">
+
+<script src="/static/js/auth.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/toast.js?v={{APP_VERSION}}"></script>
+<script src="/static/js/header.js?v={{APP_VERSION}}"></script>
+<script>
+let allAccounts=[], curFilter='all', _cb=null, _editId='', _timer=null;
+const refreshing=new Set(), claiming=new Set();
+
+const STATUS_LABEL={active:'正常',exhausted:'用完',cooling:'限流',invalid:'异常',disabled:'禁用'};
+const NOTCH_COLORS=['var(--notch-1)','var(--notch-2)','var(--notch-3)','var(--notch-4)','var(--notch-5)','var(--notch-6)'];
+
+(async()=>{
+  renderAdminHeader();
+  const key=await adminKey.get();
+  if(!key)return location.href='/admin/login';
+  if(!isKeyVerified(key)&&!await verifyKey(ADMIN_API+'/verify',key).catch(()=>false))return location.href='/admin/login';
+  await load();
+  startPolling();
+})();
+
+function startPolling(){
+  if(_timer)clearInterval(_timer);
+  _timer=setInterval(()=>{ if(!document.hidden && !anyModalOpen()) load(true); },5000);
+}
+function anyModalOpen(){return!!document.querySelector('.modal-overlay.open');}
+
+async function load(silent){
+  try{
+    const d=await api('GET','/accounts');
+    allAccounts=d.accounts||[];
+    renderStats(d.stats||{});
+    renderFilters();
+    renderList();
+    document.getElementById('last-updated').textContent='更新于 '+new Date().toLocaleTimeString();
+  }catch(e){ if(!silent)showToast('加载失败: '+e.message,'error'); }
+}
+
+// 全量套餐（上游 plans 数组；旧数据回退单个 plan），entitlements 附带所属套餐信息
+function planList(a){
+  if(Array.isArray(a.plans)&&a.plans.length)return a.plans;
+  const p=a.plan;return (p&&Object.keys(p).length)?[p]:[];
+}
+function allEntitlements(a){
+  const out=[];
+  planList(a).forEach(pl=>{
+    const planEnds=Number((pl||{}).ends_at)||Number((pl||{}).expires_at)||0;
+    ((pl||{}).entitlements||[]).forEach(e=>{
+      out.push({...e,_planEnds:planEnds,_planName:(pl||{}).name||''});
+    });
+  });
+  return out;
+}
+
+// 提取账号中匹配 GLM-5.3-Flash（不区分大小写）的配额窗口键列表
+function renderStats(s){
+  set('s-total',s.total||0);
+  set('s-active',s.active||0);
+  set('s-exhausted',s.exhausted||0);
+  // 总额度（剩余）：累加全部 balances 桶的剩余量（与后端「所有桶都用完才算 exhausted」一致），
+  // 不再只锚定 GLM-5.3-Flash，避免 GLM-5.3 等窗口的余量被漏计。
+  // 同时按模型名分组累加，tooltip 展开各模型余量明细（模型增减自适应，不占版面）。
+  let totalRem=0;
+  const perModel={};
+  allAccounts.forEach(a=>{
+    const q=a.quota||{};
+    Object.keys(q).forEach(k=>{
+      const r=Number((q[k]||{}).remaining)||0;
+      totalRem+=r;
+      perModel[k]=(perModel[k]||0)+r;
+    });
+  });
+  set('s-quota',fmtNum(totalRem));
+  const detail=Object.keys(perModel).sort((a,b)=>perModel[b]-perModel[a])
+    .map(k=>`${k}：${fmtNum(perModel[k])}`).join('\n');
+  document.getElementById('s-quota').title=`精确剩余：${Math.round(totalRem).toLocaleString('zh-CN')} tokens · 全模型窗口实时可用余额（含日免费窗与活动赠送池）\n\n按模型明细：\n${detail}`;
+}
+
+function renderFilters(){
+  const counts={all:allAccounts.length,exhausted:0,disabled:0};
+  allAccounts.forEach(a=>{counts[a.status]=(counts[a.status]||0)+1;});
+  const chips=[['all','全部'],['exhausted','用完'],['disabled','禁用']];
+  document.getElementById('filter-bar').innerHTML=chips.map(([k,l])=>
+    `<button class="filter-chip${curFilter===k?' active':''}" onclick="setFilter('${k}')">${l}<span class="filter-chip-count">${counts[k]||0}</span></button>`
+  ).join('');
+}
+function setFilter(k){curFilter=k;renderFilters();renderList();}
+
+function renderList(){
+  const items=curFilter==='all'?allAccounts:allAccounts.filter(a=>a.status===curFilter);
+  document.getElementById('tbl-count').textContent=items.length;
+  const el=document.getElementById('acct-list');
+  if(!items.length){el.innerHTML='<div class="empty-state">暂无账号，点击右上角「新增」添加</div>';return;}
+  el.innerHTML=`<div class="acct-scroll"><div class="acct-table">
+    <div class="acct-head"><span>凭证 / 账号</span><span>可用状态</span><span>额度信息</span><span>最近请求</span><span>历史用量</span><span class="th-actions">操作</span></div>
+    ${items.map(rowHtml).join('')}
+  </div></div>`;
+}
+
+/* ── CPA-Manager-Plus 风格 6 列表格行 ── */
+function notchColor(id){
+  let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))>>>0;
+  return NOTCH_COLORS[h%NOTCH_COLORS.length];
+}
+function tierBadgeHtml(a){
+  const p=a.plan||{};
+  const s=String(p.show_name||p.plan_id||'').toLowerCase();
+  let label=esc(p.show_name||p.plan_id||''),cls='other';
+  if(s.includes('max')){label='Max';cls='max';}
+  else if(s.includes('pro')&&!s.includes('preview')){label='Pro';cls='pro';}
+  else if(s.includes('lite')){label='Lite';cls='lite';}
+  else if(s.includes('start')){label='Start';cls='trial';}
+  else if(s.includes('trial')||s.includes('体验')){label='Trial';cls='trial';}
+  return label?`<span class="tier-b ${cls}">${label}</span>`:'';
+}
+
+function credCell(a){
+  const isJwt=a.mode==='jwt';
+  return `<div class="acct-name-line"><span class="notch" style="background:${notchColor(a.id)}"></span><span class="acct-name">${esc(a.name)}</span>${tierBadgeHtml(a)}</div>
+    <div class="cred-sub"><span class="tok">${esc(a.token_masked)}</span><span>·</span><span>${esc(a.provider)} / ${isJwt?'JWT':'API Key'}</span></div>`;
+}
+
+function statusCell(a){
+  let sub='';
+  // 冷却倒计时（5xx 重试耗尽进入冷却；风控封禁走 disabled 徽章 + err 文案）
+  if(a.status==='cooling'&&Number(a.cooling_until)){
+    const left=Math.max(0,Math.round(Number(a.cooling_until)-Date.now()/1000));
+    if(left>0)sub=`<div class="cell-sub"><span class="cool-line" title="限流冷却，${fmtDur(left)}后自动恢复">❄ ${fmtDur(left)}恢复</span></div>`;
+  }
+  if(!sub){
+    // 套餐有效期（ends_at，unix 秒；expires_at 为旧兼容），统一短格式 MM-DD HH:MM
+    const planEnd=Math.max(0,...planList(a).map(pl=>Number(pl.ends_at)||Number(pl.expires_at)||0));
+    if(planEnd){
+      const days=Math.ceil((planEnd*1000-Date.now())/86400000);
+      sub=`<div class="cell-sub${days<=7?' warn-line':''}" title="当前套餐有效期">有效期 ${fmtDate(planEnd)}</div>`;
+    }
+  }
+  const claimBlocked=Number(a.claim_blocked_until)||0;
+  const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
+  const claimSub=claimLeft>0?`<div class="cell-sub" title="今日活动名额已满，${fmtDur(claimLeft)}后自动解除避让"><span style="color:var(--amber)">⏳ 领取避让 ${fmtDur(claimLeft)}</span></div>`:'';
+  const err=a.last_error?`<div class="cell-sub err-line" title="${esc(a.last_error)}">${esc(a.last_error.length>26?a.last_error.slice(0,26)+'…':a.last_error)}</div>`:'';
+  return `<span class="badge badge-${a.status}">${STATUS_LABEL[a.status]||a.status}</span>${sub}${claimSub}${err}`;
+}
+
+function tickbarHtml(a){
+  const r=(a.recent_results||[]).slice(-20);
+  if(!r.length)return '<div class="tickbar-empty">—</div>';
+  // 条目兼容两种形态：明细对象 {ok,at,detail}（新）与纯布尔（历史遗留）；
+  // 悬停明细用 data-tip 交给全局浮层渲染（即时、可贴边翻转），不用原生 title
+  return `<div class="tickbar" aria-label="最近 ${r.length} 次请求结果，悬停查看明细">${r.map(e=>{
+    const ok=typeof e==='object'?e.ok:!!e;
+    const head=`${ok?'✓ 成功':'✗ 失败'}`;
+    const time=typeof e==='object'?fmtDateSec(e.at):'历史记录';
+    const detail=typeof e==='object'?(e.detail||''):'无明细';
+    return `<i class="${ok?'ok':'bad'}" data-tip="${esc(`${head} · ${time}\n${detail}`)}"></i>`;
+  }).join('')}</div>`;
+}
+
+function usageCell(a){
+  const used=a.use_count||0, fail=a.fail_count||0, strikes=a.risk_strikes||0;
+  // 成功率=成功/(成功+失败)：fail_count 是历史累计（可能大于 use_count），不能用差值公式
+  const rate=used>0||fail>0?Math.round(used/(used+fail)*100):null;
+  return `<div class="usage-mini">
+    <div class="usage-line"><span class="u-label">调用</span><span class="u-val">${used}</span><span class="u-label">成功率</span><span class="u-val ${rate===null?'':(rate>=90?'u-ok':'u-warn')}">${rate===null?'—':rate+'%'}</span></div>
+    <div class="usage-line"><span class="u-label">失败</span><span class="u-val ${fail>0?'u-bad':''}">${fail}</span><span class="u-label">风控</span><span class="u-val ${strikes>0?'u-bad':''}">${strikes}</span></div>
+  </div>`;
+}
+
+function actionsCell(a){
+  const isJwt=a.mode==='jwt';
+  const loading=refreshing.has(a.id);
+  const enabled=a.enabled!==false&&a.status!=='disabled';
+  const claimBlocked=Number(a.claim_blocked_until)||0;
+  const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
+  let claimBtnTitle='自动领取赠送额度';
+  let claimBtnStyle='';
+  if(claimLeft>0){
+    claimBtnTitle=`今日名额已满，避让中（${fmtDur(claimLeft)}后可重试）`;
+    claimBtnStyle='opacity:0.4;';
+  } else if(!hasUnclaimedActivity(a)&&((a.plans&&a.plans.length)||(a.plan_slots&&a.plan_slots.length)||a.quota)){
+    const hasPlans=(a.claimable_plans||[]).length>0;
+    claimBtnTitle=hasPlans?'已持有当前活动套餐，无需重复领取':'当前暂无待领取的活动套餐';
+    claimBtnStyle='opacity:0.45;';
+  }
+    const defaultPid = (a.claimable_plans && a.claimable_plans[0] && a.claimable_plans[0].plan_id) || '';
+    return `<div class="acct-actions">
+    ${isJwt?`<button onclick="refreshOne('${a.id}')" class="row-icon-btn${loading?' is-loading':''}" title="刷新额度"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg></button>
+    <button onclick="claimOne('${a.id}')" class="row-icon-btn${claiming.has(a.id)?' is-loading':''}" style="${claimBtnStyle}" title="${claimBtnTitle}"><svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg></button>
+    <button onclick="openClaimModal('${a.id}','${esc(defaultPid)}')" class="row-icon-btn" title="手动领取活动套餐（浏览器过验证码）"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="m9 12 2 2 4-4"/></svg></button>`:''}
+    <button onclick="openEdit('${a.id}')" class="row-icon-btn" title="编辑"><svg viewBox="0 0 24 24"><path d="m4 20 4.5-1 9.5-9.5-3.5-3.5L5 15.5z"/><path d="m13.5 5.5 3.5 3.5"/></svg></button>
+    <button onclick="doDelete('${a.id}')" class="row-icon-btn row-icon-danger" title="删除"><svg viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M9 7V4h6v3"/><path d="M8 10v7"/><path d="M12 10v7"/><path d="M16 10v7"/><path d="M7 7l1 13h8l1-13"/></svg></button>
+    <label class="switch" title="${enabled?'禁用账号':'启用账号'}"><input type="checkbox" ${enabled?'checked':''} onchange="toggleEnabled('${a.id}',${!enabled})"><span class="switch-slider"></span></label>
+  </div>`;
+}
+
+function rowHtml(a){
+  const isDisabled=a.status==='disabled';
+  return `<div class="acct-row${isDisabled?' is-disabled':''}" data-id="${a.id}">
+    <div class="cell cred">${credCell(a)}</div>
+    <div class="cell status">${statusCell(a)}</div>
+    <div class="cell quota">${quotaCell(a)}</div>
+    <div class="cell recent"><div class="recent-ts">${fmtDateSec(a.last_used_at)}</div>${tickbarHtml(a)}</div>
+    <div class="cell usage">${usageCell(a)}</div>
+    <div class="cell actions">${actionsCell(a)}</div>
+  </div>`;
+}
+
+function grantLabel(p) {
+  const items = p.grants || [];
+  if (items.length && typeof items[0] === 'object') {
+    const g = items[0];
+    const periodStr = g.period === 'one_time' ? '一次性' : (g.period ? '每' + g.period : '');
+    return `${g.name || '额度'} ${fmtNum(g.units)} · ${periodStr}`;
+  }
+  if (items.length && typeof items[0] === 'string') return items[0];
+  return '';
+}
+
+function claimStripHtml(a) {
+  const plans = a.claimable_plans || [];
+  if (!plans.length) return '';
+  const held = getHeldPlanIds(a);
+  const unheld = plans.filter(p => {
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    return pid && !held.has(pid);
+  });
+  if (!unheld.length) return '';
+  return unheld.map(p => {
+    const label = p.name || p.plan_id || '节日活动套餐';
+    const grants = grantLabel(p);
+    const targetPid = p.plan_id || '';
+    return `<div class="claim-strip" title="${esc(p.description || label)}">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg>
+      <div class="claim-info">
+        <span class="claim-name">${esc(label)}</span>
+        ${grants ? `<span class="claim-grants">${esc(grants)}</span>` : ''}
+      </div>
+      <button class="btn-claim" onclick="openClaimModal('${a.id}','${esc(targetPid)}')">领取</button>
+    </div>`;
+  }).join('');
+}
+
+function expireInfo(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  const hasTime = str.length >= 16;
+  const ms = new Date(hasTime ? str.replace(' ', 'T') : str + 'T23:59:59') - Date.now();
+  if (isNaN(ms)) return { text: str, soon: false, warn: false };
+  const soon = ms <= 5 * 86400000;
+  const warn = ms <= 7 * 86400000;
+  return { text: soon && hasTime ? str : str.slice(0, 10), soon, warn };
+}
+
+function sortPlanItems(items) {
+  return (items || []).slice().sort((a, b) => {
+    const na = String(a.name || '').toLowerCase();
+    const nb = String(b.name || '').toLowerCase();
+    const pa = na.includes('flash') ? 0 : (na.includes('glm') ? 1 : 2);
+    const pb = nb.includes('flash') ? 0 : (nb.includes('glm') ? 1 : 2);
+    return pa - pb || na.localeCompare(nb);
+  });
+}
+
+// 额度条三色：剩余<=0 或 <15% 红，<50% 琥珀，其余薄荷（对齐 zcode-switch 直观余量语义）
+function quotaRowColor(rem, remPct) {
+  return (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
+}
+
+function balRowHtml(it) {
+  const tot = Number(it.total) || 0;
+  const rem = Number(it.remaining) || 0;
+  const used = Number(it.used) || 0;
+  const remPct = tot > 0 ? Math.max(0, Math.min(100, (rem / tot) * 100)) : 0;
+  const usedPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
+  const color = quotaRowColor(rem, remPct);
+  const exp = it.expires_at ? String(it.expires_at) : '';
+  const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${Math.round(usedPct)}%已用)`;
+  return `<div class="quota-card-item">
+    <div class="qci-top">
+      <span class="qci-name" title="${esc(it.name)}">${esc(shortModel(it.name))}</span>
+      <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
+    </div>
+    <div class="qci-track" title="${esc(rawTip)}">
+      <div class="qci-fill" style="width:${remPct.toFixed(1)}%;background:${color}"></div>
+    </div>
+    <div class="qci-btm" title="${esc(rawTip)}">
+      <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
+      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.length > 11 ? exp.slice(-11) : exp)}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function planGroupHtml(p) {
+  const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
+  const exp = expireInfo(p.expire);
+  const now = Date.now() / 1000;
+  // 额度生效期：起点用后端归一化的 quota_start（entitlements.effective_at，夜间活动晚于套餐开始），
+  // 终点用套餐 expire。统一短格式（MM-DD HH:MM），不再用 starts_at 误导「额度即刻可用」。
+  const qStartTs = Number(p.quota_start_ts) || 0;
+  const qStart = p.quota_start || '';
+  const notYet = qStartTs > 0 && qStartTs > now;   // 额度尚未生效
+  const rangeTip = `额度生效期 ${qStart || '—'} ~ ${exp ? exp.text : '—'}${notYet ? `（${qStart} 起生效）` : ''}`;
+  const rangeLabel = qStart
+    ? `${qStart} ~ ${exp ? exp.text : ''}`
+    : (exp ? `至 ${exp.text}` : '');
+  const items = sortPlanItems(p.items || []);
+  const rows = items.map(balRowHtml).join('');
+  // 授予额度（entitlements）但 balances 未结算：额度尚未到 effective_at。
+  // 统一走 quota-card-item.is-pending：灰色系斜纹条 + 「未生效」标签 + 授予 token 量 + 生效时间。
+  const pendingRows = (p.pending || []).map(e => {
+    const eff = Number(e.effective_at) || 0;
+    const tip = `${esc(p.name || '')} · ${esc(e.name)} 授予 ${Math.round(e.grant_units).toLocaleString('zh-CN')} tokens${eff ? `，${fmtDate(eff)} 起生效` : ''}`;
+    return `<div class="quota-card-item is-pending">
+      <div class="qci-top">
+        <span class="qci-name" title="${tip}">${esc(shortModel(e.name))}</span>
+        <span class="qci-pct" style="color:var(--ink-mute)">未生效</span>
+      </div>
+      <div class="qci-track" title="${tip}">
+        <div class="qci-fill" style="width:100%;background:var(--ink-mute)"></div>
+      </div>
+      <div class="qci-btm" title="${tip}">
+        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
+        <span class="qci-exp">${eff ? `${fmtDate(eff)} 生效` : ''}</span>
+      </div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="plan-card">
+    <div class="plan-card-hd">
+      <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
+      ${rangeLabel ? `<span class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${notYet ? ' pending-line' : ''}" title="${esc(rangeTip)}">${esc(rangeLabel)}</span>` : ''}
+    </div>
+    <div class="plan-card-body">${rows}${pendingRows}</div>
+  </div>`;
+}
+
+function fallbackQuotaHtml(a) {
+  const q = a.quota || {};
+  const keys = Object.keys(q).sort((a, b) => {
+    const na = a.toLowerCase(), nb = b.toLowerCase();
+    const pa = na.includes('flash') ? 0 : (na.includes('glm') ? 1 : 2);
+    const pb = nb.includes('flash') ? 0 : (nb.includes('glm') ? 1 : 2);
+    return pa - pb || na.localeCompare(nb);
+  });
+  let rows = keys.map(k => {
+    const w = q[k] || {}; const rem = Number(w.remaining) || 0, tot = Number(w.total) || 0;
+    const remPct = tot > 0 ? Math.max(0, Math.min(100, (rem / tot) * 100)) : 0;
+    const color = quotaRowColor(rem, remPct);
+    const exp = Number(w.expires_at) || 0;
+    const rawTip = `${k}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens`;
+    return `<div class="quota-card-item">
+      <div class="qci-top">
+        <span class="qci-name" title="${esc(k)}">${esc(shortModel(k))}</span>
+        <span class="qci-pct" style="color:${color}">${Math.round(remPct)}% 剩余</span>
+      </div>
+      <div class="qci-track" title="${esc(rawTip)}">
+        <div class="qci-fill" style="width:${remPct.toFixed(1)}%;background:${color}"></div>
+      </div>
+      <div class="qci-btm" title="${esc(rawTip)}">
+        <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
+        ${exp ? `<span class="qci-exp" title="本窗口额度到期时间">至 ${fmtDate(exp)}</span>` : ''}
+      </div>
+    </div>`;
+  });
+  // 待生效活动套餐：灰色系斜纹条 + 「未生效」标签
+  const now = Date.now() / 1000;
+  const ents = allEntitlements(a);
+  ents.filter(e => Number(e.effective_at) > now).forEach(e => {
+    const eff = Number(e.effective_at) || 0;
+    const tip = `${esc(e._planName || '')} · ${fmtDate(eff)} 起生效${e._planEnds ? '，套餐 ' + fmtDate(e._planEnds) + ' 结束' : ''}`;
+    rows.push(`<div class="quota-card-item is-pending">
+      <div class="qci-top">
+        <span class="qci-name" title="${tip}">${esc(shortModel(e.show_name || '未生效'))}</span>
+        <span class="qci-pct" style="color:var(--ink-mute)">未生效</span>
+      </div>
+      <div class="qci-track" title="${tip}">
+        <div class="qci-fill" style="width:100%;background:var(--ink-mute)"></div>
+      </div>
+      <div class="qci-btm" title="${tip}">
+        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
+        <span class="qci-exp">${fmtDate(eff)} 生效</span>
+      </div>
+    </div>`);
+  });
+  if (!rows.length) {
+    if (a.mode !== 'jwt') return '<span class="quota-empty">—</span>';
+    return planList(a).length === 0
+      ? '<span class="quota-empty" title="上游 billing/current 返回空套餐列表：套餐已到期或未开通">无有效额度 · 套餐已到期</span>'
+      : '<span class="quota-empty">额度未获取，点上方「刷新额度」</span>';
+  }
+  return `<div class="plan-card"><div class="plan-card-body">${rows.join('')}</div></div>`;
+}
+
+function quotaCell(a) {
+  const strip = claimStripHtml(a);
+  const slots = a.plan_slots || [];
+  // 排序：已开始的按 starts_at 升序在前，未开始（starts_at > now）的放后面
+  const now = Date.now() / 1000;
+  const sorted = slots.slice().sort((x, y) => {
+    const sx = Number(x.starts_at) || 0, sy = Number(y.starts_at) || 0;
+    const px = sx > 0 && sx > now ? 1 : 0;   // 未开始 → 后置
+    const py = sy > 0 && sy > now ? 1 : 0;
+    if (px !== py) return px - py;
+    if (px === 0 && sx && sy) return sx - sy;  // 已开始的按开始时间升序
+    return 0;
+  });
+  let inner = '';
+  // slot 有 items（已结算）或有 pending（已授予待结算）均走 planGroupHtml，避免落入「额度未获取」兜底
+  const hasContent = s => ((s.items || []).length > 0) || ((s.pending || []).length > 0);
+  if (sorted.length >= 2) {
+    inner = sorted.map(planGroupHtml).join('');
+  } else if (sorted.length === 1 && hasContent(sorted[0])) {
+    inner = planGroupHtml(sorted[0]);
+  } else {
+    inner = fallbackQuotaHtml(a);
+  }
+  return `<div class="row-quota-slot">${strip}${inner}</div>`;
+}
+function shortModel(n){return String(n).replace(/^GLM[- ]?/i,'GLM-')||n;}
+/* M 缩写（百万 token，去除无意义尾零，保持紧凑自然） */
+function fmtNum(v){
+  const n=Number(v);if(!isFinite(n))return '—';
+  if(n===0)return '0 M';
+  const m=n/1e6;
+  if(Math.abs(n)>=1e4){
+    const s=m.toFixed(2);
+    return (s.indexOf('.')>=0?s.replace(/\.?0+$/,''):s)+' M';
+  }
+  const s=m.toFixed(4);
+  return (s.indexOf('.')>=0?s.replace(/\.?0+$/,''):s)+' M';
+}
+
+/* ── Actions ── */
+function openAdd(){
+  document.getElementById('add-tokens').value='';
+  switchAddTab('paste');
+  resetLoginPane();
+  openModal('modal-add');
+}
+async function doAdd(){
+  const tokens=document.getElementById('add-tokens').value;
+  const provider=document.getElementById('add-provider').value;
+  const list=tokens.split('\n').map(s=>s.trim()).filter(Boolean);
+  if(!list.length)return showToast('请输入至少一个 Token','error');
+  try{
+    const d=await api('POST','/accounts',{provider,tokens:list});
+    closeModal('modal-add');
+    showToast(`新增 ${d.count} 个账号`,'success');
+    load();
+  }catch(e){showToast('添加失败: '+e.message,'error');}
+}
+
+/* ── 授权登录 ── */
+let _loginTimer=null, _loginUrl='', _loginDeadline=0, _expireTimer=null;
+function switchAddTab(tab){
+  document.getElementById('tab-paste').classList.toggle('active',tab==='paste');
+  document.getElementById('tab-login').classList.toggle('active',tab==='login');
+  document.getElementById('add-pane-paste').style.display=tab==='paste'?'':'none';
+  document.getElementById('add-pane-login').style.display=tab==='login'?'':'none';
+  if(tab!=='login')stopLoginPoll();
+}
+function resetLoginPane(){
+  stopLoginPoll();
+  _loginUrl='';
+  document.getElementById('login-idle').style.display='';
+  document.getElementById('login-active').style.display='none';
+  document.getElementById('login-start-btn').disabled=false;
+  document.getElementById('login-label').value='';
+}
+async function startLogin(){
+  const btn=document.getElementById('login-start-btn');
+  btn.disabled=true;
+  try{
+    const label=document.getElementById('login-label').value.trim();
+    const d=await api('POST','/login/start',label?{label}:{});
+    _loginUrl=d.authorize_url;
+    _loginDeadline=Date.now()+(d.expires_in||300)*1000;
+    document.getElementById('login-url').value=_loginUrl;
+    document.getElementById('login-idle').style.display='none';
+    document.getElementById('login-active').style.display='';
+    setLoginStatus('等待授权中…',false);
+    _expireTimer=setInterval(()=>{
+      const left=Math.max(0,Math.round((_loginDeadline-Date.now())/1000));
+      const cur=document.getElementById('login-status');
+      if(cur&&!cur.dataset.err)cur.textContent=left>0?`等待授权中… 链接 ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`:'链接已过期，请关闭后重新生成';
+      if(left<=0&&_expireTimer){clearInterval(_expireTimer);_expireTimer=null;}
+    },1000);
+    try{window.open(_loginUrl,'_blank','noopener');}catch{}
+    pollLogin(d.flow_id);
+  }catch(e){
+    showToast('发起登录失败: '+e.message,'error');
+    btn.disabled=false;
+  }
+}
+	function pollLogin(flowId){
+	  let n=0, inflight=false;
+	  _loginTimer=setInterval(async()=>{
+	    if(inflight)return;
+	    if(++n>200){stopLoginPoll();setLoginStatus('登录超时，请重新生成链接',true);return;}
+	    inflight=true;
+	    try{
+	      const d=await api('GET','/login/poll/'+flowId);
+	      if(!_loginTimer)return;
+	      if(d.status==='ready'){
+	        stopLoginPoll();
+	        showToast('登录成功，已导入账号池：'+(d.account&&d.account.name||''),'success');
+	        closeModal('modal-add');
+	        load();
+	      }else if(d.status==='failed'){
+	        stopLoginPoll();
+	        setLoginStatus(d.message||'授权失败或被拒绝',true);
+	      }else if(d.status==='expired'){
+	        stopLoginPoll();
+	        setLoginStatus('链接已过期，请重新生成',true);
+	      }
+	    }catch(e){/* 单次网络抖动继续轮询 */}
+	    finally{inflight=false;}
+	  },2500);
+	}
+function setLoginStatus(text,isErr){
+  const el=document.getElementById('login-status');
+  el.textContent=text;
+  el.dataset.err=isErr?'1':'';
+  el.classList.toggle('live-dot',!isErr);
+  el.style.color=isErr?'var(--red)':'';
+}
+function stopLoginPoll(){if(_loginTimer){clearInterval(_loginTimer);_loginTimer=null;}if(_expireTimer){clearInterval(_expireTimer);_expireTimer=null;}}
+function cancelLogin(){stopLoginPoll();closeModal('modal-add');}
+function copyLoginUrl(){navigator.clipboard.writeText(_loginUrl).then(()=>showToast('已复制','success')).catch(()=>showToast('复制失败','error'));}
+function openLoginUrl(){if(_loginUrl)window.open(_loginUrl,'_blank','noopener');}
+
+function openEdit(id){
+  const a=allAccounts.find(x=>x.id===id);if(!a)return;
+  _editId=id;
+  document.getElementById('edit-name').value=a.name;
+  document.getElementById('edit-token').value='';
+  openModal('modal-edit');
+}
+async function doEdit(){
+  const name=document.getElementById('edit-name').value.trim();
+  const token=document.getElementById('edit-token').value.trim();
+  try{
+    await api('PUT','/accounts/'+_editId,{name,...(token&&{token})});
+    closeModal('modal-edit');showToast('已保存','success');load();
+  }catch(e){showToast('保存失败: '+e.message,'error');}
+}
+
+function doDelete(id){
+  const a=allAccounts.find(x=>x.id===id);
+  openConfirm('删除账号',`确认删除 <code>${esc(a?a.token_masked:id)}</code>？此操作不可撤销。`,async()=>{
+    try{await api('DELETE','/accounts',[id]);showToast('已删除','success');load();}
+    catch(e){showToast('删除失败: '+e.message,'error');}
+  });
+}
+
+async function toggleEnabled(id,enable){
+  try{await api('POST','/accounts/'+id+'/enabled',{enabled:enable});load();}
+  catch(e){showToast('操作失败: '+e.message,'error');}
+}
+
+async function refreshOne(id){
+  if(refreshing.has(id))return;
+  refreshing.add(id);renderList();
+  try{await api('POST','/accounts/'+id+'/refresh');showToast('额度已刷新','success');}
+  catch(e){showToast('刷新失败: '+e.message,'error');}
+  finally{refreshing.delete(id);await load();}
+}
+let refreshAllRunning = false;
+let refreshAllCooldownUntil = 0;
+let refreshAllTicker = null;
+
+async function refreshAll(){
+  if(refreshAllRunning) return;
+  const now = Date.now();
+  if(now < refreshAllCooldownUntil){
+    const left = Math.ceil((refreshAllCooldownUntil - now) / 1000);
+    showToast(`请等待刷新冷却（${left}秒）后重试`, 'info');
+    return;
+  }
+  const targets = allAccounts.filter(a => a.mode === 'jwt' && a.enabled !== false && a.status !== 'disabled');
+  if(!targets.length){
+    showToast('暂无有效的 JWT 账号可刷新', 'info');
+    return;
+  }
+
+  const btn = document.getElementById('btn-refresh-all');
+  const progWrap = document.getElementById('batch-progress-wrap');
+  const progMsg = document.getElementById('batch-progress-msg');
+  const progCount = document.getElementById('batch-progress-count');
+  const progFill = document.getElementById('batch-progress-fill');
+
+  refreshAllRunning = true;
+  if(btn) btn.disabled = true;
+  if(progWrap){
+    progWrap.style.display = 'block';
+    progMsg.textContent = '准备刷新全部账号额度与活动…';
+    progCount.textContent = `0 / ${targets.length} (0%)`;
+    progFill.style.width = '0%';
+  }
+  showToast('开始一体化刷新额度与待领活动…', 'info');
+
+  let okCount = 0, failCount = 0;
+  const total = targets.length;
+
+  for(let i = 0; i < total; i++){
+    const acc = targets[i];
+    refreshing.add(acc.id);
+    renderList();
+    if(btn){
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新中 (${i + 1}/${total})…`;
+    }
+    const pct = Math.round((i / total) * 100);
+    if(progMsg) progMsg.textContent = `正在刷新「${acc.name}」额度与待领活动…`;
+    if(progCount) progCount.textContent = `${i} / ${total} (${pct}%)`;
+    if(progFill) progFill.style.width = `${pct}%`;
+
+    try{
+      const res = await api('POST', `/accounts/${acc.id}/refresh`);
+      if(res && res.ok) okCount++;
+      else failCount++;
+    }catch(e){
+      failCount++;
+    }finally{
+      refreshing.delete(acc.id);
+      await load(true);
+    }
+  }
+
+  if(progMsg) progMsg.textContent = `刷新完成：成功 ${okCount}，失败 ${failCount}`;
+  if(progCount) progCount.textContent = `${total} / ${total} (100%)`;
+  if(progFill) progFill.style.width = '100%';
+  setTimeout(() => {
+    if(progWrap) progWrap.style.display = 'none';
+  }, 1000);
+
+  refreshAllRunning = false;
+  refreshAllCooldownUntil = Date.now() + 60000;
+  startRefreshAllTicker();
+  showToast(`全部刷新完成：成功 ${okCount}，失败 ${failCount}`, okCount ? 'success' : 'error');
+}
+
+function startRefreshAllTicker(){
+  if(refreshAllTicker) clearInterval(refreshAllTicker);
+  const btn = document.getElementById('btn-refresh-all');
+  refreshAllTicker = setInterval(() => {
+    const left = Math.ceil((refreshAllCooldownUntil - Date.now()) / 1000);
+    if(left > 0){
+      if(btn){
+        btn.disabled = true;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新额度 (${left}s)`;
+      }
+    }else{
+      clearInterval(refreshAllTicker);
+      refreshAllTicker = null;
+      if(btn){
+        btn.disabled = false;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 刷新额度`;
+      }
+    }
+  }, 1000);
+}
+
+/* ── 额度领取 ── */
+function getHeldPlanIds(a){
+  const held = new Set();
+  (a.plans || []).forEach(p => {
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    if(pid) held.add(pid);
+  });
+  (a.plan_slots || []).forEach(s => {
+    const pid = String(s.pid || '').toLowerCase().trim();
+    if(pid && pid !== 'default') held.add(pid);
+  });
+  return held;
+}
+
+function hasUnclaimedActivity(a){
+  // 检查账号是否有尚未领取的待领活动（只信本号 preview 结果 claimable_plans，不推断池内活动）
+  const held = getHeldPlanIds(a);
+  const claimable = a.claimable_plans || [];
+  for(const p of claimable){
+    const pid = String(p.plan_id || p.planId || '').toLowerCase().trim();
+    if(pid && !held.has(pid)) return true;
+  }
+  return false;
+}
+
+function claimToast(o){
+  if(o.skipped) {
+    showToast(`「${o.account_name}」${o.message || '已跳过'}`, 'info');
+  } else if(o.ok) {
+    showToast(`「${o.account_name}」已领取「${o.plan_name || o.plan_id}」`, 'success');
+  } else {
+    let msg = o.message || '';
+    if(o.next_at && o.next_at > Date.now()){
+      msg += '（名额约 ' + fmtDur((o.next_at - Date.now()) / 1000) + ' 后恢复）';
+    }
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过') || msg.includes('已持有')){
+      showToast(`「${o.account_name}」${msg}`, 'info');
+    } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
+      showToast(`「${o.account_name}」触发上游机房风控(3012)，可点击右侧盾牌手动过验证`, 'info');
+    } else {
+      showToast(`「${o.account_name}」领取失败：${msg || '未知错误'}`, 'error');
+    }
+  }
+}
+
+async function claimOne(id){
+  if(claiming.has(id)) return;
+  const acc = allAccounts.find(a => a.id === id);
+  if(acc && !hasUnclaimedActivity(acc)){
+    const hasPlans = (acc.claimable_plans || []).length > 0;
+    if(hasPlans){
+      showToast(`「${acc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      return;
+    } else if((acc.plans && acc.plans.length > 0) || (acc.plan_slots && acc.plan_slots.length > 0) || acc.quota){
+      showToast(`「${acc.name}」当前暂无待领取的活动套餐`, 'info');
+      return;
+    }
+  }
+  claiming.add(id);
+  renderList();
+  try{
+    const d = await api('POST', '/claim', { account_ids: [id] });
+    (d.outcomes || []).forEach(claimToast);
+  }catch(e){
+    const msg = e.message || '';
+    if(msg.includes('没有待领取') || msg.includes('无可领') || msg.includes('已领取过') || msg.includes('已经领取过') || msg.includes('已持有')){
+      showToast(`「${acc ? acc.name : id}」${msg}`, 'info');
+    } else if(msg.includes('3012') || msg.includes('机房环境被上游风控拦截')){
+      showToast(`「${acc ? acc.name : id}」触发上游机房风控(3012)，可点击右侧盾牌手动过验证`, 'info');
+    } else {
+      showToast('领取失败: ' + msg, 'error');
+    }
+  }finally{
+    claiming.delete(id);
+    await load();
+  }
+}
+
+let claimAllRunning = false;
+async function claimAll(){
+  if(claimAllRunning) return;
+  const btn = document.getElementById('btn-claim-all');
+  if(btn && btn.disabled) return;
+
+  const jwtAccounts = allAccounts.filter(a => a.mode === 'jwt' && a.enabled !== false && a.status !== 'disabled');
+  if(!jwtAccounts.length){
+    showToast('暂无有效的 JWT 账号', 'info');
+    return;
+  }
+
+  // 核心：判断账户是否已经领取过这个活动，如果已领就跳过，只领取还没领取的账户
+  const pendingAccounts = [];
+  const alreadyClaimedAccounts = [];
+
+  jwtAccounts.forEach(a => {
+    if(hasUnclaimedActivity(a)){
+      pendingAccounts.push(a);
+    } else {
+      alreadyClaimedAccounts.push(a);
+    }
+  });
+
+  if(!pendingAccounts.length){
+    showToast(`所有账号（共 ${jwtAccounts.length} 个）均已领取过活动或无可领活动，已自动跳过`, 'info');
+    return;
+  }
+
+  const progWrap = document.getElementById('batch-progress-wrap');
+  const progMsg = document.getElementById('batch-progress-msg');
+  const progCount = document.getElementById('batch-progress-count');
+  const progFill = document.getElementById('batch-progress-fill');
+
+  claimAllRunning = true;
+  if(btn) btn.disabled = true;
+  if(progWrap){
+    progWrap.style.display = 'block';
+    progMsg.textContent = `准备为 ${pendingAccounts.length} 个未领账号领取活动（已跳过 ${alreadyClaimedAccounts.length} 个已领账号）…`;
+    progCount.textContent = `0 / ${pendingAccounts.length} (0%)`;
+    progFill.style.width = '0%';
+  }
+  showToast(`开始为 ${pendingAccounts.length} 个未领取账号领取活动（已跳过 ${alreadyClaimedAccounts.length} 个已领账号）…`, 'info');
+
+  let okCount = 0, failCount = 0, skipCount = alreadyClaimedAccounts.length;
+  const total = pendingAccounts.length;
+
+  for(let i = 0; i < total; i++){
+    const acc = pendingAccounts[i];
+    claiming.add(acc.id);
+    renderList();
+    if(btn){
+      btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" style="animation:spin .85s linear infinite"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg> 领取中 (${i + 1}/${total})…`;
+    }
+    const pct = Math.round((i / total) * 100);
+    if(progMsg) progMsg.textContent = `正在为「${acc.name}」求解验证码并领取活动…`;
+    if(progCount) progCount.textContent = `${i} / ${total} (${pct}%)`;
+    if(progFill) progFill.style.width = `${pct}%`;
+
+    try{
+      const d = await api('POST', '/claim', { account_ids: [acc.id] });
+      (d.outcomes || []).forEach(o => {
+        claimToast(o);
+        if(o.skipped) skipCount++;
+        else if(o.ok) okCount++;
+        else failCount++;
+      });
+    }catch(e){
+      failCount++;
+      showToast(`「${acc.name}」领取异常: ` + e.message, 'error');
+    }finally{
+      claiming.delete(acc.id);
+      await load(true);
+    }
+  }
+
+  if(progMsg) progMsg.textContent = `一键领取完成：成功 ${okCount}，已跳过 ${skipCount}，失败 ${failCount}`;
+  if(progCount) progCount.textContent = `${total} / ${total} (100%)`;
+  if(progFill) progFill.style.width = '100%';
+  setTimeout(() => {
+    if(progWrap) progWrap.style.display = 'none';
+  }, 1000);
+
+  claimAllRunning = false;
+  if(btn){
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C11 3 12 8 12 8s1-5 4.5-5a2.5 2.5 0 0 1 0 5"/></svg> 一键领取`;
+  }
+  showToast(`一键领取完成：成功 ${okCount}，已跳过 ${skipCount}，失败 ${failCount}`, failCount === 0 ? 'success' : 'error');
+}
+
+/* ── 手动领取：浏览器内过阿里滑块 → verifyParam 提交 hub 转发 ── */
+let claimSdkLoaded=false, claimVerifyParam='', claimCfgRegion='';
+function claimStatus(msg){document.getElementById('claim-status').textContent=msg||'';}
+function setClaimBusy(b){document.getElementById('claim-submit').disabled=b;
+  document.getElementById('claim-submit').textContent=b?'提交中…':'领取';}
+
+async function openClaimModal(id, targetPlanId){
+  const jwtAll=allAccounts.filter(a=>a.mode==='jwt');
+  if(!jwtAll.length){showToast('没有可领取的 JWT 账号','info');return;}
+  const sel=document.getElementById('claim-account');
+  sel.innerHTML=jwtAll.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('');
+  if(id)sel.value=id;
+
+  const curAcc=allAccounts.find(a=>a.id===sel.value);
+  if(curAcc){
+    const held = getHeldPlanIds(curAcc);
+    const targetNorm = String(targetPlanId || '').toLowerCase().trim();
+    if(targetNorm && held.has(targetNorm)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      return;
+    }
+    if(!targetNorm && !hasUnclaimedActivity(curAcc)){
+      const hasPlans = (curAcc.claimable_plans || []).length > 0;
+      if(hasPlans || (curAcc.plans && curAcc.plans.length > 0)){
+        showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+        return;
+      }
+    }
+  }
+
+  sel.onchange=()=>{
+    claimVerifyParam='';
+    const accNow = allAccounts.find(a=>a.id===sel.value);
+    if(accNow && !hasUnclaimedActivity(accNow)){
+      claimStatus('「' + accNow.name + '」已持有当前活动套餐，无需重复领取');
+      claimStatusColor(true);
+      const box=document.getElementById('claim-captcha-box');
+      if(box) box.innerHTML='<span class="dialog-help" style="color:var(--mint, #4ade80)">账号已持有该活动套餐，无需验证</span>';
+      return;
+    }
+    claimStatus('账号已切换，请完成人机验证');
+    initClaimCaptcha();
+    loadClaimPlans(targetPlanId);
+  };
+  document.getElementById('claim-plan-id').value=targetPlanId||'';
+  claimVerifyParam='';
+  claimStatus('');
+  setClaimBusy(false);
+  openModal('modal-claim');
+  await loadClaimPlans(targetPlanId);
+  initClaimCaptcha();
+}
+
+async function loadClaimPlans(targetPlanId){
+  const sel=document.getElementById('claim-plan');
+  const acctId=document.getElementById('claim-account').value;
+  const curAcc=allAccounts.find(a=>a.id===acctId);
+  const dedupMap=new Map();
+  [...((curAcc&&curAcc.claimable_plans)||[])].forEach(p=>{
+    const pid=String(p.plan_id||p.planId||'').trim();
+    if(pid && !dedupMap.has(pid.toLowerCase())) dedupMap.set(pid.toLowerCase(), p);
+  });
+
+  function renderOpts(plans){
+    if(!plans.length){
+      sel.innerHTML='<option value="">自动选择</option><option value="" disabled>（当前无可领活动套餐）</option>';
+      return;
+    }
+    const held = curAcc ? getHeldPlanIds(curAcc) : new Set();
+    sel.innerHTML='<option value="">自动选择（可领套餐中优先级最高）</option>'+
+      plans.map(p=>{
+        const pid=p.plan_id||p.planId;
+        const isHeld=held.has(String(pid).toLowerCase());
+        const tag=isHeld?' [已持有]':' [推荐可领]';
+        const isSel=(targetPlanId===pid)||(!targetPlanId && !isHeld);
+        return `<option value="${esc(pid)}"${isSel?' selected':''}>${esc(p.name||pid)}${tag}</option>`;
+      }).join('');
+  }
+
+  const initialList = Array.from(dedupMap.values());
+  initialList.sort((a,b)=>(b.priority||0)-(a.priority||0));
+  renderOpts(initialList);
+
+  try{
+    const d=await api('GET','/claim/preview?account_id='+encodeURIComponent(acctId));
+    const item=(d.preview||[])[0]||{};
+    const serverPlans=item.plans||[];
+    if(item.error)claimStatus('套餐提示：'+item.error);
+    serverPlans.forEach(p=>{
+      const pid=String(p.plan_id||p.planId||'').trim();
+      if(pid && !dedupMap.has(pid.toLowerCase())) dedupMap.set(pid.toLowerCase(), p);
+    });
+    const finalPlans=Array.from(dedupMap.values());
+    finalPlans.sort((a,b)=>(b.priority||0)-(a.priority||0));
+    renderOpts(finalPlans);
+  }catch(e){
+    // 已由本地候选渲染兜底
+  }
+}
+
+async function loadCaptchaSdk(){
+  if(claimSdkLoaded&&typeof window.initAliyunCaptcha==='function')return;
+  await new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js';
+    s.onload=res;s.onerror=()=>rej(new Error('验证码 SDK 加载失败'));
+    document.head.appendChild(s);
+  });
+  claimSdkLoaded=true;
+}
+
+async function initClaimCaptcha(){
+  const box=document.getElementById('claim-captcha-box');
+  box.innerHTML='<span class="dialog-help">验证码加载中…</span>';
+  try{
+    const cfg=await api('GET','/claim/captcha-config');
+    if(cfg.enabled===false||!cfg.scene_id)throw new Error('验证码未启用');
+    claimCfgRegion=cfg.region||'';
+    await loadCaptchaSdk();
+    box.innerHTML='<div id="claim-cap-holder"></div><button id="claim-cap-btn" type="button" style="display:none"></button>';
+    window.AliyunCaptchaConfig={region:cfg.region,prefix:cfg.prefix};
+    window.initAliyunCaptcha({
+      SceneId:cfg.scene_id, mode:'popup', language:'zh-CN', showErrorTip:false,
+      element:'#claim-cap-holder', button:'#claim-cap-btn',
+      getInstance:(inst)=>{try{inst.startTracelessVerification&&inst.startTracelessVerification();}catch(e){}},
+      success:(param)=>{
+        claimVerifyParam=typeof param==='string'?param:(param&&param.captchaVerifyParam)||'';
+        claimStatus('✓ 人机验证已通过，正在自动提交领取…');
+        claimStatusColor(true);
+        // 对齐 zcode-switch：仅在弹窗打开且未在提交中时自动提交一次
+        setTimeout(()=>{
+          const modal=document.getElementById('modal-claim');
+          if(modal && modal.classList.contains('open') && claimVerifyParam && !claimSubmitting){
+            submitManualClaim();
+          }
+        }, 120);
+      },
+      fail:(p)=>{claimStatus('无感验证未通过，已弹出交互验证，请完成滑块');claimStatusColor(false);},
+      onError:()=>{claimStatus('验证码出错，请重试');claimStatusColor(false);},
+    });
+    claimStatus('请完成人机验证（无感通过或滑块）');
+    claimStatusColor(false);
+  }catch(e){
+    box.innerHTML='';
+    claimStatus('验证码初始化失败：'+e.message);
+    claimStatusColor(false);
+  }
+}
+function claimStatusColor(ok){
+  const el=document.getElementById('claim-status');
+  el.style.color=ok?'var(--mint, #4ade80)':'';
+}
+
+let claimSubmitting=false;
+async function submitManualClaim(){
+  if(claimSubmitting)return;
+  const account_id=document.getElementById('claim-account').value;
+  const curAcc=allAccounts.find(a=>a.id===account_id);
+  const plan_sel=document.getElementById('claim-plan').value;
+  const plan_manual=document.getElementById('claim-plan-id').value.trim();
+  const targetPid = (plan_manual || plan_sel || '').toLowerCase().trim();
+  if(curAcc){
+    const held = getHeldPlanIds(curAcc);
+    if(targetPid && held.has(targetPid)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      closeClaimModal();
+      return;
+    }
+    if(!targetPid && !hasUnclaimedActivity(curAcc)){
+      showToast(`「${curAcc.name}」已持有该活动套餐，无需重复领取`, 'info');
+      closeClaimModal();
+      return;
+    }
+  }
+  if(!claimVerifyParam){
+    claimStatus('请先完成人机验证');claimStatusColor(false);return;
+  }
+  claimSubmitting=true;
+  setClaimBusy(true);
+  try{
+    const d=await api('POST','/claim/manual',{
+      account_id,
+      captcha_verify_param:claimVerifyParam,
+      captcha_region:claimCfgRegion||undefined,
+      plan_id:plan_manual||plan_sel||undefined,
+    });
+    claimVerifyParam='';
+    d.outcomes.forEach(claimToast);
+    if(d.summary.ok){
+      closeClaimModal();
+    } else {
+      claimStatus('领取失败：'+(d.outcomes[0]||{}).message+'，可重做验证再试');
+      claimStatusColor(false);
+      initClaimCaptcha();
+    }
+  }catch(e){
+    claimVerifyParam='';
+    claimStatus('提交失败：'+e.message);
+    claimStatusColor(false);
+  }finally{
+    claimSubmitting=false;
+    setClaimBusy(false);
+    await load();
+  }
+}
+function closeClaimModal(){
+  closeModal('modal-claim');
+  claimVerifyParam='';
+  claimSubmitting=false;
+  const box=document.getElementById('claim-captcha-box');
+  if(box) box.innerHTML='';
+  try{window.AliyunCaptchaConfig=undefined;}catch(e){}
+}
+
+async function doExport(){
+  try{
+    const d=await api('GET','/export');
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:'application/json'}));
+    a.download='zcode-accounts.json';a.click();
+  }catch(e){showToast('导出失败: '+e.message,'error');}
+}
+function openImport(){document.getElementById('import-file').click();}
+async function onImportFile(ev){
+  const file=ev.target.files?.[0];if(!file)return;
+  try{
+    const payload=JSON.parse(await file.text());
+    const d=await api('POST','/import',payload);
+    showToast(`导入 ${d.count} 个账号`,'success');load();
+  }catch(e){showToast('导入失败: '+e.message,'error');}
+  ev.target.value='';
+}
+
+/* ── Helpers ── */
+function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmtDate(d){if(!d)return'—';const dt=new Date(Number(d)*1000);if(isNaN(dt.getTime()))return'—';const M=String(dt.getMonth()+1).padStart(2,'0'),D=String(dt.getDate()).padStart(2,'0'),h=String(dt.getHours()).padStart(2,'0'),m=String(dt.getMinutes()).padStart(2,'0');return `${M}-${D} ${h}:${m}`;}
+function fmtDateSec(d){if(!d)return'—';const dt=new Date(d*1000);return isNaN(dt)?'—':dt.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function fmtDur(s){s=Math.max(0,Math.round(s));if(s<60)return s+'秒';const m=Math.floor(s/60);if(m<60)return m+'分';const h=Math.floor(m/60);return h+'小时'+(m%60?(m%60)+'分':'');}
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+function openConfirm(title,body,cb){_cb=async()=>{closeModal('modal-confirm');await cb();};document.getElementById('confirm-title').textContent=title;document.getElementById('confirm-body').innerHTML=body;openModal('modal-confirm');}
+document.querySelectorAll('.modal-overlay').forEach(el=>el.addEventListener('click',e=>{if(e.target===el){if(el.id==='modal-claim')closeClaimModal();else{el.classList.remove('open');if(el.id==='modal-add')stopLoginPoll();}}}));
+
+/* 最近请求 tick 悬停明细浮层：全局单例、fixed 定位（不受 .acct-scroll 裁剪）、
+   视口内自动贴边与上下翻转，mouseover 委托（5s 轮询重渲染后新元素照常触发） */
+(function(){
+  let tip=document.getElementById('tickTip');
+  if(!tip){tip=document.createElement('div');tip.id='tickTip';tip.className='tick-tip';document.body.appendChild(tip);}
+  function hide(){tip.classList.remove('show');}
+  document.addEventListener('mouseover',e=>{
+    const t=e.target&&e.target.closest?e.target.closest('.tickbar i'):null;
+    if(!t){hide();return;}
+    const raw=t.dataset.tip||'';
+    const nl=raw.indexOf('\n');
+    const head=nl<0?raw:raw.slice(0,nl), body=nl<0?'':raw.slice(nl+1);
+    tip.innerHTML=`<span class="tt-head ${t.classList.contains('ok')?'is-ok':'is-bad'}">${esc(head)}</span>`+(body?`<span class="tt-body">${esc(body)}</span>`:'');
+    tip.classList.add('show');
+    tip.style.left='0px';tip.style.top='0px';
+    const r=t.getBoundingClientRect(), tw=tip.offsetWidth, th=tip.offsetHeight;
+    let x=r.left+r.width/2-tw/2;
+    x=Math.max(8,Math.min(x,window.innerWidth-tw-8));
+    let y=r.top-th-10;
+    if(y<8)y=r.bottom+10;
+    tip.style.left=x+'px';tip.style.top=y+'px';
+  });
+  window.addEventListener('scroll',hide,true);
+  window.addEventListener('blur',hide);
+})();
+</script>
+</body>
+</html>

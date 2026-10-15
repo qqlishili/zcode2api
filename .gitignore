@@ -1,0 +1,41 @@
+# ── 运行时生成，永不入库 ──
+data/
+*.db
+*.db-wal
+*.db-shm
+*.zsb
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node（captcha_node）
+node_modules/
+
+# 秘钥 / 凭证导出
+*accounts*.json
+zcode-accounts*.json
+.env.*
+!.env.example
+*.pem
+*.key
+*secret*.json
+*token*.json
+
+# vendor：插件目录本身由 submodule 管（入库），但不得在其中装依赖
+vendor/*/node_modules/
+vendor/*/package-lock.json
+
+# 本机工具与会话提示
+.serena/
+docs/PROMPT.md
+openspec/

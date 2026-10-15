@@ -1,0 +1,2230 @@
+// solver.js — 无浏览器阿里云无痕验证求解器（Node + happy-dom）。
+// 设计对齐 zapi captcha-happy.ts（设计移植，非代码拷贝）：
+//   1. 多态自洽桌面指纹池（Win32/MacIntel + 真实物理独显/Apple Silicon + 动态微噪点 Canvas/Audio）
+//   2. alicdn 资源磁盘+内存双缓存（~/.zcode-captcha-cdn-cache/<sha1>）
+//   3. pe.* 字节码 VM 补丁（btoa/atob 调用打 __DBT 观测钩子）
+//   4. interceptor 全量接管网络层：每请求注入自洽 client-hint/UA/origin/referer
+//   5. guest 侧补丁（Event.isTrusted、HTMLDocument 命名、错误静默记录）
+//   6. ~40 项浏览器 polyfill + native-toString 伪装 + 行为仿真（鼠标滑动）
+//   7. 严格 extractVerifyParam：短参数/缺 securityToken 的降级结果直接拒绝
+// 子进程模型：一进程一解，成功打印 VERIFY_PARAM=<param> 后退出。
+// 用法: node solver.js <scene> <region> <prefix>
+// 退出码: 0 成功 / 2 超时 / 3 初始化失败 / 4 fail / 5 onError / 6 参数无效
+
+// 注意：必须用 Window（BrowserWindow 子类，setupVMContext 建 VM 上下文，
+// guest 脚本里 window/document 才有定义）；GlobalWindow 走宿主 eval 且不建
+// VM 上下文，Node 26 下 <script> 静默不执行（Bun 下 zapi 靠全局别名绕过）。
+const { Window, PropertySymbol } = require("happy-dom");
+const WindowBrowserContext =
+  require("happy-dom/lib/window/WindowBrowserContext.js").default ||
+  require("happy-dom/lib/window/WindowBrowserContext.js");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const zlib = require("node:zlib");
+const { extractVerifyParam, failure, emitFailure } = require("./solver_diagnostics");
+const solverStarted = Date.now();
+
+const SCENE = process.argv[2] || "11xygtvd";
+const REGION = process.argv[3] || "sgp";
+const PREFIX = process.argv[4] || "no8xfe";
+
+const DEBUG = /^(1|true|yes)$/i.test(process.env.CAPTCHA_DEBUG || "");
+const dbg = (msg) => {
+  if (DEBUG) process.stderr.write(`[solver] ${msg}\n`);
+};
+
+try {
+  require("node:dns").setDefaultResultOrder("ipv4first");
+} catch (_) {}
+try {
+  const t = setTimeout(() => {}, 0);
+  clearTimeout(t);
+  if (t && typeof t === "object" && t.constructor && t.constructor.prototype) {
+    t.constructor.prototype.toJSON = function () {
+      return typeof this[Symbol.toPrimitive] === "function" ? this[Symbol.toPrimitive]("number") : 1;
+    };
+  }
+} catch (_) {}
+const proxyUrl = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
+if (proxyUrl) {
+  try {
+    const { ProxyAgent, setGlobalDispatcher } = require("undici");
+    setGlobalDispatcher(new ProxyAgent(proxyUrl));
+  } catch (err) {
+    dbg(`proxy setup skipped (undici unavailable): ${err.message}`);
+  }
+}
+
+// ── 确定性伪随机散列（SplitMix32：保证同进程内多次采样幂等、跨进程完全唯一）──
+function splitMix32(x) {
+  let z = (x + 0x9e3779b9) | 0;
+  z = Math.imul(z ^ (z >>> 16), 0x85ebca6b);
+  z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35);
+  return (z ^ (z >>> 16)) >>> 0;
+}
+
+function seedHex64(seed, salt) {
+  let out = "";
+  for (let i = 0; i < 8; i++) {
+    out += splitMix32(seed ^ Math.imul(salt + i + 1, 0x27d4eb2d))
+      .toString(16)
+      .padStart(8, "0");
+  }
+  return out;
+}
+
+// ── 动态 Canvas PNG 生成器（基于会话 seed 注入确定性微噪点，兼顾跨进程唯一与同进程幂等）──
+const _CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32Buf(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = _CRC32_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function makePngChunk(typeStr, dataBuf) {
+  const typeBuf = Buffer.from(typeStr, "ascii");
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(dataBuf.length, 0);
+  const crcInput = Buffer.concat([typeBuf, dataBuf]);
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32Buf(crcInput), 0);
+  return Buffer.concat([lenBuf, typeBuf, dataBuf, crcBuf]);
+}
+
+function generateCanvasPngDataUrl(seed) {
+  const width = 32;
+  const height = 32;
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // color type RGBA
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  let offset = 0;
+  for (let y = 0; y < height; y++) {
+    raw[offset++] = 0; // filter type 0 (None)
+    for (let x = 0; x < width; x++) {
+      const h = splitMix32(seed ^ Math.imul(y * width + x + 1, 0x1b873593));
+      raw[offset++] = (x * 7 + y * 3 + (h & 0x07)) & 0xff;
+      raw[offset++] = (x * 5 + y * 11 + ((h >>> 3) & 0x07)) & 0xff;
+      raw[offset++] = (128 + x * 2 - y * 2 + ((h >>> 6) & 0x03)) & 0xff;
+      raw[offset++] = 255;
+    }
+  }
+  const idat = zlib.deflateSync(raw, { level: 6 });
+  const pngSig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const pngBuf = Buffer.concat([
+    pngSig,
+    makePngChunk("IHDR", ihdr),
+    makePngChunk("IDAT", idat),
+    makePngChunk("IEND", Buffer.alloc(0)),
+  ]);
+  return "data:image/png;base64," + pngBuf.toString("base64");
+}
+
+// ── 多态自洽桌面指纹池（参考主流指纹浏览器跨层对齐设计：OS/GPU/Screen/ClientHints/Media/Voices 全闭环）──
+const CHROME_VERSIONS = [
+  { major: "128", full: "128.0.6613.138" },
+  { major: "129", full: "129.0.6668.101" },
+  { major: "130", full: "130.0.6723.117" },
+  { major: "131", full: "131.0.6778.109" },
+  { major: "132", full: "132.0.6834.110" },
+  { major: "133", full: "133.0.6943.98" },
+  { major: "134", full: "134.0.6998.89" },
+];
+
+const DESKTOP_SKUS = [
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1.25 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 4070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "10.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 2560, h: 1440, aw: 2560, ah: 1400, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "10.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (NVIDIA)",
+    webglUnmaskedRenderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (AMD)",
+    webglUnmaskedRenderer: "ANGLE (AMD, AMD Radeon RX 6700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 16,
+    deviceMemory: 8,
+    screen: { w: 1920, h: 1080, aw: 1920, ah: 1040, dpr: 1 },
+    webglUnmaskedVendor: "Google Inc. (AMD)",
+    webglUnmaskedRenderer: "ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Windows NT 10.0; Win64; x64",
+    platform: "Win32",
+    chPlatform: "Windows",
+    platformVersion: "15.0.0",
+    arch: "x86",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: { w: 1536, h: 864, aw: 1536, ah: 824, dpr: 1.25 },
+    webglUnmaskedVendor: "Google Inc. (Intel)",
+    webglUnmaskedRenderer: "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "14.6.1",
+    arch: "arm",
+    hardwareConcurrency: 8,
+    deviceMemory: 8,
+    screen: { w: 1440, h: 900, aw: 1440, ah: 875, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2, Unspecified Version)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.1.0",
+    arch: "arm",
+    hardwareConcurrency: 10,
+    deviceMemory: 8,
+    screen: { w: 1512, h: 982, aw: 1512, ah: 950, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.1.0",
+    arch: "arm",
+    hardwareConcurrency: 12,
+    deviceMemory: 8,
+    screen: { w: 1728, h: 1117, aw: 1728, ah: 1085, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M2 Pro, Unspecified Version)",
+  },
+  {
+    uaOsToken: "Macintosh; Intel Mac OS X 10_15_7",
+    platform: "MacIntel",
+    chPlatform: "macOS",
+    platformVersion: "15.2.0",
+    arch: "arm",
+    hardwareConcurrency: 10,
+    deviceMemory: 8,
+    screen: { w: 1512, h: 982, aw: 1512, ah: 950, dpr: 2 },
+    webglUnmaskedVendor: "Google Inc. (Apple)",
+    webglUnmaskedRenderer: "ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version)",
+  },
+];
+
+function generateFingerprint() {
+  const seed = crypto.randomInt(1, 0x7fffffff);
+  const ver = CHROME_VERSIONS[crypto.randomInt(0, CHROME_VERSIONS.length)];
+  const sku = DESKTOP_SKUS[crypto.randomInt(0, DESKTOP_SKUS.length)];
+  const userAgent = `Mozilla/5.0 (${sku.uaOsToken}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${ver.major}.0.0.0 Safari/537.36`;
+  const audioJitter = ((splitMix32(seed ^ 0x13579bdf) & 0x3ff) - 512) * 1e-7;
+  const rectJitter = (((splitMix32(seed ^ 0x2468ace0) & 0xff) - 128) || 1) * 1e-4;
+  return {
+    seed,
+    userAgent,
+    uaMajor: ver.major,
+    uaFull: ver.full,
+    platform: sku.platform,
+    chPlatform: sku.chPlatform,
+    platformVersion: sku.platformVersion,
+    arch: sku.arch,
+    hardwareConcurrency: sku.hardwareConcurrency,
+    deviceMemory: sku.deviceMemory,
+    screen: sku.screen,
+    webglUnmaskedVendor: sku.webglUnmaskedVendor,
+    webglUnmaskedRenderer: sku.webglUnmaskedRenderer,
+    canvasImage: generateCanvasPngDataUrl(seed),
+    audioJitter,
+    rectJitter,
+  };
+}
+const fp = generateFingerprint();
+
+const HTML = `<!DOCTYPE html><html><head></head><body>
+<div id="cap"></div><button id="btn"></button>
+<script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
+</body></html>`;
+
+// ── CDN 双缓存 ──────────────────────────────────────────────────────────────
+const CDN_CACHE_DIR = path.join(os.homedir(), ".zcode-captcha-cdn-cache");
+const _memCdnCache = new Map();
+// 同一进程内一次求解只跑一遍，但 stall 记账按 URL 保留在模块级：
+// 子进程池串行拉起时，上一进程的 stall 文件由磁盘 eviction 落实。
+const _stallCounts = new Map();
+
+function diskPathFor(url) {
+  return path.join(CDN_CACHE_DIR, crypto.createHash("sha1").update(String(url)).digest("hex"));
+}
+
+function sniffMime(url) {
+  if (/\.js(\?|$)/i.test(url)) return "application/javascript";
+  if (/\.css(\?|$)/i.test(url)) return "text/css";
+  if (/\.png(\?|$)/i.test(url)) return "image/png";
+  if (/\.(jpg|jpeg)(\?|$)/i.test(url)) return "image/jpeg";
+  if (/\.json(\?|$)/i.test(url)) return "application/json";
+  return "application/octet-stream";
+}
+
+function getCachedBody(url) {
+  const mem = _memCdnCache.get(url);
+  if (mem) return mem;
+  try {
+    const p = diskPathFor(url);
+    if (fs.existsSync(p)) {
+      const body = fs.readFileSync(p);
+      _memCdnCache.set(url, body);
+      return body;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function fetchAndStore(url) {
+  try {
+    const res = await fetch(url, { headers: { "user-agent": fp.userAgent } });
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > 0) {
+      _memCdnCache.set(url, buf);
+      try {
+        const p = diskPathFor(url);
+        fs.mkdirSync(CDN_CACHE_DIR, { recursive: true });
+        fs.writeFileSync(p, buf);
+        const stat = fs.statSync(p);
+        if (stat.size !== buf.length) {
+          fs.writeFileSync(p, buf);
+        }
+      } catch (err) {
+        dbg(`cache-write-err ${url}: ${err.message}`);
+      }
+    }
+    return buf;
+  } catch (err) {
+    dbg(`loader-fetch-err ${url}: ${err.message}`);
+    return null;
+  }
+}
+
+// stall（pe VM 卡死）处理：同 URL 连续两次即逐出内存+磁盘缓存，
+// 下次 init 重新拉新版 pe 字节码（旋转版本可能整体坏掉）。
+function noteStallAndMaybeEvict(peUrl) {  try {
+    if (!peUrl || !/dynamicJS\//.test(peUrl)) return;
+    const n = (_stallCounts.get(peUrl) || 0) + 1;
+    _stallCounts.set(peUrl, n);
+    process.stderr.write(`[pe-stall] ${peUrl.split("/").pop()} x${n}\n`);
+    if (n >= 2) {
+      _memCdnCache.delete(peUrl);
+      try {
+        fs.unlinkSync(diskPathFor(peUrl));
+      } catch (_) {}
+      _stallCounts.delete(peUrl);
+    } else if (fs.existsSync(diskPathFor(peUrl))) {
+      // 子进程内没有"下次"，直接当次失效：删缓存让下一次进程拉新
+      _memCdnCache.delete(peUrl);
+      try {
+        fs.unlinkSync(diskPathFor(peUrl));
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+// ── pe.* 字节码 VM 观测钩子（btoa/atob 调用入栈时记录，排障用）───────────────
+const peVmCallRegex =
+  /55==A\?\(f=r\[n\+\+\],l=e\.pop\(\),h=e\.pop\(\),o=\[\],\w+\(f\)\.forEach\(function\(\)\{o\.unshift\(e\.pop\(\)\)\}\),p=null===h\?l\.apply\((\w+),o\):h\[l\]\.apply\(h,o\),r\[n\+\+\]&&e\.push\(p\)\):/;
+function patchPeBundle(buf, url) {
+  if (process.env.PE_PATCH !== "on") return buf;
+  if (!/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) return buf;
+  let src = buf.toString("utf8");
+  if (src.includes("__DBT")) return buf;
+  const m = src.match(peVmCallRegex);
+  if (!m) return buf;
+  const locals = m[1];
+  const hook = `55==A?(f=r[n++],l=e.pop(),h=e.pop(),o=[],v(f).forEach(function(){o.unshift(e.pop())}),p=null===h?l.apply(${locals},o):h[l].apply(h,o),r[n++]&&e.push(p),function(){try{if(l===window.btoa||l===window.atob){window.__DBT=window.__DBT||[];var __sav=[];for(var __i=0;__i<e.length;__i++){var __vv=e[__i];if(typeof __vv==="string"){__sav.push("s:"+__vv)}else if(typeof __vv==="number"){__sav.push("n:"+__vv)}else if(typeof __vv==="boolean"){__sav.push("b:"+__vv)}else if(__vv&&typeof __vv.length==="number"){__sav.push("a:"+__vv.length)}else{__sav.push("t:"+typeof __vv)}}var __ls={};for(var __k2 in ${locals}){if(__k2!=="_"&&__k2!=="*"&&__k2!=="arguments"){try{var __lv=${locals}[__k2];if(typeof __lv==="string"){__ls[__k2]="s:"+__lv}else if(typeof __lv==="number"){__ls[__k2]="n:"+__lv}else if(__lv&&typeof __lv.length==="number"){__ls[__k2]="a:"+__lv.length}else{__ls[__k2]="t:"+typeof __lv}}catch(_e){}}}window.__DBT.push({call:"btoa",ip:n,args:o.map(function(__a){return typeof __a==="string"?"s:"+__a:typeof __a==="number"?"n:"+__a:typeof __a==="function"?"fn:"+(__a.name||"?"):typeof __a==="object"&&__a?"obj":typeof __a}),stack:__sav,locals:__ls,rlen:r.length,r:r})}}catch(_e){}}()):`;
+  src = src.replace(m[0], hook);
+  dbg(`loader-patch ${url} (VM hook applied, locals=${locals})`);
+  return Buffer.from(src, "utf8");
+}
+
+// ── 每请求头注入（XHR/fetch/script 全走这里）────────────────────────────────
+function injectRequestHeaders(request) {
+  const h = request.headers;
+  try {
+    h.set(
+      "sec-ch-ua",
+      `"Chromium";v="${fp.uaMajor}", "Google Chrome";v="${fp.uaMajor}", "Not-A.Brand";v="99"`
+    );
+    h.set("sec-ch-ua-mobile", "?0");
+    h.set("sec-ch-ua-platform", '"' + fp.chPlatform + '"');
+    h.set("user-agent", fp.userAgent);
+    h.set("accept-language", "en-US,en;q=0.9");
+    h.set("referer", "https://zcode.z.ai/");
+    let origin = null;
+    try {
+      const u = new URL(request.url);
+      const method = String(request.method || "GET").toUpperCase();
+      const crossOrigin = u.origin !== "https://zcode.z.ai";
+      if (crossOrigin || (method !== "GET" && method !== "HEAD")) {
+        origin = "https://zcode.z.ai";
+      }
+    } catch (_) {}
+    if (origin) h.set("origin", origin);
+  } catch (_) {}
+}
+
+function cookieHeader(request) {
+  try {
+    const ctx = global.__cookieContainer;
+    if (!ctx || request.credentials === "omit") return null;
+    const u = new URL(request.url);
+    const cookies = ctx.getCookies(u, false);
+    if (cookies.length > 0) {
+      return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    }
+  } catch (_) {}
+  return null;
+}
+
+function cookiesFromSetCookie(list, url) {
+  const cookieContainer = global.__cookieContainer;
+  if (!cookieContainer || !list || !list.length) return;
+  for (const raw of list) {
+    try {
+      const u = new URL(url);
+      const parts = raw.split(";");
+      const pair = parts[0].split("=");
+      const cookie = {
+        name: pair[0].trim(),
+        value: pair.slice(1).join("=").trim(),
+        url: u.origin,
+        domain: u.hostname,
+        path: "/",
+      };
+      for (const p of parts.slice(1)) {
+        const kv = p.trim().split(/=(.*)/s);
+        const k = (kv[0] || "").toLowerCase();
+        if (k === "domain" && kv[1]) cookie.domain = kv[1];
+        if (k === "path" && kv[1]) cookie.path = kv[1];
+        if (k === "expires") cookie.expires = new Date(kv[1]).getTime();
+        if (k === "max-age") cookie.maxAge = parseInt(kv[1], 10);
+        if (k === "httponly") cookie.httpOnly = true;
+        if (k === "secure") cookie.secure = true;
+        if (k === "samesite") cookie.sameSite = kv[1];
+      }
+      cookieContainer.addCookies([cookie]);
+    } catch (_) {}
+  }
+}
+
+// ── 自有 sync fetch（替换 happy-dom 坏掉的 spawn） ───────────────────────────
+// happy-dom v20 的 SyncFetchScriptBuilder 生成 `http.request(undefined, opts,
+// cb)`，Node 26 下直接 TypeError（URL 为 undefined 时 opts 被当 listener）。
+// 拦截器对 sync 请求永不返回 null：缓存未命中时用下面这个正确的子进程拉取。
+function syncFetchBody(url, headers) {
+  const proxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY || "";
+  const script = `
+const u = new URL(${JSON.stringify(url)});
+const proxy = ${JSON.stringify(proxy)};
+const headers = ${JSON.stringify(headers || {})};
+
+async function fetchSync() {
+  if (proxy) {
+    try {
+      const { ProxyAgent, request } = require("undici");
+      const res = await request(u, {
+        method: "GET",
+        headers,
+        dispatcher: new ProxyAgent(proxy),
+      });
+      const chunks = [];
+      for await (const chunk of res.body) {
+        chunks.push(chunk);
+      }
+      const b64 = Buffer.concat(chunks).toString("base64");
+      console.log(JSON.stringify({ error: null, status: res.statusCode, b64 }));
+      return;
+    } catch (e) {
+      // fallback to native http below
+    }
+  }
+  const http = require("http"), https = require("https");
+  const mod = u.protocol === "https:" ? https : http;
+  const req = mod.request(u, { method: "GET", headers, rejectUnauthorized: false }, (res) => {
+    const chunks = [];
+    res.on("data", (c) => chunks.push(c));
+    res.on("end", () => console.log(JSON.stringify({ error: null, status: res.statusCode, b64: Buffer.concat(chunks).toString("base64") })));
+  });
+  req.on("error", (e) => console.log(JSON.stringify({ error: e.message })));
+  req.end();
+}
+fetchSync();`;
+  try {
+    const out = require("node:child_process").execFileSync(process.argv[0], ["-e", script], {
+      cwd: __dirname,
+      env: process.env,
+      encoding: "buffer",
+      timeout: 20000,
+      maxBuffer: 256 * 1024 * 1024,
+    });
+    const parsed = JSON.parse(out.toString("utf8"));
+    if (parsed.error) {
+      dbg(`sync-fetch err ${url}: ${parsed.error}`);
+      return null;
+    }
+    return Buffer.from(parsed.b64, "base64");
+  } catch (err) {
+    dbg(`sync-fetch spawn fail ${url}: ${err.message}`);
+    return null;
+  }
+}
+
+// ── interceptor：整体替换 happy-dom 网络层 ──────────────────────────────────
+function makeInterceptor() {
+  async function serveCdn(url, w) {
+    if (!/\balicdn\.com/i.test(url)) return null;
+    let body = getCachedBody(url);
+    if (body && /\.js(\?|$)/i.test(url)) {
+      try {
+        new Function(body.toString("utf8"));
+      } catch (parseErr) {
+        process.stderr.write(`[cache-bad-js] ${url} len=${body.length} ${parseErr.message} — refetch\n`);
+        _memCdnCache.delete(url);
+        try {
+          fs.unlinkSync(diskPathFor(url));
+        } catch (_) {}
+        body = null;
+      }
+    }
+    if (!body) body = await fetchAndStore(url);
+    if (!body) return null;
+    if (/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) {
+      try {
+        w.__lastPeUrl = url;
+      } catch (_) {}
+    }
+    return { body, mime: sniffMime(url) };
+  }
+
+  return {
+    async beforeAsyncRequest({ request, window: w }) {
+      const url = request.url;
+      global.__requestLog.push({ at: Date.now(), method: request.method, url });
+      injectRequestHeaders(request);
+      const cdn = await serveCdn(url, w);
+      if (cdn) {
+        return new w.Response(patchPeBundle(Buffer.from(cdn.body), url), {
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": cdn.mime },
+        });
+      }
+      // 非 CDN：直连（undici fetch，尊重全局 ProxyAgent）
+      try {
+        const init = { method: request.method, headers: {} };
+        request.headers.forEach((value, key) => {
+          init.headers[key] = value;
+        });
+        const cookie = cookieHeader(request);
+        if (cookie) init.headers.cookie = cookie;
+        let hasBody = false;
+        try {
+          if (request.body) {
+            const ab = await request.arrayBuffer();
+            if (ab && ab.byteLength > 0) {
+              init.body = ab;
+              hasBody = true;
+            }
+          }
+        } catch (_) {}
+        const res = await fetch(url, init);
+        const buf = Buffer.from(await res.arrayBuffer());
+        cookiesFromSetCookie(
+          typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [],
+          url,
+        );
+        const bs = new URL(url);
+        if (DEBUG && /captcha-open|verify\.|device\.saf|cloudauth-device|upload\./i.test(url) && buf.length < 4096) {
+          process.stderr.write(`[xhr] ${request.method} ${bs.hostname}${bs.pathname} -> ${res.status} ${buf.toString("utf8").slice(0, 1200)}\n`);
+        } else {
+          dbg(`xhr ${request.method} ${bs.hostname}${bs.pathname} -> ${res.status} (${buf.length}b)`);
+        }
+        const headers = {};
+        const ct = res.headers.get("content-type");
+        if (ct) headers["content-type"] = ct;
+        return new w.Response(buf, {
+          status: res.status,
+          statusText: res.statusText || "",
+          headers,
+        });
+      } catch (err) {
+        dbg(`xhr-err ${url}: ${err.message}`);
+        return new w.Response("", { status: 503, statusText: "passthrough failed" });
+      }
+    },
+    beforeSyncRequest({ request, window: w }) {
+      // sync XHR/脚本：缓存命中直接回；未命中走自有 syncFetchBody（happy-dom
+      // 自带的 node -e spawn 脚本在 Node 26 下是坏的，绝不放行到它）。
+      const url = request.url;
+      global.__requestLog.push({ at: Date.now(), method: request.method, url, sync: true });
+      injectRequestHeaders(request);
+      const isCdn = /\balicdn\.com/i.test(url);
+      if (isCdn) {
+        const cached = getCachedBody(url);
+        if (cached) {
+          if (/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) {
+            try {
+              w.__lastPeUrl = url;
+            } catch (_) {}
+          }
+          return {
+            status: 200,
+            statusText: "OK",
+            ok: true,
+            url,
+            redirected: false,
+            headers: new w.Headers({ "content-type": sniffMime(url) }),
+            body: patchPeBundle(Buffer.from(cached), url),
+            [PropertySymbol.virtualServerFile]: null,
+          };
+        }
+        // 未命中：同步拉取并回填缓存（首个 solve 预热 AliyunCaptcha.js 走这里）
+        const fresh = syncFetchBody(url, { "user-agent": fp.userAgent });
+        if (fresh && fresh.length > 0) {
+          _memCdnCache.set(url, fresh);
+          try {
+            fs.mkdirSync(CDN_CACHE_DIR, { recursive: true });
+            fs.writeFileSync(diskPathFor(url), fresh);
+          } catch (_) {}
+          return {
+            status: 200,
+            statusText: "OK",
+            ok: true,
+            url,
+            redirected: false,
+            headers: new w.Headers({ "content-type": sniffMime(url) }),
+            body: patchPeBundle(fresh, url),
+            [PropertySymbol.virtualServerFile]: null,
+          };
+        }
+        return null;
+      }
+      // 非 CDN sync 请求（通常不发生：XHR 都是异步）：自有 sync fetch 兜底，
+      // 保证不落到 happy-dom 坏掉的 spawn。
+      const cookie = cookieHeader(request);
+      const hdrs = { "user-agent": fp.userAgent };
+      if (cookie) hdrs.cookie = cookie;
+      const fresh = syncFetchBody(url, hdrs);
+      if (fresh && fresh.length > 0) {
+        return {
+          status: 200,
+          statusText: "OK",
+          ok: true,
+          url,
+          redirected: false,
+          headers: new w.Headers({ "content-type": "application/json" }),
+          body: fresh,
+          [PropertySymbol.virtualServerFile]: null,
+        };
+      }
+      return null;
+    },
+  };
+}
+
+// ── parse-fail 观测：happy-dom VM eval 漏斗包装 ─────────────────────────────
+function installEvalInstrumentation(w) {
+  const sym = PropertySymbol && PropertySymbol.evaluateScript;
+  if (!sym || typeof w[sym] !== "function") {
+    dbg("no evaluateScript symbol, host hook skipped");
+    return;
+  }
+  const orig = w[sym];
+  w[sym] = function (code, options) {
+    try {
+      return orig.call(this, code, options);
+    } catch (err) {
+      try {
+        const src = String(code || "");
+        const filename = (options && options.filename) || "?";
+        const sha1 = crypto.createHash("sha1").update(src).digest("hex");
+        process.stderr.write(
+          `\n[EVAL-PARSE-FAIL] file=${filename} len=${src.length} sha1=${sha1}\n` +
+            `  head300: ${JSON.stringify(src.slice(0, 300))}\n` +
+            `  err: ${err && err.message}\n`,
+        );
+        if (/^https?:/.test(filename)) {
+          (async () => {
+            try {
+              const fresh = await fetchAndStore(filename);
+              if (fresh && fresh.length !== src.length) {
+                dbg(`EVAL-CACHE-MISMATCH deleting ${diskPathFor(filename)}`);
+                try {
+                  fs.unlinkSync(diskPathFor(filename));
+                } catch (_) {}
+                _memCdnCache.delete(filename);
+              }
+            } catch (_) {}
+          })();
+        }
+      } catch (_) {}
+      throw err;
+    }
+  };
+}
+
+// ── JS 实现的平台 API 伪装成 native（FeiLin toString 扫描对抗）───────────────
+function installNativeToString(w) {
+  const realToString = Function.prototype.toString;
+  const nativeRe = /\[native code\]/;
+  const mask = (fn) => {
+    if (typeof fn !== "function") return;
+    try {
+      if (nativeRe.test(realToString.call(fn))) return;
+      const name = fn.name || "";
+      const nativeStr = `function ${name}() { [native code] }`;
+      Object.defineProperty(fn, "toString", {
+        value: () => nativeStr,
+        configurable: true,
+        writable: true,
+      });
+    } catch (_) {}
+  };
+  const seen = new w.Set();
+  const maskObj = (obj, depth) => {
+    if (!obj || (typeof obj !== "object" && typeof obj !== "function") || depth > 5) return;
+    try {
+      if (obj.constructor && obj.constructor.prototype !== Object.prototype) {
+        const ctorName = obj.constructor.name;
+        if (/^(WriteStream|ReadStream|Socket|Process|Timeout|Immediate)$/.test(ctorName)) return;
+      }
+    } catch (_) {}
+    if (seen.has(obj)) return;
+    try {
+      seen.add(obj);
+    } catch (_) {
+      return;
+    }
+    let names = [];
+    try {
+      names = Object.getOwnPropertyNames(obj);
+    } catch (_) {
+      return;
+    }
+    for (const name of names) {
+      if (name === "toString" || name === "constructor") continue;
+      let desc;
+      try {
+        desc = Object.getOwnPropertyDescriptor(obj, name);
+      } catch (_) {
+        continue;
+      }
+      if (!desc) continue;
+      if (typeof desc.value === "function") {
+        mask(desc.value);
+      } else if (typeof desc.get === "function") {
+        mask(desc.get);
+        try {
+          const v = desc.get.call(obj);
+          if (typeof v === "function") mask(v);
+        } catch (_) {}
+      }
+      if (depth < 3) {
+        try {
+          const v = desc.value;
+          if (v && (typeof v === "function" || typeof v === "object")) maskObj(v, depth + 1);
+        } catch (_) {}
+      }
+    }
+  };
+  const targets = [
+    w,
+    w.navigator,
+    w.document,
+    w.Document && w.Document.prototype,
+    w.Element && w.Element.prototype,
+    w.HTMLElement && w.HTMLElement.prototype,
+    w.Node && w.Node.prototype,
+    w.EventTarget && w.EventTarget.prototype,
+    w.HTMLCanvasElement && w.HTMLCanvasElement.prototype,
+    w.XMLHttpRequest && w.XMLHttpRequest.prototype,
+    w.Event && w.Event.prototype,
+    w.Window && w.Window.prototype,
+  ].filter(Boolean);
+  for (const t of targets) {
+    try {
+      maskObj(t, 0);
+    } catch (_) {}
+  }
+}
+
+// ── guest 侧补丁（window.eval 注入 VM realm）────────────────────────────────
+const GUEST_EVAL_PATCH = `
+(function() {
+  try {
+    var __timerSeq = 1;
+    var __timerMap = new Map();
+    var __origST = window.setTimeout;
+    var __origCT = window.clearTimeout;
+    var __origSI = window.setInterval;
+    var __origCI = window.clearInterval;
+    if (typeof __origST === "function") {
+      window.setTimeout = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var id = __timerSeq++;
+        var h = __origST.apply(window, [function() {
+          __timerMap.delete(id);
+          if (typeof fn === "function") fn.apply(window, args);
+        }, delay]);
+        __timerMap.set(id, h);
+        return id;
+      };
+      window.clearTimeout = function(id) {
+        var h = __timerMap.get(id) || id;
+        __timerMap.delete(id);
+        return __origCT.call(window, h);
+      };
+    }
+    if (typeof __origSI === "function") {
+      window.setInterval = function(fn, delay) {
+        var args = Array.prototype.slice.call(arguments, 2);
+        var id = __timerSeq++;
+        var h = __origSI.apply(window, [function() {
+          if (typeof fn === "function") fn.apply(window, args);
+        }, delay]);
+        __timerMap.set(id, h);
+        return id;
+      };
+      window.clearInterval = function(id) {
+        var h = __timerMap.get(id) || id;
+        __timerMap.delete(id);
+        return __origCI.call(window, h);
+      };
+    }
+  } catch (e) {}
+  try {
+    Object.defineProperty(Event.prototype, "isTrusted", {
+      get() { return true; },
+      configurable: true
+    });
+  } catch (e) {}
+  try {
+    if (window.HTMLDocument) {
+      Object.defineProperty(window.HTMLDocument, "name", { value: "HTMLDocument", configurable: true });
+      Object.defineProperty(window.HTMLDocument.prototype, Symbol.toStringTag, { value: "HTMLDocument", configurable: true });
+    }
+  } catch (e) {}
+  try {
+    Object.defineProperty(window.Document.prototype, Symbol.toStringTag, { value: "HTMLDocument", configurable: true });
+  } catch (e) {}
+  // guest 错误只记录不打印：SDK 在 happy-dom 里每次求解都会抛良性
+  // TypeError（DOM 仿真不完美），但求解仍能成功 —— 失败时才随错误带出。
+  function __capRecord(kind, msg, stack) {
+    try {
+      var m = String(msg || "?");
+      var s = String(stack || "").split("\\n").slice(0, 2).join(" | ");
+      if (!window.__capErrs) window.__capErrs = [];
+      var last = window.__capErrs[window.__capErrs.length - 1];
+      if (last && last.k === kind && last.m === m) {
+        last.n = (last.n || 1) + 1;
+      } else {
+        window.__capErrs.push({ k: kind, m: m, s: s, n: 1 });
+        if (window.__capErrs.length > 8) window.__capErrs.shift();
+      }
+      if (${DEBUG ? "true" : "false"}) console.error("[" + kind + "]", m, s);
+    } catch (e2) {}
+  }
+  try {
+    window.addEventListener("unhandledrejection", function(e) {
+      var r = e && e.reason;
+      __capRecord("UH-REASON", (r && r.message) || typeof r, r && r.stack);
+    });
+  } catch (e) {}
+  try {
+    window.addEventListener("error", function(e) {
+      __capRecord("WINDOW-ERROR", e && e.message, e && e.error && e.error.stack);
+    });
+  } catch (e) {}
+  // eval/Function parse-fail 观测（pe 动态 chunk 走这里）
+  function __capFailDump(kind, code) {
+    try {
+      var src = String(code || "");
+      console.error("[" + kind + "] url=" + (window.__lastPeUrl || "?") + " len=" + src.length + " head=" + JSON.stringify(src.slice(0, 300)) + " tail=" + JSON.stringify(src.slice(-100)));
+    } catch (e2) {}
+  }
+  try {
+    var _origEval2 = window.eval;
+    if (_origEval2) {
+      window.eval = function(code) {
+        try { return _origEval2.call(window, code); }
+        catch (e) {
+          if (e && (/unexpected|invalid|parse|syntax/i.test(String((e && e.message) || e)))) {
+            __capFailDump("REALM-EVAL-FAIL", code);
+          }
+          throw e;
+        }
+      };
+    }
+  } catch (e) {}
+  try {
+    var _of = window.Function;
+    if (_of) {
+      var _WF = function() {
+        var args = Array.prototype.slice.call(arguments);
+        var body = args.length ? String(args[args.length - 1]) : "";
+        try { return _of.apply(this, args); }
+        catch (e) {
+          if (e && (/unexpected|invalid|parse|syntax/i.test(String((e && e.message) || e)))) {
+            __capFailDump("REALM-FN-FAIL", body);
+          }
+          throw e;
+        }
+      };
+      _WF.prototype = _of.prototype;
+      try { Object.defineProperty(_WF, "name", { value: "Function", configurable: true }); } catch (e) {}
+      window.Function = _WF;
+    }
+  } catch (e) {}
+})();
+`;
+
+// ── 浏览器 polyfill 集（FeiLin / pe 风控引擎探测面）─────────────────────────
+function applyPolyfills(w) {
+  if (typeof w.Option !== "function") {
+    w.Option = class Option extends w.HTMLOptionElement {
+      constructor(text, value, defaultSelected, selected) {
+        super();
+        if (text !== undefined) {
+          const el = w.document.createElement("option");
+          el.text = text;
+          if (value !== undefined) el.value = value;
+          if (defaultSelected) el.defaultSelected = true;
+          if (selected) el.selected = true;
+          return el;
+        }
+      }
+    };
+  }
+  if (typeof w.Video !== "function" && w.HTMLVideoElement) {
+    w.Video = class Video extends w.HTMLVideoElement {
+      constructor() {
+        return w.document.createElement("video");
+      }
+    };
+  }
+
+  if (typeof w.alert !== "function") w.alert = () => {};
+  if (typeof w.prompt !== "function") w.prompt = () => null;
+  if (typeof w.confirm !== "function") w.confirm = () => false;
+  try {
+    Object.defineProperty(w, "alert", { value: () => {}, configurable: true, writable: true });
+    Object.defineProperty(w, "prompt", { value: () => null, configurable: true, writable: true });
+    Object.defineProperty(w, "confirm", { value: () => false, configurable: true, writable: true });
+    // happy-dom 自带 open/close 有破坏性（close 会拆窗），一律中和
+    Object.defineProperty(w, "open", { value: () => null, configurable: true, writable: true });
+    Object.defineProperty(w, "close", { value: () => {}, configurable: true, writable: true });
+  } catch (_) {}
+
+  const extraGlobals = {
+    print: () => {},
+    stop: () => {},
+    moveTo: () => {},
+    moveBy: () => {},
+    showModalDialog: () => null,
+    find: () => false,
+  };
+  for (const [k, v] of Object.entries(extraGlobals)) {
+    try {
+      Object.defineProperty(w, k, { value: v, configurable: true, writable: true });
+    } catch (_) {}
+  }
+
+  if (!w.EventSource) {
+    w.EventSource = class {
+      constructor() {
+        this.readyState = 2;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onerror = null;
+      }
+      close() {
+        this.readyState = 2;
+      }
+      addEventListener() {}
+      removeEventListener() {}
+    };
+  }
+
+  if (!w.Beacon) w.Beacon = class {};
+
+  if (!w.RTCPeerConnection) {
+    w.RTCPeerConnection = class {
+      constructor() {}
+      createDataChannel() {
+        return {};
+      }
+      close() {}
+      createOffer() {
+        return Promise.resolve({});
+      }
+      setLocalDescription() {
+        return Promise.resolve();
+      }
+      addEventListener() {}
+      removeEventListener() {}
+    };
+  }
+
+  if (!w.MessageChannel) {
+    w.MessageChannel = class {
+      constructor() {
+        this.port1 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {} };
+        this.port2 = { onmessage: null, postMessage() {}, start() {}, close() {}, addEventListener() {}, removeEventListener() {} };
+      }
+    };
+  }
+
+  w.IntersectionObserver =
+    w.IntersectionObserver ||
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    };
+
+  w.ResizeObserver =
+    w.ResizeObserver ||
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+
+  w.DeviceOrientationEvent =
+    w.DeviceOrientationEvent ||
+    class extends w.Event {
+      constructor(type, opts) {
+        super(type, opts);
+      }
+    };
+  w.DeviceMotionEvent =
+    w.DeviceMotionEvent ||
+    class extends w.Event {
+      constructor(type, opts) {
+        super(type, opts);
+      }
+    };
+
+  w.requestIdleCallback =
+    w.requestIdleCallback ||
+    ((cb) => w.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 10 }), 1));
+  w.cancelIdleCallback = w.cancelIdleCallback || ((id) => w.clearTimeout(id));
+
+  w.matchMedia =
+    w.matchMedia ||
+    (() => ({
+      matches: false,
+      media: "",
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    }));
+
+  if (!w.visualViewport) {
+    const VisualViewport = function () {};
+    VisualViewport.prototype = {
+      width: fp.screen.w - 16,
+      height: fp.screen.h - 120,
+      scale: 1,
+      offsetLeft: 0,
+      offsetTop: 0,
+      pageLeft: 0,
+      pageTop: 0,
+      onresize: null,
+      onscroll: null,
+      onscrollend: null,
+    };
+    w.VisualViewport = VisualViewport;
+    w.visualViewport = Object.create(w.VisualViewport.prototype);
+  }
+
+  if (!w.indexedDB) {
+    const IDBFactory = function () {};
+    IDBFactory.prototype = {
+      open: () => ({ onupgradeneeded: null, onsuccess: null, onerror: null }),
+      deleteDatabase: () => ({}),
+      databases: () => Promise.resolve([]),
+    };
+    w.IDBFactory = IDBFactory;
+    w.indexedDB = Object.create(w.IDBFactory.prototype);
+  }
+
+  if (!w.speechSynthesis) {
+    const defaultVoices =
+      fp.platform === "MacIntel"
+        ? [
+            { voiceURI: "Samantha", name: "Samantha", lang: "en-US", localService: true, default: true },
+            { voiceURI: "Alex", name: "Alex", lang: "en-US", localService: true, default: false },
+          ]
+        : [
+            {
+              voiceURI: "Microsoft David - English (United States)",
+              name: "Microsoft David - English (United States)",
+              lang: "en-US",
+              localService: true,
+              default: true,
+            },
+            {
+              voiceURI: "Microsoft Zira - English (United States)",
+              name: "Microsoft Zira - English (United States)",
+              lang: "en-US",
+              localService: true,
+              default: false,
+            },
+          ];
+    const SpeechSynthesis = function () {};
+    SpeechSynthesis.prototype = {
+      pending: false,
+      speaking: false,
+      paused: false,
+      onvoiceschanged: null,
+      speak() {},
+      cancel() {},
+      pause() {},
+      resume() {},
+      getVoices: () => defaultVoices,
+    };
+    w.SpeechSynthesis = SpeechSynthesis;
+    w.speechSynthesis = Object.create(w.SpeechSynthesis.prototype);
+    w.SpeechSynthesisUtterance = function () {};
+  }
+
+  w.Worker =
+    w.Worker ||
+    class {
+      postMessage() {}
+      terminate() {}
+      addEventListener() {}
+      removeEventListener() {}
+    };
+
+  w.Notification =
+    w.Notification ||
+    class {
+      static permission = "default";
+      static requestPermission() {
+        return Promise.resolve("default");
+      }
+      close() {}
+    };
+
+  // ── Canvas / WebGL ──
+  const proto = w.HTMLCanvasElement.prototype;
+  const nativeGetContext = typeof proto.getContext === "function" ? proto.getContext : null;
+  proto.getContext = function (type, ...rest) {
+    if (/webgl/i.test(type)) {
+      return makeWebGLMock(this);
+    }
+    if (nativeGetContext) {
+      try {
+        const ctx = nativeGetContext.call(this, type, ...rest);
+        if (ctx) return ctx;
+      } catch (_) {}
+    }
+    return make2DStub(this);
+  };
+
+  function makeWebGLMock(canvas) {
+    return {
+      canvas,
+      getParameter(p) {
+        if (p === 7936) return "WebKit";
+        if (p === 7937) return "WebKit WebGL";
+        if (p === 7938) return "WebGL 1.0 (OpenGL ES 2.0 Chromium)";
+        if (p === 35724) return "WebGL GLSL ES 1.0 (OpenGL ES GLSL ES 1.0 Chromium)";
+        if (p === 0x9245) return fp.webglUnmaskedVendor;
+        if (p === 0x9246) return fp.webglUnmaskedRenderer;
+        if (p === 3379 || p === 34076 || p === 34024) return 16384;
+        if (p === 34921 || p === 34930 || p === 35660 || p === 34047) return 16;
+        if (p === 35661) return 32;
+        if (p === 36347) return 4096;
+        if (p === 36348) return 30;
+        if (p === 36349) return 1024;
+        if (p === 3410 || p === 3411 || p === 3412 || p === 3413 || p === 3415) return 8;
+        if (p === 3414) return 24;
+        if (p === 3386) return new Int32Array([32767, 32767]);
+        if (p === 33901) return new Float32Array([1, 1024]);
+        if (p === 33902) return new Float32Array([1, 1]);
+        return 0;
+      },
+      getExtension(name) {
+        if (name === "WEBGL_debug_renderer_info") {
+          return { UNMASKED_VENDOR_WEBGL: 0x9245, UNMASKED_RENDERER_WEBGL: 0x9246 };
+        }
+        if (name === "EXT_texture_filter_anisotropic") {
+          return {
+            TEXTURE_MAX_ANISOTROPY_EXT: 0x84fe,
+            MAX_TEXTURE_MAX_ANISOTROPY_EXT: 0x84ff,
+          };
+        }
+        return null;
+      },
+      getSupportedExtensions() {
+        return [
+          "ANGLE_instanced_arrays", "EXT_blend_minmax", "EXT_color_buffer_half_float",
+          "EXT_disjoint_timer_query", "EXT_float_blend", "EXT_frag_depth",
+          "EXT_shader_texture_lod", "EXT_texture_compression_bptc",
+          "EXT_texture_compression_rgtc", "EXT_texture_filter_anisotropic",
+          "EXT_sRGB", "KHR_parallel_shader_compile", "OES_element_index_uint",
+          "OES_fbo_render_mipmap", "OES_standard_derivatives",
+          "OES_texture_float", "OES_texture_float_linear",
+          "OES_texture_half_float", "OES_texture_half_float_linear",
+          "OES_vertex_array_object", "WEBGL_color_buffer_float",
+          "WEBGL_compressed_texture_astc", "WEBGL_compressed_texture_etc",
+          "WEBGL_compressed_texture_etc1", "WEBGL_compressed_texture_s3tc",
+          "WEBGL_compressed_texture_s3tc_srgb", "WEBGL_debug_renderer_info",
+          "WEBGL_debug_shaders", "WEBGL_depth_texture", "WEBGL_draw_buffers",
+          "WEBGL_lose_context", "WEBGL_multi_draw",
+        ];
+      },
+      getContextAttributes() {
+        return {
+          alpha: true, antialias: true, depth: true,
+          failIfMajorPerformanceCaveat: false, powerPreference: "default",
+          premultipliedAlpha: true, preserveDrawingBuffer: false,
+          stencil: false, desynchronized: false,
+        };
+      },
+      getShaderPrecisionFormat() {
+        return { precision: 23, rangeMin: 127, rangeMax: 127 };
+      },
+    };
+  }
+
+  function make2DStub(canvas) {
+    let drawState = fp.seed >>> 0;
+    const bumpDraw = (tag, arg) => {
+      let s = tag;
+      if (arg !== undefined && arg !== null) {
+        const str = String(arg);
+        for (let i = 0; i < str.length; i++) {
+          s = Math.imul(s ^ str.charCodeAt(i), 0x01000193);
+        }
+      }
+      drawState = splitMix32(drawState ^ s);
+    };
+    return {
+      canvas,
+      fillRect(x = 0, y = 0, rw = 0, rh = 0) {
+        bumpDraw(0x101, `${x},${y},${rw},${rh}`);
+      },
+      clearRect() {
+        drawState = fp.seed >>> 0;
+      },
+      getImageData(sx = 0, sy = 0, sw = 1, sh = 1) {
+        const safeW = Math.max(1, Math.min(2048, Number(sw) | 0 || 1));
+        const safeH = Math.max(1, Math.min(2048, Number(sh) | 0 || 1));
+        const img = new w.ImageData(safeW, safeH);
+        const data = img.data;
+        if (data && data.length >= safeW * safeH * 4) {
+          for (let py = 0; py < safeH; py++) {
+            for (let px = 0; px < safeW; px++) {
+              const idx = (py * safeW + px) * 4;
+              const coordHash = splitMix32(
+                drawState ^ Math.imul((sx + px + 1) * 73856093, (sy + py + 1) * 19349663)
+              );
+              let r = ((sx + px) * 13 + (sy + py) * 7 + (coordHash & 0x1f)) & 0xff;
+              let g = ((sx + px) * 5 + (sy + py) * 17 + ((coordHash >>> 5) & 0x1f)) & 0xff;
+              let b = (96 + (sx + px) * 3 - (sy + py) * 3 + ((coordHash >>> 10) & 0x1f)) & 0xff;
+              // 稀疏确定性微扰（约 1/31 像素位点注入 ±1~3 微移，兼顾抗指纹追踪与同会话二次校验幂等）
+              if (coordHash % 31 === 0) {
+                const delta = ((coordHash >>> 16) % 3) + 1;
+                const ch = (coordHash >>> 20) % 3;
+                if (ch === 0) r = (r + delta) & 0xff;
+                else if (ch === 1) g = (g + delta) & 0xff;
+                else b = (b + delta) & 0xff;
+              }
+              data[idx] = r;
+              data[idx + 1] = g;
+              data[idx + 2] = b;
+              data[idx + 3] = 255;
+            }
+          }
+        }
+        return img;
+      },
+      putImageData() {},
+      createImageData: (w2 = 1, h2 = 1) => new w.ImageData(w2, h2),
+      setTransform() {},
+      transform() {},
+      drawImage() {
+        bumpDraw(0x102, "img");
+      },
+      save() {},
+      restore() {},
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      bezierCurveTo() {},
+      quadraticCurveTo() {},
+      closePath() {},
+      clip() {},
+      stroke() {
+        bumpDraw(0x103, this.strokeStyle);
+      },
+      fill() {
+        bumpDraw(0x104, this.fillStyle);
+      },
+      arc(x = 0, y = 0, r = 0) {
+        bumpDraw(0x105, `${x},${y},${r}`);
+      },
+      rect(x = 0, y = 0, rw = 0, rh = 0) {
+        bumpDraw(0x106, `${x},${y},${rw},${rh}`);
+      },
+      ellipse() {},
+      translate() {},
+      scale() {},
+      rotate() {},
+      fillText(t = "") {
+        bumpDraw(0x107, `${this.font}:${t}`);
+      },
+      strokeText(t = "") {
+        bumpDraw(0x108, `${this.font}:${t}`);
+      },
+      measureText: (t) => {
+        const str = String(t);
+        const base = str.length * 8;
+        return {
+          width: base > 0 ? base + fp.rectJitter : 0,
+          actualBoundingBoxLeft: 0,
+          actualBoundingBoxRight: base > 0 ? base + fp.rectJitter : 0,
+          actualBoundingBoxAscent: 8 + fp.rectJitter,
+          actualBoundingBoxDescent: 2,
+        };
+      },
+      createLinearGradient: () => ({ addColorStop() {} }),
+      createRadialGradient: () => ({ addColorStop() {} }),
+      createPattern: () => ({}),
+      isPointInPath: () => false,
+      font: "10px sans-serif",
+      textBaseline: "alphabetic",
+      textAlign: "start",
+      fillStyle: "#000",
+      strokeStyle: "#000",
+      globalAlpha: 1,
+      lineWidth: 1,
+      shadowBlur: 0,
+      shadowColor: "",
+    };
+  }
+
+  const nativeToDataURL = typeof proto.toDataURL === "function" ? proto.toDataURL : null;
+  proto.toDataURL = function (...a) {
+    try {
+      if (nativeToDataURL) return nativeToDataURL.apply(this, a);
+    } catch (_) {}
+    return fp.canvasImage;
+  };
+  if (typeof proto.toBlob !== "function") {
+    proto.toBlob = (cb) => cb && cb(new w.Blob());
+  }
+
+  w.OffscreenCanvas =
+    w.OffscreenCanvas ||
+    class {
+      constructor(width, height) {
+        this.width = width;
+        this.height = height;
+      }
+      getContext() {
+        return proto.getContext.call(this);
+      }
+    };
+
+  // ── Audio（基于会话 seed 的逐采样点确定性微噪，具备真实白噪频谱且同会话重放幂等）──
+  const audioMock = class {
+    constructor() {
+      this.sampleRate = 44100;
+      this.currentTime = 0;
+      this.state = "suspended";
+    }
+    createOscillator() {
+      return {
+        type: "sine",
+        frequency: { value: 440, setValueAtTime() {} },
+        connect() {},
+        start() {},
+        stop() {},
+      };
+    }
+    createDynamicsCompressor() {
+      return {
+        threshold: { value: -24, setValueAtTime() {} },
+        knee: { value: 30, setValueAtTime() {} },
+        ratio: { value: 12, setValueAtTime() {} },
+        attack: { value: 0.003, setValueAtTime() {} },
+        release: { value: 0.25, setValueAtTime() {} },
+        reduction: -12.5 + fp.audioJitter * 1e4,
+        connect() {},
+      };
+    }
+    createAnalyser() {
+      return {
+        fftSize: 2048,
+        frequencyBinCount: 1024,
+        getByteFrequencyData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              arr[i] = (splitMix32(fp.seed ^ (i * 0x45d9f3b)) & 0x7f) + 32;
+            }
+          }
+        },
+        getFloatFrequencyData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              const h = splitMix32(fp.seed ^ (i * 0x45d9f3b));
+              arr[i] = -60 + ((h & 0x3ff) - 512) * 0.02 + fp.audioJitter;
+            }
+          }
+        },
+        getByteTimeDomainData(arr) {
+          if (arr && typeof arr.length === "number") {
+            for (let i = 0; i < arr.length; i++) {
+              arr[i] = 128 + ((splitMix32(fp.seed ^ i) & 0x07) - 4);
+            }
+          }
+        },
+        connect() {},
+      };
+    }
+    createGain() {
+      return { gain: { value: 1, setValueAtTime() {} }, connect() {} };
+    }
+    destination = {};
+    resume() {
+      this.state = "running";
+      return Promise.resolve();
+    }
+    close() {
+      this.state = "closed";
+      return Promise.resolve();
+    }
+  };
+  w.AudioContext = w.AudioContext || audioMock;
+  w.OfflineAudioContext =
+    w.OfflineAudioContext ||
+    class extends audioMock {
+      constructor(_channels, length, sampleRate) {
+        super();
+        this.length = length;
+        this.sampleRate = sampleRate;
+      }
+      startRendering() {
+        const len = this.length || 44100;
+        const sr = this.sampleRate || 44100;
+        const buf = new Float32Array(len);
+        const baseJitter = fp.audioJitter || 0;
+        for (let i = 0; i < len; i += 1) {
+          const t = i / sr;
+          const sampleNoise =
+            (((splitMix32(fp.seed ^ Math.imul(i + 1, 0x9e3779b1)) & 0x3ff) - 512) / 512) * 1e-7;
+          buf[i] =
+            Math.sin(2 * Math.PI * 1000 * t) * Math.exp(-t * 1.2) * 0.6 +
+            Math.sin(2 * Math.PI * 3000 * t) * Math.exp(-t * 1.5) * 0.25 +
+            Math.sin(2 * Math.PI * 5000 * t) * Math.exp(-t * 2.0) * 0.12 +
+            baseJitter +
+            sampleNoise;
+        }
+        return Promise.resolve({
+          numberOfChannels: 1,
+          length: len,
+          sampleRate: sr,
+          getChannelData: () => buf,
+        });
+      }
+    };
+
+  w.requestAnimationFrame = w.requestAnimationFrame || ((cb) => w.setTimeout(() => cb(Date.now()), 16));
+  w.cancelAnimationFrame = w.cancelAnimationFrame || ((id) => w.clearTimeout(id));
+
+  try {
+    Object.defineProperty(w.document, "hidden", { value: false, configurable: true });
+    Object.defineProperty(w.document, "visibilityState", { value: "visible", configurable: true });
+  } catch (_) {}
+
+  if (!w.document.fonts) {
+    w.document.fonts = {
+      ready: Promise.resolve(),
+      check: () => true,
+      addEventListener() {},
+      removeEventListener() {},
+    };
+  }
+
+  // ── Element.prototype.getBoundingClientRect 亚像素微扰（模拟 GPU 排版光栅化差异）──
+  if (w.Element && w.Element.prototype && typeof w.Element.prototype.getBoundingClientRect === "function") {
+    const origGetBCR = w.Element.prototype.getBoundingClientRect;
+    w.Element.prototype.getBoundingClientRect = function (...args) {
+      const r = origGetBCR.apply(this, args) || {
+        x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0,
+      };
+      const j = fp.rectJitter || 0;
+      const wVal = r.width ? r.width + j : 0;
+      const hVal = r.height ? r.height + j : 0;
+      return {
+        x: r.x || 0,
+        y: r.y || 0,
+        width: wVal,
+        height: hVal,
+        top: r.top || 0,
+        right: (r.left || 0) + wVal,
+        bottom: (r.top || 0) + hVal,
+        left: r.left || 0,
+        toJSON() {
+          return {
+            x: this.x, y: this.y, width: this.width, height: this.height,
+            top: this.top, right: this.right, bottom: this.bottom, left: this.left,
+          };
+        },
+      };
+    };
+  }
+
+  // ── chrome 对象 ──
+  if (!w.chrome) {
+    w.chrome = {
+      app: {
+        isInstalled: false,
+        InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" },
+        RunningState: { CANNOT_RUN: "cannot_run", CAN_RUN: "can_run", RUNNING: "running" },
+        getDetails() {
+          return null;
+        },
+        getIsInstalled() {
+          return false;
+        },
+        installState(cb) {
+          if (cb) cb("not_installed");
+        },
+        runningState(cb) {
+          if (cb) cb("cannot_run");
+        },
+      },
+      csi() {
+        const now = Date.now();
+        return { startE: now - 100, onloadT: now, pageT: 100, tran: 15 };
+      },
+      loadTimes() {
+        const now = Date.now() / 1000;
+        return {
+          requestTime: now - 0.1, startLoadTime: now - 0.1,
+          commitLoadTime: now - 0.05, finishDocumentLoadTime: now,
+          finishLoadTime: now, firstPaintTime: now - 0.02,
+          firstPaintAfterLoadTime: 0, navigationType: "Other",
+          wasFetchedViaSpdy: true, wasNpnNegotiated: true,
+          npnNegotiatedProtocol: "h2", wasAlternateProtocolAvailable: false,
+          connectionInfo: "h2",
+        };
+      },
+    };
+  }
+
+  // ── navigator ──
+  const nav = w.navigator;
+  const plugins = createNavigatorPlugins(w);
+  const navPatch = {
+    userAgent: fp.userAgent,
+    platform: fp.platform,
+    language: "en-US",
+    languages: ["en-US", "en"],
+    vendor: "Google Inc.",
+    webdriver: false,
+    hardwareConcurrency: fp.hardwareConcurrency,
+    deviceMemory: fp.deviceMemory,
+    maxTouchPoints: 0,
+    cookieEnabled: true,
+    plugins: plugins.plugins,
+    mimeTypes: plugins.mimeTypes,
+    appVersion: fp.userAgent.replace(/^Mozilla\//, ""),
+    appName: "Netscape",
+    appCodeName: "Mozilla",
+    product: "Gecko",
+    productSub: "20030107",
+    vendorSub: "",
+    doNotTrack: null,
+    sendBeacon: (url, data) => {
+      try {
+        const xhr = new w.XMLHttpRequest();
+        xhr.open("POST", url, true);
+        xhr.send(data);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+  };
+  for (const [k, v] of Object.entries(navPatch)) {
+    try {
+      Object.defineProperty(nav, k, { value: v, configurable: true });
+    } catch (_) {}
+  }
+
+  const makeNS = (protoObj) => {
+    const C = new w.Function();
+    C.prototype = protoObj;
+    return new C();
+  };
+
+  if (!nav.connection) {
+    const NetInfo = () => {};
+    NetInfo.prototype = { onchange: null, effectiveType: "4g", rtt: 50, downlink: 10, saveData: false };
+    w.NetworkInformation = NetInfo;
+    try {
+      Object.defineProperty(nav, "connection", { value: makeNS(NetInfo.prototype), configurable: true });
+    } catch (_) {}
+  }
+  if (!nav.userAgentData) {
+    const uaBrands = [
+      { brand: "Chromium", version: fp.uaMajor },
+      { brand: "Google Chrome", version: fp.uaMajor },
+      { brand: "Not-A.Brand", version: "99" },
+    ];
+    const uaFullVersionList = [
+      { brand: "Chromium", version: fp.uaFull },
+      { brand: "Google Chrome", version: fp.uaFull },
+      { brand: "Not-A.Brand", version: "99.0.0.0" },
+    ];
+    const highEntropyMap = {
+      architecture: fp.arch,
+      bitness: "64",
+      brands: uaBrands,
+      formFactors: ["Desktop"],
+      fullVersionList: uaFullVersionList,
+      mobile: false,
+      model: "",
+      platform: fp.chPlatform,
+      platformVersion: fp.platformVersion,
+      uaFullVersion: fp.uaFull,
+      wow64: false,
+    };
+    const UAData = function () {};
+    UAData.prototype = {
+      brands: uaBrands,
+      mobile: false,
+      platform: fp.chPlatform,
+      toJSON: () => ({
+        brands: uaBrands,
+        mobile: false,
+        platform: fp.chPlatform,
+      }),
+      getHighEntropyValues: (hints) => {
+        if (!Array.isArray(hints)) {
+          return Promise.resolve({ ...highEntropyMap });
+        }
+        const res = {
+          brands: uaBrands,
+          mobile: false,
+          platform: fp.chPlatform,
+        };
+        for (const h of hints) {
+          if (Object.prototype.hasOwnProperty.call(highEntropyMap, h)) {
+            res[h] = highEntropyMap[h];
+          }
+        }
+        return Promise.resolve(res);
+      },
+    };
+    try {
+      Object.defineProperty(nav, "userAgentData", { value: makeNS(UAData.prototype), configurable: true });
+    } catch (_) {}
+  }
+  if (!w.Permissions) {
+    const Perms = () => {};
+    Perms.prototype = {
+      query: (param) =>
+        Promise.resolve({ state: param.name === "notifications" ? "prompt" : "granted", onchange: null }),
+    };
+    w.Permissions = Perms;
+  }
+  try {
+    if (!nav.permissions) Object.defineProperty(nav, "permissions", { value: makeNS(w.Permissions.prototype), configurable: true });
+  } catch (_) {}
+  try {
+    if (!nav.clipboard)
+      Object.defineProperty(nav, "clipboard", {
+        value: makeNS({ readText: () => Promise.resolve(""), writeText: () => Promise.resolve() }),
+        configurable: true,
+      });
+  } catch (_) {}
+  try {
+    if (!nav.geolocation)
+      Object.defineProperty(nav, "geolocation", {
+        value: makeNS({
+          getCurrentPosition: (s) => s && s({ coords: { latitude: 0, longitude: 0, accuracy: 1 } }),
+          watchPosition: () => 1,
+          clearWatch: () => {},
+        }),
+        configurable: true,
+      });
+  } catch (_) {}
+  try {
+    if (!nav.credentials)
+      Object.defineProperty(nav, "credentials", {
+        value: makeNS({ get: () => Promise.resolve(null), create: () => Promise.resolve(null), store: () => Promise.resolve(), preventSilentAccess: () => Promise.resolve() }),
+        configurable: true,
+      });
+  } catch (_) {}
+  try {
+    if (!nav.storage)
+      Object.defineProperty(nav, "storage", {
+        value: makeNS({ estimate: () => Promise.resolve({ quota: 1e8, usage: 0 }), persisted: () => Promise.resolve(false), persist: () => Promise.resolve(false) }),
+        configurable: true,
+      });
+  } catch (_) {}
+  try {
+    if (!nav.usb)
+      Object.defineProperty(nav, "usb", {
+        value: makeNS({ getDevices: () => Promise.resolve([]), requestDevice: () => Promise.reject(new Error("no devices")) }),
+        configurable: true,
+      });
+  } catch (_) {}
+  try {
+    if (!nav.mediaDevices) {
+      const audioGroupId = seedHex64(fp.seed, 10);
+      const videoGroupId = seedHex64(fp.seed, 20);
+      const defaultDevices = [
+        {
+          deviceId: "default",
+          kind: "audioinput",
+          label: "",
+          groupId: audioGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+        {
+          deviceId: seedHex64(fp.seed, 30),
+          kind: "videoinput",
+          label: "",
+          groupId: videoGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+        {
+          deviceId: "default",
+          kind: "audiooutput",
+          label: "",
+          groupId: audioGroupId,
+          toJSON() {
+            return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId };
+          },
+        },
+      ];
+      Object.defineProperty(nav, "mediaDevices", {
+        value: makeNS({
+          enumerateDevices: () => Promise.resolve(defaultDevices),
+          getUserMedia: () => Promise.reject(new Error("NotAllowedError")),
+        }),
+        configurable: true,
+      });
+    }
+  } catch (_) {}
+
+  // ── screen / 窗口尺寸 ──
+  const screenPatch = {
+    width: fp.screen.w,
+    height: fp.screen.h,
+    availWidth: fp.screen.aw,
+    availHeight: fp.screen.ah,
+    availLeft: 0,
+    availTop: 0,
+    colorDepth: 24,
+    pixelDepth: 24,
+    orientation: { angle: 0, type: "landscape-primary", onchange: null },
+  };
+  for (const [k, v] of Object.entries(screenPatch)) {
+    try {
+      Object.defineProperty(w.screen, k, { get: () => v, configurable: true });
+    } catch (_) {}
+  }
+
+  w.outerWidth = fp.screen.w;
+  w.outerHeight = fp.screen.h - 40;
+  w.innerWidth = fp.screen.w - 16;
+  w.innerHeight = fp.screen.h - 120;
+  w.devicePixelRatio = fp.screen.dpr || 1;
+}
+
+function createNavigatorPlugins(w) {
+  const indexed = [
+    { name: "PDF Viewer", filename: "internal-pdf-viewer", description: "Portable Document Format" },
+    { name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+    { name: "Chromium PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "" },
+  ];
+  const plugins = w.PluginArray ? Object.create(w.PluginArray.prototype) : {};
+  const mockIndexed = [];
+  for (let i = 0; i < indexed.length; i++) {
+    const p = Object.create((w.Plugin && w.Plugin.prototype) || Object.prototype);
+    Object.defineProperty(p, "name", { value: indexed[i].name, configurable: true, enumerable: true });
+    Object.defineProperty(p, "filename", { value: indexed[i].filename, configurable: true, enumerable: true });
+    Object.defineProperty(p, "description", { value: indexed[i].description, configurable: true, enumerable: true });
+    Object.defineProperty(p, "length", { value: 1, configurable: true, enumerable: true });
+    Object.defineProperty(p, "0", { value: p, configurable: true, enumerable: true });
+    p.item = () => p;
+    p.namedItem = () => p;
+    plugins[i] = p;
+    mockIndexed.push(p);
+  }
+  Object.defineProperty(plugins, "length", { value: indexed.length, configurable: true, enumerable: true });
+  plugins.item = (i) => plugins[i] ?? null;
+  plugins.namedItem = (name) => mockIndexed.find((p) => p.name === name) ?? null;
+  plugins.refresh = () => {};
+  const mimeTypes = w.MimeTypeArray ? Object.create(w.MimeTypeArray.prototype) : {};
+  Object.defineProperty(mimeTypes, "length", { value: 0, configurable: true, enumerable: true });
+  mimeTypes.item = () => null;
+  mimeTypes.namedItem = () => null;
+  return { plugins, mimeTypes };
+}
+
+// ── 行为仿真（FeiLin 人类动作缓冲：600ms 鼠标滑行 + 点击 + 键盘）─────────────
+function simulateBehavior(w, durationMs = 600) {
+  const { document, MouseEvent, KeyboardEvent, UIEvent } = w;
+  if (!document || !MouseEvent) return;
+  const fire = (type, ctor, opts) => {
+    try {
+      const Ctor = ctor || UIEvent;
+      const ev = new Ctor(type, { bubbles: true, cancelable: true, view: w, ...opts });
+      document.dispatchEvent(ev);
+      if (document.body) document.body.dispatchEvent(ev);
+    } catch (_) {}
+  };
+  let x = 140 + Math.random() * 30;
+  let y = 110 + Math.random() * 20;
+  const targetX = 540 + Math.random() * 40;
+  const targetY = 380 + Math.random() * 30;
+  const steps = 22;
+  let i = 0;
+  const start = Date.now();
+  const moveStep = () => {
+    if (i > steps) return;
+    x += (targetX - x) * 0.16 + (Math.random() - 0.5) * 5;
+    y += (targetY - y) * 0.16 + (Math.random() - 0.5) * 4;
+    fire("mousemove", MouseEvent, {
+      screenX: Math.round(x),
+      screenY: Math.round(y),
+      clientX: Math.round(x),
+      clientY: Math.round(y),
+      button: 0,
+      buttons: 1,
+    });
+    i += 1;
+    const done = Date.now() - start >= durationMs;
+    if (i <= steps && !done) {
+      w.setTimeout(moveStep, 26 + Math.floor(Math.random() * 32));
+    } else {
+      fire("mousedown", MouseEvent, { clientX: Math.round(x), clientY: Math.round(y), button: 0, buttons: 1 });
+      fire("mouseup", MouseEvent, { clientX: Math.round(x), clientY: Math.round(y), button: 0, buttons: 0 });
+      fire("click", MouseEvent, { clientX: Math.round(x), clientY: Math.round(y), button: 0 });
+      try {
+        fire("keyup", KeyboardEvent, { key: "a", code: "KeyA", keyCode: 65, which: 65 });
+      } catch (_) {}
+    }
+  };
+  moveStep();
+}
+
+// ── cookie priming 缓存（对齐 zapi _cookieCache，5 分钟） ─────────────────────
+const COOKIE_CACHE_TTL_MS = 5 * 60 * 1000;
+let _cookieCache = { cookies: [], ts: 0 };
+
+// ── waitFor：轮询等待条件成立（initAliyunCaptcha 挂载） ──────────────────────
+function waitFor(cond, timeoutMs, intervalMs = 50) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      let ok = false;
+      try {
+        ok = !!cond();
+      } catch (_) {
+        ok = false;
+      }
+      if (ok) return resolve(true);
+      if (Date.now() - start >= timeoutMs) {
+        return reject(new Error("waitFor timeout"));
+      }
+      setTimeout(tick, intervalMs);
+    };
+    tick();
+  });
+}
+
+// ── createDom：装配一个可解验证码的 happy-dom 窗口 ──────────────────────────
+// 对齐 zapi createDom：cookie priming（5min 缓存）→ GlobalWindow（开启 JS 执行 +
+// 拦截器）→ WindowBrowserContext 取 cookieContainer → 预置 cookie → 装 polyfill/
+// 掩码/eval 探针（务必在 SDK 脚本执行前）→ document.write(HTML) → 挂 config。
+async function createDom(region, prefix) {
+  let cookies = [];
+  const now = Date.now();
+  if (_cookieCache.ts > 0 && now - _cookieCache.ts < COOKIE_CACHE_TTL_MS) {
+    cookies = _cookieCache.cookies;
+  } else {
+    try {
+      const res = await fetch("https://zcode.z.ai/", {
+        headers: {
+          "User-Agent": fp.userAgent,
+          "sec-ch-ua": '"Chromium";v="' + fp.uaMajor + '", "Not)A;Brand";v="24"',
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": '"' + fp.chPlatform + '"',
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      });
+      cookies = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+      _cookieCache = { cookies, ts: Date.now() };
+    } catch (_) {}
+  }
+
+  const interceptor = makeInterceptor();
+
+  // 子进程只解一次，无需 unhandledRejection 累积防护，但要防止 guest 脚本抛出的
+  // 同步异常终止整个进程（happy-dom 的异常观察者会 rethrow）。
+  if (!process.__capUncaughtHooked) {
+    process.__capUncaughtHooked = true;
+    process.on("uncaughtException", (err) => {
+      dbg(`[guest-uncaught] ${err && err.message ? err.message : String(err)}`);
+    });
+    process.on("unhandledRejection", (reason) => {
+      dbg(`[guest-unhandledRejection] ${reason && reason.message ? reason.message : String(reason)}`);
+    });
+  }
+
+  const noop = () => {};
+  const guestConsole = DEBUG
+    ? {
+        log: (...a) => process.stderr.write(`[guest-log] ${a.map(String).join(" ")}\n`),
+        warn: (...a) => process.stderr.write(`[guest-warn] ${a.map(String).join(" ")}\n`),
+        error: (...a) => process.stderr.write(`[guest-err] ${a.map(String).join(" ")}\n`),
+        info: (...a) => process.stderr.write(`[guest-info] ${a.map(String).join(" ")}\n`),
+        debug: (...a) => process.stderr.write(`[guest-debug] ${a.map(String).join(" ")}\n`),
+        trace: noop,
+      }
+    : { log: noop, warn: noop, error: noop, info: noop, debug: noop, trace: noop };
+
+  const w = new Window({
+    url: "https://zcode.z.ai/",
+    console: guestConsole,
+    settings: {
+      enableJavaScriptEvaluation: true,
+      enableImageFileLoading: true,
+      suppressInsecureJavaScriptEnvironmentWarning: true,
+      navigator: { userAgent: fp.userAgent },
+      viewport: { width: fp.screen.w, height: fp.screen.h, devicePixelRatio: fp.screen.dpr || 1 },
+      fetch: {
+        disableSameOriginPolicy: true,
+        interceptor,
+      },
+    },
+  });
+
+  const browserFrame = new WindowBrowserContext(w).getBrowserFrame();
+  global.__browserFrame = browserFrame;
+  global.__cookieContainer = browserFrame.page.context.cookieContainer;
+
+  // priming cookie（从 zcode.z.ai 首页 set-cookie 灌入）
+  for (const raw of cookies) {
+    try {
+      const u = new URL("https://zcode.z.ai/");
+      const parts = raw.split(";");
+      const pair = parts[0].split("=");
+      const cookie = {
+        name: pair[0].trim(),
+        value: pair.slice(1).join("=").trim(),
+        url: u.origin,
+        domain: u.hostname,
+        path: "/",
+      };
+      for (const p of parts.slice(1)) {
+        const kv = p.trim().split(/=(.*)/s);
+        const k = (kv[0] || "").toLowerCase();
+        if (k === "domain" && kv[1]) cookie.domain = kv[1];
+        if (k === "path" && kv[1]) cookie.path = kv[1];
+        if (k === "expires") cookie.expires = new Date(kv[1]).getTime();
+        if (k === "max-age") cookie.maxAge = parseInt(kv[1], 10);
+        if (k === "httponly") cookie.httpOnly = true;
+        if (k === "secure") cookie.secure = true;
+        if (k === "samesite") cookie.sameSite = kv[1];
+      }
+      browserFrame.page.context.cookieContainer.addCookies([cookie]);
+    } catch (_) {}
+  }
+
+  // 预置访客身份 cookie（对齐 zapi）
+  const visitorId = crypto.randomUUID();
+  const deviceMid = crypto.randomUUID();
+  const pre = [
+    { name: "zcode_visitor_id", value: visitorId, domain: "zcode.z.ai" },
+    { name: "zcode_device_mid", value: deviceMid, domain: "zcode.z.ai" },
+    { name: "visitor_id", value: visitorId, domain: "zcode.z.ai", httpOnly: true },
+  ];
+  for (const c of pre) {
+    try {
+      browserFrame.page.context.cookieContainer.addCookies([{ ...c, url: "https://zcode.z.ai", path: "/" }]);
+    } catch (_) {}
+  }
+
+  // polyfill / 掩码 / eval 探针必须在 SDK 脚本执行前装好
+  applyPolyfills(w);
+  installNativeToString(w);
+  installEvalInstrumentation(w);
+  if (w.Error) {
+    try {
+      w.Error.prepareStackTrace = Error.prepareStackTrace;
+    } catch (_) {}
+  }
+
+  // guest 侧 dump 助手调用的宿主回调：算 sha1、比对 pe 磁盘缓存新鲜度
+  w.__capDebugDump = (url, src, kind) => {
+    if (!DEBUG) return;
+    try {
+      const s = String(src || "");
+      const sha1 = crypto.createHash("sha1").update(s).digest("hex");
+      process.stderr.write(
+        `\n[${kind}] url=${url} len=${s.length} sha1=${sha1}\n` +
+          `  head300: ${JSON.stringify(s.slice(0, 300))}\n`,
+      );
+    } catch (_) {}
+  };
+
+  w.eval(GUEST_EVAL_PATCH);
+  w.document.write(HTML);
+  w.AliyunCaptchaConfig = { region, prefix };
+
+  return { window: w, browserFrame };
+}
+
+// ── 结果提取：严格校验（对齐 zapi extractVerifyParam） ──────────────────────
+// 真实 verifyParam ~280 字符 base64-JSON，内含 securityToken（≥50 字符）。
+// len-76 的降级结果（无 securityToken）上游必然 3007，绝不放行。
+function handleCaptchaResult(result) {
+  if (result && typeof result === "object" && result.verifyResult === false) {
+    throw failure("sdk_failed");
+  }
+  return result;
+}
+
+// ── main：单次求解 → 打印 VERIFY_PARAM= ─────────────────────────────────────
+async function main() {
+  global.__requestLog = [];
+  global.__cookieContainer = null;
+  global.__browserFrame = null;
+
+  const timeoutMs = 30_000;
+  const stallMs = Number(process.env.CAPTCHA_STALL_MS || 6_000);
+
+  const dom = await createDom(REGION, PREFIX);
+  const w = dom.window;
+  const solveStart = Date.now();
+
+  try {
+    try {
+      await waitFor(() => typeof w.initAliyunCaptcha === "function", timeoutMs, 50);
+    } catch (_) {
+      throw failure("solver_timeout");
+    }
+    simulateBehavior(w, 600);
+
+    const param = await new Promise((resolve, reject) => {
+      const reqSnapshot = () =>
+        global.__requestLog
+          .filter((r) => r.at >= solveStart)
+          .map((r) => `${r.at - solveStart}ms ${r.method} ${String(r.url).replace(/^https?:\/\//, "").slice(0, 60)}`)
+          .slice(-12);
+
+      const timer = setTimeout(() => {
+        const peUrl = (() => {
+          try {
+            return w.__lastPeUrl || "?";
+          } catch (_) {
+            return "?";
+          }
+        })();
+        reject(failure("solver_timeout"));
+      }, timeoutMs);
+
+      // 失速探测：健康求解会持续发 XHR（~3s 内到 verify）。若 stallMs 内无新
+      // XHR，则该 pe-VM 版本失速 —— 提前中止并淘汰缓存，让上层重试拿新 pe。
+      const stallTimer = setInterval(() => {
+        const last = global.__requestLog[global.__requestLog.length - 1];
+        if (last && Date.now() - last.at > stallMs) {
+          const peUrl = (() => {
+            try {
+              return w.__lastPeUrl || "?";
+            } catch (_) {
+              return "?";
+            }
+          })();
+          noteStallAndMaybeEvict(peUrl);
+          clearTimeout(timer);
+          clearInterval(stallTimer);
+          reject(failure("solver_stalled"));
+        }
+      }, 500);
+
+      const finish = (fn) => (value) => {
+        clearTimeout(timer);
+        clearInterval(stallTimer);
+        fn(value);
+      };
+
+      try {
+        w.initAliyunCaptcha({
+          SceneId: SCENE,
+          mode: "popup",
+          region: REGION,
+          prefix: PREFIX,
+          language: "en",
+          element: "#cap",
+          button: "#btn",
+          captchaLogoImg: "",
+          showErrorTip: false,
+          getInstance: (inst) => {
+            try {
+              (inst.startTracelessVerification || inst.show).call(inst);
+            } catch (e) {
+              finish(reject)(failure("sdk_failed"));
+            }
+          },
+          success: (result) => {
+            try {
+              finish(resolve)(handleCaptchaResult(result));
+            } catch (err) {
+              finish(reject)(err);
+            }
+          },
+          fail: () => finish(reject)(failure("sdk_failed")),
+          onError: () => finish(reject)(failure("sdk_on_error")),
+        });
+      } catch (err) {
+        clearTimeout(timer);
+        clearInterval(stallTimer);
+        reject(failure("sdk_failed"));
+      }
+    });
+
+    // 成功后清理该 pe 的失速计数
+    try {
+      const okPe = w.__lastPeUrl;
+      if (okPe) _stallCounts.delete(okPe);
+    } catch (_) {}
+
+    const out = extractVerifyParam(param);
+    process.stdout.write("VERIFY_PARAM=" + out + "\n");
+    process.exit(0);
+  } catch (err) {
+    process.exit(emitFailure(err, Date.now() - solverStarted));
+  } finally {
+    try {
+      const cap = w.document.getElementById("cap");
+      if (cap) cap.replaceChildren();
+      w.happyDOM.close();
+    } catch (_) {}
+    global.__cookieContainer = null;
+    global.__browserFrame = null;
+  }
+}
+
+main().catch(() => {
+  process.exit(emitFailure(failure("sdk_init_failed"), Date.now() - solverStarted));
+});

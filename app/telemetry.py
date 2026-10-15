@@ -1,0 +1,124 @@
+"""激活遥测上报 —— 官方 event/report 端点的单一事实源。
+
+事件体 16 字段与 app.asar 逆向的 telemetry-core sendReport 逐字段一致
+（commit 65a547b 三源实证：首启日志 / asar 逆向 / Linux 实装模仿）。字段集、
+URL、业务码判定只在本模块维护：
+
+  - claim.report_activation_events（登录态激活上报，preview 前）
+  - install.run_install_sequence（首启安装序）
+
+端点走 settings.ZCODE_EVENT_REPORT_URL（env 可覆盖，测试注入 mock 上游）。
+"""
+
+from __future__ import annotations
+
+import uuid
+
+import httpx
+
+from . import constants, settings
+
+_TIMEOUT = 10
+
+
+def build_activation_event_body(
+    element: str,
+    profile,
+    user_id: str,
+    *,
+    event_region: str = "app",
+    event_type: str = "view",
+    event_extra_detail: dict | None = None,
+) -> dict:
+    """激活事件体（官方 sendReport 字段集固定为这 16 个）。
+
+    event_region / event_type / event_extra_detail 可配置：默认 `app` 域 +
+    `view` + 空 detail，与 `app_launch`/`app_daily_active` 既有形态一致；
+    `app_login_success` 等需要 `app_profile` 域或明细的事件由调用方显式传入。
+    """
+    return {
+        "event_id": str(uuid.uuid4()),
+        "client_timezone": profile.timezone,
+        "client_language": profile.language,
+        "element_name": element,
+        "event_region": event_region,
+        "event_type": event_type,
+        "event_text": "",
+        "event_extra_detail": event_extra_detail or {},
+        "user_id": user_id,
+        "screen_resolution": profile.screen,
+        "app_version": constants.BILLING_APP_VERSION,
+        "device_os_category": profile.os_category,
+        "device_os_version": profile.os_version,
+        "device_mid": profile.device_mid,
+        "mac_id": "",
+        "marketing_params": "{}",
+    }
+
+
+def resolve_login_provider(provider: str) -> str:
+    """登录事件 provider 标签（对齐官方 resolveProviderTelemetryLabel）。
+
+    zai 系 → "z.ai"；bigmodel 系 → "bigmodel"；未知 provider 原样返回。
+    """
+    if provider == "zai":
+        return "z.ai"
+    if provider == "bigmodel":
+        return "bigmodel"
+    return provider
+
+
+def business_code(body) -> int:
+    """上游业务码；非对象 JSON / 缺 code / 非数字 → -1（视为失败）。"""
+    if not isinstance(body, dict):
+        return -1
+    try:
+        return int(body.get("code", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+async def post_activation_event(
+    profile,
+    user_id: str,
+    element: str,
+    client: httpx.AsyncClient | None = None,
+    timeout: float = _TIMEOUT,
+    *,
+    headers: dict | None = None,
+    event_region: str = "app",
+    event_type: str = "view",
+    event_extra_detail: dict | None = None,
+) -> None:
+    """单条激活事件上报。
+
+    优先复用外部传入的 client（与账号绑定大区代理出口同源）；未传入时降级创建临时客户端。
+    登录态调用方可经 `headers` 传入完整公共头与 `Authorization`（对齐官方
+    event-report-delivery-reliability.md 投递合同）；未传入时保持最小 `Content-Type`
+    （兼容 `install.run_install_sequence` 匿名首启上报）。
+    HTTP >= 400 或业务码非 0 抛 RuntimeError，文案含定位信息（"HTTP 500" /
+    "业务码异常"）；httpx.HTTPError 原样上抛 —— 容错策略（中止/继续）由调用方定。
+    """
+    body = build_activation_event_body(
+        element,
+        profile,
+        user_id,
+        event_region=event_region,
+        event_type=event_type,
+        event_extra_detail=event_extra_detail,
+    )
+    req_headers = headers or {"Content-Type": "application/json"}
+    if client is not None:
+        res = await client.post(settings.ZCODE_EVENT_REPORT_URL, headers=req_headers, json=body)
+    else:
+        async with httpx.AsyncClient(timeout=timeout) as fallback_client:
+            res = await fallback_client.post(settings.ZCODE_EVENT_REPORT_URL, headers=req_headers, json=body)
+    if res.status_code >= 400:
+        raise RuntimeError(f"event/report {element} HTTP {res.status_code}: {res.text[:120]}")
+    try:
+        body = res.json()
+    except ValueError:
+        body = None
+    code = business_code(body)
+    if code != 0:
+        raise RuntimeError(f"event/report {element} 业务码异常({code}): {res.text[:120]}")

@@ -1,0 +1,481 @@
+"""账号与设置的持久化存储（SQLite）。
+
+数据保存在项目本目录下的 data/accounts.db，采用 WAL 模式，
+与 grok2api 的本地 (local) 账号后端保持一致。
+
+运行期账号对象常驻内存（保证轮询游标与状态实时性），
+每次变更同步落库；进程启动时从 SQLite 读取快照。
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import time
+import uuid
+from contextlib import closing
+
+from . import settings
+from .models import PROVIDERS, Account, Status
+
+_TBL = "accounts"
+_META = "meta"
+
+
+class Store:
+    """线程安全的账号 / 设置存储，含轮询游标。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._accounts: dict[str, list[Account]] = {p: [] for p in PROVIDERS}
+        self._settings: dict = {}
+        self._rotation: dict[str, int] = {p: 0 for p in PROVIDERS}
+        self._init_db()
+        self._load()
+
+    # ── SQLite 基础 ──────────────────────────────────────────────────────────
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(settings.DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        return conn
+
+    def _init_db(self) -> None:
+        settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with closing(self._connect()) as conn:
+            conn.executescript(
+                f"""
+                CREATE TABLE IF NOT EXISTS {_META} (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS {_TBL} (
+                    id          TEXT PRIMARY KEY,
+                    provider    TEXT NOT NULL,
+                    name        TEXT,
+                    mode        TEXT,
+                    status      TEXT,
+                    enabled     INTEGER NOT NULL DEFAULT 1,
+                    created_at  REAL,
+                    data        TEXT NOT NULL,
+                    assigned_region TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_acc_provider ON {_TBL} (provider);
+                CREATE INDEX IF NOT EXISTS idx_acc_status   ON {_TBL} (status);
+                """
+            )
+            try:
+                conn.execute(f"ALTER TABLE {_TBL} ADD COLUMN assigned_region TEXT")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_acc_region ON {_TBL} (assigned_region)")
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('admin_key', ?)",
+                (settings.DEFAULT_ADMIN_KEY,),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('gateway_key', '')"
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('quota_refresh_interval', ?)",
+                (str(settings.QUOTA_REFRESH_INTERVAL),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('account_concurrency', ?)",
+                (str(settings.ACCOUNT_CONCURRENCY),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('bark_server_url', ?)",
+                (settings.BARK_SERVER_URL,),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('bark_device_key', ?)",
+                (settings.BARK_DEVICE_KEY,),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_interval', ?)",
+                (str(settings.SENTINEL_INTERVAL),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_auto_claim', ?)",
+                (str(settings.SENTINEL_AUTO_CLAIM),),
+            )
+            conn.execute(
+                f"INSERT OR IGNORE INTO {_META} (key, value) VALUES ('sentinel_seen_plans', '[]')"
+            )
+            conn.commit()
+
+    def _load(self) -> None:
+        with closing(self._connect()) as conn:
+            meta_rows = conn.execute(f"SELECT key, value FROM {_META}").fetchall()
+            self._settings = {r["key"]: r["value"] for r in meta_rows}
+            self._settings.setdefault("admin_key", settings.DEFAULT_ADMIN_KEY)
+            self._settings.setdefault("gateway_key", "")
+            self._settings.setdefault("quota_refresh_interval", str(settings.QUOTA_REFRESH_INTERVAL))
+            self._settings.setdefault("account_concurrency", str(settings.ACCOUNT_CONCURRENCY))
+            self._settings.setdefault("bark_server_url", settings.BARK_SERVER_URL)
+            self._settings.setdefault("bark_device_key", settings.BARK_DEVICE_KEY)
+            self._settings.setdefault("sentinel_interval", str(settings.SENTINEL_INTERVAL))
+            self._settings.setdefault("sentinel_auto_claim", str(settings.SENTINEL_AUTO_CLAIM))
+            self._settings.setdefault("sentinel_seen_plans", "[]")
+
+            self._accounts = {p: [] for p in PROVIDERS}
+            rows = conn.execute(
+                f"SELECT data, assigned_region FROM {_TBL} ORDER BY created_at ASC"
+            ).fetchall()
+            for row in rows:
+                try:
+                    account = Account.from_dict(json.loads(row["data"]))
+                    if row["assigned_region"]:
+                        account.assigned_region = row["assigned_region"]
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if account.provider in self._accounts:
+                    self._accounts[account.provider].append(account)
+
+    def _persist_account(self, account: Account) -> None:
+        with closing(self._connect()) as conn:
+            data_dict = account.to_dict()
+            if account.assigned_region:
+                data_dict["assigned_region"] = account.assigned_region
+            conn.execute(
+                f"""INSERT INTO {_TBL}
+                    (id, provider, name, mode, status, enabled, created_at, data, assigned_region)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        provider = excluded.provider,
+                        name = excluded.name,
+                        mode = excluded.mode,
+                        status = excluded.status,
+                        enabled = excluded.enabled,
+                        created_at = excluded.created_at,
+                        data = excluded.data,
+                        assigned_region = COALESCE(excluded.assigned_region, {_TBL}.assigned_region)
+                """,
+                (
+                    account.id, account.provider, account.name, account.mode,
+                    account.status, 1 if account.enabled else 0, account.created_at,
+                    json.dumps(data_dict, ensure_ascii=False),
+                    account.assigned_region,
+                ),
+            )
+            conn.commit()
+
+    def _delete_account(self, account_id: str) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(f"DELETE FROM {_TBL} WHERE id = ?", (account_id,))
+            conn.commit()
+
+    def _set_meta(self, key: str, value: str) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO {_META} (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            conn.commit()
+
+    def save(self) -> None:
+        """全量落库（兜底接口）。"""
+        with self._lock:
+            for accounts in self._accounts.values():
+                for account in accounts:
+                    self._persist_account(account)
+
+    # ── 设置 ─────────────────────────────────────────────────────────────────
+    def get_setting(self, key: str, default=None):
+        with self._lock:
+            return self._settings.get(key, default)
+
+    def set_setting(self, key: str, value) -> None:
+        with self._lock:
+            self._settings[key] = str(value)
+            self._set_meta(key, str(value))
+
+    def admin_key(self) -> str:
+        return str(self.get_setting("admin_key", settings.DEFAULT_ADMIN_KEY) or "")
+
+    def gateway_key(self) -> str:
+        return str(self.get_setting("gateway_key", "") or "")
+
+    def quota_refresh_interval(self) -> int:
+        try:
+            return max(0, int(self.get_setting("quota_refresh_interval", settings.QUOTA_REFRESH_INTERVAL)))
+        except (TypeError, ValueError):
+            return settings.QUOTA_REFRESH_INTERVAL
+
+    def account_concurrency(self) -> int:
+        """单账号并发上限（0 = 不限）。运行时可改（meta 表），改后即生效。"""
+        try:
+            return max(0, int(self.get_setting("account_concurrency", settings.ACCOUNT_CONCURRENCY)))
+        except (TypeError, ValueError):
+            return settings.ACCOUNT_CONCURRENCY
+
+    def bark_server_url(self) -> str:
+        return str(self.get_setting("bark_server_url", settings.BARK_SERVER_URL) or "https://api.day.app").strip()
+
+    def bark_device_key(self) -> str:
+        return str(self.get_setting("bark_device_key", settings.BARK_DEVICE_KEY) or "").strip()
+
+    def sentinel_interval(self) -> int:
+        try:
+            return max(0, int(self.get_setting("sentinel_interval", settings.SENTINEL_INTERVAL)))
+        except (TypeError, ValueError):
+            return settings.SENTINEL_INTERVAL
+
+    def sentinel_auto_claim(self) -> bool:
+        v = str(self.get_setting("sentinel_auto_claim", str(settings.SENTINEL_AUTO_CLAIM))).strip().lower()
+        return v not in ("0", "false", "off", "no")
+
+    def get_seen_plan_ids(self) -> set[str]:
+        raw = self.get_setting("sentinel_seen_plans", "[]")
+        try:
+            items = json.loads(raw)
+            if isinstance(items, list):
+                return {str(item) for item in items if item}
+        except Exception:
+            pass
+        return set()
+
+    def add_seen_plan_ids(self, plan_ids: list[str] | set[str]) -> None:
+        with self._lock:
+            current = self.get_seen_plan_ids()
+            current.update(str(p) for p in plan_ids if p)
+            self.set_setting("sentinel_seen_plans", json.dumps(sorted(list(current)), ensure_ascii=False))
+
+    # ── 账号读取 ─────────────────────────────────────────────────────────────
+    def list_accounts(self, provider: str | None = None) -> list[Account]:
+        with self._lock:
+            if provider:
+                return list(self._accounts.get(provider, []))
+            return [a for p in PROVIDERS for a in self._accounts[p]]
+
+    def find(self, provider: str, id_or_name: str) -> Account | None:
+        with self._lock:
+            return self._find_locked(provider, id_or_name)
+
+    def find_any(self, id_or_name: str) -> Account | None:
+        with self._lock:
+            for p in PROVIDERS:
+                for a in self._accounts[p]:
+                    if a.id == id_or_name:
+                        return a
+        return None
+
+    def get_accounts_by_region(self, provider: str, region: str) -> list[Account]:
+        """获取指定提供商和指定大区的全部账号。"""
+        with self._lock:
+            return [
+                a for a in self._accounts.get(provider, [])
+                if getattr(a, "assigned_region", None) == region
+            ]
+
+    def get_region_distribution(self, provider: str) -> dict[str, int]:
+        """统计当前提供商各已绑定大区的账号数量分布。"""
+        with self._lock:
+            dist: dict[str, int] = {}
+            for a in self._accounts.get(provider, []):
+                r = getattr(a, "assigned_region", None) or "UNASSIGNED"
+                dist[r] = dist.get(r, 0) + 1
+            return dist
+
+    def _find_locked(self, provider: str, id_or_name: str) -> Account | None:
+        for a in self._accounts.get(provider, []):
+            if a.id == id_or_name or a.name == id_or_name:
+                return a
+        return None
+
+    # ── 账号增删改 ───────────────────────────────────────────────────────────
+    def add_account(self, provider: str, name: str, secret: str) -> Account:
+        if provider not in PROVIDERS:
+            raise ValueError(f"不支持的 provider: {provider}")
+        account = Account.create(provider, name, secret)
+        with self._lock:
+            for a in self._accounts[provider]:
+                # 按凭证身份去重：JWT 每次签发 iat 不同，全文比对无法识别同一账号
+                # 重新授权，会重复入池并各自占用大区与出口端口。
+                if a.identity and a.identity == account.identity:
+                    return a  # 跳过同一账号的重复凭证
+            self._assign_fingerprint(account)  # 入池即分配独立设备指纹
+            self._assign_region(account)  # 入池即发牌：保证任一入口的账号都有大区
+            account.install_id = str(uuid.uuid4())  # 安装身份：稳定安装令牌
+            self._accounts[provider].append(account)
+            self._persist_account(account)
+        return account
+
+    @staticmethod
+    def _assign_fingerprint(account: Account) -> None:
+        """给账号分配客户端指纹并固化为 dict（随 asdict 落库，取用时还原）。"""
+        from .fingerprint import profile_for
+
+        profile = profile_for(account)
+        account.fingerprint = {
+            "platform": profile.platform, "arch": profile.arch,
+            "os_version": profile.os_version, "language": profile.language,
+            "timezone": profile.timezone, "screen": profile.screen,
+            "device_mid": profile.device_mid,
+        }
+
+    def _assign_region(self, account: Account) -> bool:
+        """入池即时发牌：给尚无大区的账号分配一个「当前确有活跃出口」的大区。
+
+        第一性原理：大区只决定该账号走哪个出口端口段，不进入任何上游请求；因此
+        发牌时机不影响账号资格，只影响能否解析到可用出口。已有大区的账号一律保留
+        （幂等），注册表不可读或无可发牌区时留空，交由后续补配重试。
+        """
+        from .region_assign import pick_region
+
+        if getattr(account, "assigned_region", None):
+            return False
+        try:
+            from .client_pool import account_client_pool
+
+            active = account_client_pool.load_registry()
+        except Exception:  # noqa: BLE001 - 注册表不可读时留空，不阻断入池
+            return False
+        region = pick_region(self._region_distribution(), active)
+        if not region:
+            return False
+        account.assigned_region = region
+        return True
+
+    def _region_distribution(self) -> dict[str, int]:
+        """当前已发放大区的账号数量分布（发牌缺额计算的输入）。"""
+        dist: dict[str, int] = {}
+        for items in self._accounts.values():
+            for acc in items:
+                region = getattr(acc, "assigned_region", None)
+                if region:
+                    dist[region] = dist.get(region, 0) + 1
+        return dist
+
+    def remove_account(self, provider: str, id_or_name: str) -> bool:
+        with self._lock:
+            items = self._accounts.get(provider, [])
+            target = next((a for a in items if a.id == id_or_name or a.name == id_or_name), None)
+            if not target:
+                return False
+            self._accounts[provider] = [a for a in items if a.id != target.id]
+            self._delete_account(target.id)
+            return True
+
+    def update_account(self, account: Account) -> bool:
+        """持久化某个账号的当前状态。
+
+        账号已从内存池删除时拒绝写回，避免后台任务 INSERT OR REPLACE 把已删行救活。
+        """
+        with self._lock:
+            if self._find_locked(account.provider, account.id) is None:
+                return False
+            self._persist_account(account)
+            return True
+
+    def set_enabled(self, provider: str, id_or_name: str, enabled: bool) -> bool:
+        with self._lock:
+            account = self._find_locked(provider, id_or_name)
+            if not account:
+                return False
+            account.enabled = enabled
+            if not enabled:
+                account.status = Status.DISABLED
+            elif account.status == Status.DISABLED:
+                account.status = Status.ACTIVE
+            self._persist_account(account)
+            return True
+
+    # ── 轮询选择 ─────────────────────────────────────────────────────────────
+    def select(
+        self,
+        provider: str,
+        skip_ids: set[str] | None = None,
+        model: str | None = None,
+        avoid_id: str | None = None,
+        observations: dict | None = None,
+        healthy_regions: set[str] | None = None,
+    ) -> Account | None:
+        """按 round-robin 选择下一个可用账号。用完 / 失效 / 目标模型无余量 / 大区无出口的自动跳过。
+
+        若指定了 model 且池内存在显式持有该模型正余量的账号（或尚未拉取配额的冷启动新号），
+        优先在该子集中轮询（例如请求 GLM-5.3 时精准路由给持有 GLM-5.3 额度的账号）。
+        若指定了 healthy_regions 且账号已绑定大区，当且仅当其大区无活跃出口时前置避让（不消耗尝试次数）。
+        """
+        skip_ids = skip_ids or set()
+        now = time.time()
+        with self._lock:
+            pool = []
+            for a in self._accounts.get(provider, []):
+                reason = a.selection_exclusion(now)
+                if reason is None and a.id in skip_ids:
+                    continue
+                reason = reason or a.model_quota_exclusion(model)
+                if reason is None and healthy_regions is not None and a.assigned_region:
+                    if a.assigned_region not in healthy_regions:
+                        reason = "region_egress_offline"
+                if reason:
+                    if observations is not None:
+                        observations[a.id] = {"code": reason, "at": now}
+                else:
+                    pool.append(a)
+            if not pool:
+                return None
+            if model:
+                preferred = [a for a in pool if a.explicitly_supports_model(model)]
+                if preferred:
+                    pool = preferred
+            # 新会话窗口优先换号；无替代时允许旧号，不覆盖模型优先级或失败排除。
+            if avoid_id:
+                pool = [a for a in pool if a.id != avoid_id] or pool
+            cursor = self._rotation.get(provider, 0)
+            account = pool[cursor % len(pool)]
+            self._rotation[provider] = (cursor + 1) % 1_000_000
+            return account
+
+    def selection_snapshot(self, provider: str, model: str | None = None) -> dict:
+        """锁内只读筛选快照，不推进轮询游标或刷新账号。"""
+        now = time.time()
+        with self._lock:
+            return {a.id: {"code": a.selection_exclusion(now),
+                           "model_code": a.model_quota_exclusion(model),
+                           "cooling_until": a.cooling_until, "at": now}
+                    for a in self._accounts.get(provider, [])}
+
+    # ── 导入 / 导出 ─────────────────────────────────────────────────────────
+    def export(self) -> dict:
+        with self._lock:
+            return {
+                "version": 1,
+                "exported_at": time.time(),
+                "providers": {
+                    p: [
+                        {"name": a.name, "mode": a.mode, "secret": a.secret,
+                         "assigned_region": a.assigned_region}
+                        for a in self._accounts[p]
+                    ]
+                    for p in PROVIDERS
+                },
+            }
+
+    def import_accounts(self, payload: dict) -> int:
+        providers = payload.get("providers", {})
+        count = 0
+        for provider, items in providers.items():
+            if provider not in PROVIDERS or not isinstance(items, list):
+                continue
+            for it in items:
+                secret = it.get("secret") or it.get("token") or it.get("jwtToken") or it.get("apiKey")
+                if not secret:
+                    continue
+                acc = self.add_account(provider, it.get("name", provider), secret)
+                # 备份是权威来源：带大区的账号覆盖入池发牌结果，恢复不改变出口归属。
+                region = str(it.get("assigned_region") or "").strip()
+                if region and acc.assigned_region != region:
+                    acc.assigned_region = region
+                    self.update_account(acc)
+                count += 1
+        return count
+
+
+# 单例
+store = Store()
