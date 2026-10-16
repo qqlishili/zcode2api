@@ -245,6 +245,8 @@ class AccountClientPool:
 
     def get_healthy_regions(self) -> set[str] | None:
         """返回当前拥有至少一个健康出口的大区集合。若无注册表文件则返回 None（全放行）。"""
+        if settings.EGRESS_MODE == "direct":
+            return None
         if not self._registry_path.is_file():
             return None
         reg = self.load_registry()
@@ -252,6 +254,8 @@ class AccountClientPool:
 
     def is_region_healthy(self, region: str | None) -> bool:
         """检查特定大区是否拥有活跃出口。未指定大区或无注册表文件则视为健康（走全局/直连）。"""
+        if settings.EGRESS_MODE == "direct":
+            return True
         if not region:
             return True
         if not self._registry_path.is_file():
@@ -276,6 +280,8 @@ class AccountClientPool:
         否则一个端口熔断就会让账号出口漂移，已预热的 token 全部作废，且上游会
         看到同一账号在出口间跳动（见 openspec design.md D1）。
         """
+        if settings.EGRESS_MODE == "direct":
+            return None
         # 1. 账号自身显式绑定的代理
         if account is not None and not isinstance(account, str):
             if getattr(account, "proxy", None) and str(account.proxy).strip():
@@ -406,8 +412,11 @@ class AccountClientPool:
 
     def _get_client_locked(self, account=None, *, timeout=None, proxy=None) -> httpx.AsyncClient:
         self.load_registry()
+        direct = settings.EGRESS_MODE == "direct"
+        if direct:
+            proxy = None
         account_id = self._account_id(account) if proxy is None else "__proxy__:" + proxy
-        explicit = getattr(account, "proxy", None)
+        explicit = None if direct else getattr(account, "proxy", None)
         pair = self._clients.get(account_id)
         if pair:
             client, _ = pair
@@ -415,6 +424,8 @@ class AccountClientPool:
             identity = self._client_identities.get(client)
             region = getattr(account, "assigned_region", None)
             region_matches = (not region or actual in self._registry_cache.get(region, []))
+            if direct:
+                region_matches = actual is None
             if (not getattr(client, "is_closed", False) and self.proxy_eligible(actual, identity) and
                     (not explicit or explicit == actual) and (explicit or region_matches)):
                 self._clients[account_id] = (client, time.time())
@@ -422,8 +433,10 @@ class AccountClientPool:
             self._clients.pop(account_id)
             self._retired_clients.add(client)
         actual = proxy if proxy is not None else self.resolve_proxy(account)
+        # 显式直连不能再被代理大区门禁拦截；proxy 模式仍禁止静默直连降级。
         if (not self.proxy_eligible(actual) or
-                (not actual and (getattr(account, "assigned_region", None) or self._registry.get("slots")))):
+                (not direct and not actual and
+                 (getattr(account, "assigned_region", None) or self._registry.get("slots")))):
             raise RegionOfflineError("账号大区无可用健康出口，禁止直连降级")
         req_timeout = timeout if timeout is not None else httpx.Timeout(
             connect=30.0, read=None, write=120.0, pool=30.0)
@@ -457,7 +470,8 @@ class AccountClientPool:
                 if identity is not None and not self.proxy_eligible(proxy, identity):
                     raise RegionOfflineError("延后任务出口身份已过期")
                 client = self._get_client_locked(account, timeout=timeout, proxy=proxy)
-                account_id = self._account_id(account) if proxy is None else "__proxy__:" + proxy
+                account_id = (self._account_id(account) if proxy is None or settings.EGRESS_MODE == "direct"
+                              else "__proxy__:" + proxy)
                 actual_identity = self._client_identities.get(client)
             operation = EgressOperation(self, client, account_id, self.client_proxy(client),
                                         actual_identity, self._registry.get("generation"), kind)

@@ -40,6 +40,32 @@ def account(name="account"):
     return SimpleNamespace(id=name, assigned_region="HK", proxy=None)
 
 
+async def test_direct_mode_does_not_filter_accounts_by_proxy_region(pool, monkeypatch):
+    monkeypatch.setattr(client_pool.settings, "EGRESS_MODE", "direct")
+    write_registry(pool._registry_path, [(21100, "old", 1, "draining")])
+
+    assert pool.get_healthy_regions() is None
+    assert pool.is_region_healthy("HK")
+
+
+@pytest.mark.parametrize("explicit_proxy", [None, "http://127.0.0.1:21100"])
+async def test_direct_mode_acquires_and_reuses_direct_client(pool, monkeypatch, explicit_proxy):
+    monkeypatch.setattr(client_pool.settings, "EGRESS_MODE", "direct")
+    write_registry(pool._registry_path, [(21100, "old", 1, "draining")])
+    acc = account()
+    acc.proxy = explicit_proxy
+
+    assert pool.resolve_proxy(acc) is None
+    async with pool.operation(acc) as operation:
+        assert operation.proxy is None
+        assert operation.identity is None
+        assert pool.client_proxy(operation.client) is None
+        assert await pool.get_client(acc) is operation.client
+    async with pool.operation(acc, proxy=explicit_proxy) as operation:
+        assert operation.proxy is None
+        assert operation.account_id == acc.id
+
+
 async def test_old_stream_protected_new_operation_uses_replacement(pool):
     old = await pool.acquire_operation(account())
     await pool.prune_idle()

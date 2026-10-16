@@ -1,0 +1,76 @@
+# HK / JP 出口恢复核验（2026-10-16）
+
+本轮由用户授权恢复线上出口并验证真实请求、SSE。核验约于 15:59–16:16 CST 完成；**HK / JP 恢复仍未完成**，没有把通用网站连通、直连成功或 TW 成功记作同区恢复。
+
+## 实测结论
+
+当前故障集中于 HK / JP 出口相关的上游拒绝。官方插件、相同账号和模型请求经直连或 TW 可以成功，经现有 HK / JP 返回 `HTTP 405 / code 3012 / server ESA`；部分节点连接失败。证据支持出口相关风控拒绝，不能进一步断言上游规则只检查 IP 信誉。
+
+| 对照 | 非流式真实响应 | SSE |
+|---|---|---|
+| active HK 账号 a1，VPS 直连 | 200，文本 `OK`，`end_turn` | 200，文本 `OK`，有 `message_start` / `message_stop` |
+| active JP 账号 a2，VPS 直连 | 200，文本 `OK`，`end_turn` | 200，文本 `OK`，有 `message_start` / `message_stop` |
+| active HK 账号 a3，VPS 直连 | 200，但 64 token 上限截断推理，文本为空；不算非空输出验收通过 | 200，文本 `OK`，有 `message_start` / `message_stop` |
+| 同一 HK 账号，经 TW `21200` | 200，文本 `OK`，`end_turn` | 200，文本 `OK`，有 `message_start` / `message_stop` |
+| 同一 HK 账号，经 HK `21100` | 405 / 3012 | 405 / 3012，未建立业务 SSE |
+| 同一 JP 账号，经 JP `21300` | 405 / 3012 | 405 / 3012，未建立业务 SSE |
+| Windows 外部客户端 → 公网网关 `/v1/chat/completions` | 503，`unknown_unavailability` | 503，未建立 SSE |
+
+以上 a1–a3 仅为本报告别名，不能和其它诊断中的序号作账号关联。测试模型为 `GLM-5.3-Flash`；上游对照直接调用现有 `PluginHost.fetch` 并显式指定代理，不经过 `PluginChannel` 的未确认代理直连兜底。因此代理成功结果没有混入直连成功。公网请求另从 Windows 实际发送，未用 VPS 本机请求代替。
+
+## 节点配置与来源核对
+
+- 当前两份来源均重新读取成功，分别为 67 / 76 个节点，完整连接指纹没有新增；没有可补入的新 HK / JP 节点。
+- 全部 5 个 HK、24 个 JP 节点用独立插件宿主连接逐个请求：HK 为 4 个 405/3012、1 个连接失败；JP 为 22 个 405/3012、2 个连接失败。29 个节点定义不是 29 个独立出口 IP；取得定位的结果存在出口复用。
+- 对 HK / JP / TW 共 36 个节点，核对生命周期完整连接指纹、生产 provider 定义、mixed listener 的端口/绑定组，以及 Mihomo 控制器运行中组选择，未发现身份不符或串线。
+- 独立 curl 对照使用相同账号、请求头和正文：直连返回 200；TW `21200` 的 HTTP CONNECT、SOCKS5h 均为 200；HK `21100`、JP `21300` 的两种入口均为 405/3012。全部 `curl_exit=0`、`ssl_verify_result=0`，不是本机代理认证失败或上游 TLS 证书校验失败。
+- 捕获官方插件最终外发请求后，以 httpx、独立 Bun fetch 重放：TW 200，HK 405/3012。请求正文和插件传输的差异不足以解释这组失败；未发现本地节点定义或端口映射错误。
+
+`3012` 不能单独证明“配置绝对正确”或“永久封禁”。上述配置、TLS、入口和出口对照共同支持当前判断；上游具体风控规则未取得。
+
+## 与 VPS 上三个项目的核对
+
+| 目录 | 检出版本与本轮检查 |
+|---|---|
+| `/root/code/ZCode` | `aac4755666d09fdcd70272fcf063c077a639015f`；读取 Host 的 `nodeApiNetwork.ts` 及 CLI 的 `proxy-fetch.ts`，核对按请求注入代理 transport 的实现 |
+| `/root/code/magpie` | `22d7ef08fedbb9bb61876dec0aa396af8d8fd0ed`；`internal/plugin/host.js` 的代理上下文和 `fetchAs` 段与当前 vendor 副本一致 |
+| `/root/code/magpie-plugins` | `f2f4ff4014d3abcb9851ff87af75d214786f5949`；`packages/zcode/index.mjs` 相对当前引入的 `6a3fe9b4…` 没有差异 |
+
+真实调用使用项目当前引入的 `vendor/magpie_host.js` 和 `vendor/magpie-plugins/packages/zcode`。没有仅凭主仓库或插件版本号猜测故障，也没有为本次故障升级 vendor。未启动完整 ZCode 桌面客户端做 E2E。
+
+## 证据边界与诊断纠正
+
+最初隔离扫描在同一代理地址上切换 selector，并复用插件宿主，Bun 的已有连接仍使用切换前的出口，曾产生 TW 插件失败及 HK 插件成功的误导结果。这些跨节点宿主复用结果不作为对应节点的验收证据。最终全量插件扫描每个节点重建独立宿主；固定生产端口的非流式/SSE 对照、独立 curl/Bun/httpx 重放另作交叉验证。
+
+本地原始结果位于忽略目录 `data/diagnostics/handoff-20261016/`：
+
+- `egress-plugin-fresh-connections.json`：最终逐节点插件扫描。
+- `egress-upstream-response-and-sse.json`：实际响应与 SSE 起止事件、文本检查。
+- `egress-transport-exact-request.json`：最终外发请求的独立传输重放；其中复用宿主后的 HK 行不采信，独立 httpx / Bun 行有效。
+- `egress-http-socks-comparison.json`：HTTP CONNECT / SOCKS5h 与 TLS 验证结果。
+- `external-gateway-before.json`：Windows 外部客户端实际 503。
+
+对应 VPS 原始报告保留在 `/root/egress-restore-20261016-akuu7qju/report.json`、`/root/egress-sse-20261016-ifsm79lp/report.json`、`/root/egress-wire-20261016-cfcwqk3_/report.json`、`/root/egress-tunnel-20261016-6y9pxird/report.json`。目录权限 0700，报告权限 0600。临时凭据和请求头文件在核验结束后清理，不进入 Git。
+
+## 恢复状态与下一步
+
+用户确认没有其它节点。现有 HK / JP 没有找到可服务出口，不能通过放宽准入、改地区标签或把 3012 标健康来完成恢复。
+
+用户随后明确同意“先直连”。已于约 16:22 CST 保全 `.env` 和 `app/client_pool.py`，将 `ZCODE_EGRESS_MODE=proxy` 改为 `direct` 并重启 `zcode2api`，`/meta` 200、新 PID 687842。但从 Windows 在服务就绪后复测，非流式和 SSE 仍为 503。配置位置正确，单改配置不足以修复当前版本。
+
+原因已由源码、实际 503 和新增失败测试共同复现：`PluginChannel` 识别 direct，但 `AccountClientPool.get_healthy_regions`、`is_region_healthy` 仍以代理大区过滤账号，连接池也禁止已绑定账号直连。因此准备最小修正，使显式 direct 配置贯穿调度、解析和客户端获取；proxy 模式的同区隔离及禁止静默降级规则保留。
+
+修正涉及 `app/client_pool.py` 和 `tests/unit/test_egress_operations.py`。新增 3 项回归先失败；修正后相关 9 份测试共 71 项通过，最后一次修改后受影响操作测试 12 项复验通过。Windows Ruff 原生进程因 DLL 初始化失败退出（3221225794），改用 VPS 已有 Ruff 对上传的候选源码和测试运行，检查通过。用户已明确授权本次 Git 提交、推送及原目录快进部署，正在发布；公网恢复以发布后真实验收为准。
+
+回退材料为 VPS `/root/egress-direct-recovery-20261016-0gck0fjw/`，包含权限 0600 的 `env.before`、`client_pool.py.before` 和哈希清单。`external-gateway-direct-config-only.json` 保留仅切配置后的真实 503，`direct-mode-red.xml`、`direct-mode-green.xml`、`direct-mode-final.xml` 保留失败与回归结果。
+
+16:16 前的核对中，生产模式为 proxy，`zcode2api` / `mihomo` PID 为 186203 / 2797546、`NRestarts=0`；注册表 generation 为 `3e45cc67563daf227871bcbe05d7e556531590e341f02bb80b5c789129f97a29`，基础配置哈希与生命周期基线匹配。本轮仅切换出口模式并重启网关，未改变地区绑定、生命周期、准入或 Mihomo 基础配置。直连恢复即使成功，也使用 VPS 出口，**HK / JP 节点恢复仍保持未完成**。
+
+## VPS 的 CF / WARP 出口与账号影响（16:55 CST 复核）
+
+- `warp-svc` 运行、`warp-cli status` 为 Connected；实际配置是 `WarpProxy on port 40000`、MASQUE，仅监听 `127.0.0.1:40000`，不是系统全局隧道。
+- `zcode2api` 进程没有 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 环境变量。Cloudflare HTTPS trace 实测 `ip=107.174.244.167`、`loc=US`、`warp=off`、`gateway=off`，ipify 独立确认同一个 IP。
+- 当时 `zcode.z.ai` 解析为 `47.246.23.189`，实际路由经 `eth0`、源地址 `107.174.244.167`；没有 `/etc/hosts` 覆盖。已检查 nft/iptables 的地址转换规则，只有既有 Docker 入站 DNAT，未发现把本项目出站转入 WARP 的规则。
+- 因此本次 direct 使用 VPS 原生公网出口，不自动经过现有 WARP 代理，也不因“为 CF 优化”而获得独立账号出口。未改 WARP、系统路由、DNS 或防火墙。
+
+影响：全局 direct 会让业务账号及使用该连接池的后台账号操作共享 VPS 公网 IP；原账号 assigned_region 和各自凭证/设备数据保留，但实际外呼不再按 HK / JP 分流。上游可以观察到相同来源 IP，结合令牌和行为关联账号；本次短时成功不能证明长期多账号同 IP 没有风控风险，也不能预测必然封号。此模式作为已获准的临时业务恢复，HK / JP 独立出口恢复继续开放。
