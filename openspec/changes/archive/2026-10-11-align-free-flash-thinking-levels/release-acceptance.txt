@@ -1,0 +1,10 @@
+warning: --mode plan has no effect while slash command expansion is disabled.
+VERDICT: PASS
+
+经对所提供的真实发布证据与源码进行严格只读审查，验收结论如下：
+
+1. **版本与发布一致性**：本机、GitHub main 与 VPS HEAD 均一致收敛于 `299faab`；三核心 Python 文件 SHA256 两端吻合，工作区干净，无历史改写与私有配置污染。
+2. **思考契约严密性**：`_apply_reasoning_params` 逻辑严谨，完整覆盖类型检验、仅限 low/high/max 档位约束、多字段一致性冲突排查及孤立 budget_tokens 拦截；非法 medium 均实测返回 400。
+3. **真实端到端链路闭环**：本机真实 pi → VPS → 上游三档（low/high/max）均获 200 与 stop 终态，流式 Chat 与 Responses 终态闭环完整，7 个账号数据及既有配置无损。
+
+**证据限制**：生产环境未人为模拟异常静默截断（该收口已由离线 424 项回归及 66 项暂存复验充分验证）；本次验收依据当前提供的离线测试证据与线上样本调用，长效稳定性仍依赖运行期持续观测。

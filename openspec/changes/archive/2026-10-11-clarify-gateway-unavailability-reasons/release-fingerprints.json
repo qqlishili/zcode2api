@@ -1,0 +1,57 @@
+[
+  {
+    "matches": true,
+    "sha256": "39216F4D0849DC7DD25BDD083A44707370D2385290604B32937C7A27AEF12CAE",
+    "path": "app/models.py"
+  },
+  {
+    "matches": true,
+    "sha256": "874258435061A050B9D779B4B4944B52749B4AF2832475CA22AF14D6B10335A0",
+    "path": "app/store.py"
+  },
+  {
+    "matches": true,
+    "sha256": "EF257114D3B7DEA79D9EDA55C63F49075ABAEA0713BCD1C6EA8353630D7FA3E4",
+    "path": "app/routes/gateway.py"
+  },
+  {
+    "matches": true,
+    "sha256": "AD4A565629CA7FBF529A47329EA8965ECFFE84D184F2CA21F1FBD45467A6FCFC",
+    "path": "app/reqlog.py"
+  },
+  {
+    "matches": true,
+    "sha256": "382FAECEFE6B776472C354D4438944F3A4E14A822EFFC1038339B34BF5FDAC50",
+    "path": "docs/development/04-api-spec.md"
+  },
+  {
+    "matches": true,
+    "sha256": "A1C2D84A0AD419A7B06898336460360A17AD7B16FE3FF090B8EDDDC90D5E1AA2",
+    "path": "tests/integration/test_gateway_unavailability.py"
+  },
+  {
+    "matches": true,
+    "sha256": "D874D45AD605A06DAC50A51A4E056B74A91141BDB71ACF4325B13DC42AF9A4C6",
+    "path": "tests/integration/test_gateway_monitoring.py"
+  },
+  {
+    "matches": true,
+    "sha256": "5A2869334B1C12553E1B06EF37860228BB315B212803554D8D460D769B57041E",
+    "path": "tests/unit/test_selection_evidence.py"
+  },
+  {
+    "matches": true,
+    "sha256": "A322ED25E516918486031474B4BFBA35DF443FD214FF23444D4130E0C513A4C1",
+    "path": "tests/unit/test_unavailability_result.py"
+  },
+  {
+    "matches": true,
+    "sha256": "4A5C21770459D3A24BBAD6E55172B43268B498336C1D66CE03CCE20F5AE46D4D",
+    "path": "tests/unit/test_reqlog.py"
+  },
+  {
+    "matches": true,
+    "sha256": "D1F6D280A1DA3265F259E6578894F7E0D1C0C717F841C8E16E50A77817162692",
+    "path": "tests/unit/test_regression_baseline.py"
+  }
+]

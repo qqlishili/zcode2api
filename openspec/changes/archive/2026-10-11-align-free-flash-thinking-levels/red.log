@@ -1,0 +1,1051 @@
+......FFFFFFFFFFFFFFFF..................F..FFFFFFFFFFFFFFFFFFFFFFFFFFFFF [ 54%]
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF...            [100%]
+================================== FAILURES ===================================
+_ TestThinkingParams.test_invalid_original_params_rejected[params0-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params0-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params1-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'disabled'}} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params1-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'disabled'}} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params2-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'output_config': {'effort': 'max'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params2-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'output_config': {'effort': 'max'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params3-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params3-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params4-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params4-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params5-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params5-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params6-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'output_config': {'effort': 'max'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params6-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'output_config': {'effort': 'max'}, ...} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params7-openai_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled', 'budget_tokens': 8192}} is None
+_ TestThinkingParams.test_invalid_original_params_rejected[params7-responses_to_anthropic] _
+tests\unit\test_openai_compat.py:181: in test_invalid_original_params_rejected
+    assert body is None
+E   AssertionError: assert {'model': 'GLM-5.3-Flash', 'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': 'hi'}]}], 'max_tokens': 4096, 'thinking': {'type': 'enabled', 'budget_tokens': 8192}} is None
+_ TestThinkingLevels.test_omitted_effort_uses_upstream_default[params3-/v1/messages] _
+tests\integration\test_gateway_openai.py:206: in test_omitted_effort_uses_upstream_default
+    assert upstream["thinking"] == {"type": "enabled"}
+           ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'thinking'
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mde8fb08a24df8238[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [32m<<<[0m [90mde8fb08a24df8238[0m
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[minimal-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mda64d6e27a5e197a[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mda64d6e27a5e197a[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[minimal-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mbd3bf437c858482d[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mbd3bf437c858482d[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[minimal-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mbd9b156a49c375b9[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mbd9b156a49c375b9[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[medium-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md74b9e4183a3b389[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90md74b9e4183a3b389[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[medium-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me9ca890cfebad6f4[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me9ca890cfebad6f4[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[medium-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me78ef3a32109752a[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me78ef3a32109752a[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[xhigh-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma11845014f880f27[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90ma11845014f880f27[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[xhigh-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md4041829363ffacb[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90md4041829363ffacb[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[xhigh-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4831af7a6d66ab5a[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m4831af7a6d66ab5a[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[none-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m0c3762be022ed1bc[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m0c3762be022ed1bc[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[none-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mdeb9677cc81ec330[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mdeb9677cc81ec330[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[none-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8d7526af7a48b780[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m8d7526af7a48b780[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[off-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m3ed2012f7ccd06a6[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m3ed2012f7ccd06a6[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[off-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m39220e3f8c690aac[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m39220e3f8c690aac[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[off-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m146ae2a25f18d41e[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m146ae2a25f18d41e[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[disabled-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf89baa638a7ca929[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mf89baa638a7ca929[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[disabled-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mb1557eca989e6fe6[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mb1557eca989e6fe6[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[disabled-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m073235c5b710a381[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m073235c5b710a381[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[unknown-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mcce2884b33c0c0af[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mcce2884b33c0c0af[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[unknown-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4f5e516b24cbea18[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m4f5e516b24cbea18[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[unknown-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m167153190b2f9481[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m167153190b2f9481[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mce3477f9e17f9c25[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mce3477f9e17f9c25[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma7a9bef086de33e0[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90ma7a9bef086de33e0[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mbf1a6e8a30de3705[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mbf1a6e8a30de3705[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[HIGH-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m434215b93154cf41[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m434215b93154cf41[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[HIGH-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mfee9beca4924fe7b[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mfee9beca4924fe7b[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[HIGH-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90med0c6001ede3cb00[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90med0c6001ede3cb00[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[ low -/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mcc3af5edc31a9807[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mcc3af5edc31a9807[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[ low -/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m659a3295c10a268f[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m659a3295c10a268f[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[ low -/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m2571d584e26cc017[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m2571d584e26cc017[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[None-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me33e81247f6ebf27[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me33e81247f6ebf27[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[None-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m742e61a8e0736859[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m742e61a8e0736859[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[None-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m568c25771670ce32[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m568c25771670ce32[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[False-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf9798fbd348357ff[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mf9798fbd348357ff[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[False-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m5489dacb248c8747[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m5489dacb248c8747[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[False-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m777c569489fef688[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m777c569489fef688[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[1-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m14c572c64ef183f0[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m14c572c64ef183f0[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[1-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me76e3f1ab5599a8d[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me76e3f1ab5599a8d[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[1-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m5e163ada726e93a6[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m5e163ada726e93a6[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort13-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4de78c9a1601ffcf[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m4de78c9a1601ffcf[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort13-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m328a9c18939a7ba5[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m328a9c18939a7ba5[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort13-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m6240f394f0d39a28[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m6240f394f0d39a28[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort14-/v1/messages] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mdce9402da385cfc8[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mdce9402da385cfc8[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort14-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90med1703db753b4361[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90med1703db753b4361[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_invalid_effort_rejected_before_selection[effort14-/v1/responses] _
+tests\integration\test_gateway_openai.py:218: in test_invalid_effort_rejected_before_selection
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8186671ab6b24f59[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m8186671ab6b24f59[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params0-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mfff9f0292a4cc3ba[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mfff9f0292a4cc3ba[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params0-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m0a7fd0278f6fd55e[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m0a7fd0278f6fd55e[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params0-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mfb82af15c508d8f1[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mfb82af15c508d8f1[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params1-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m29eac583abde83b7[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m29eac583abde83b7[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params1-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m1127a2f2ebe28825[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m1127a2f2ebe28825[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params1-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m7cfcd967d2efe959[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m7cfcd967d2efe959[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params2-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mc9e00c2fc9140b10[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mc9e00c2fc9140b10[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params2-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m01e5185b0470fa87[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m01e5185b0470fa87[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params2-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m2286099b3d754424[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m2286099b3d754424[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params3-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mc47e3adb7ac1f223[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mc47e3adb7ac1f223[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params3-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m7d71f81e008ed1b3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m7d71f81e008ed1b3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params3-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me4c2b5912092ba18[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me4c2b5912092ba18[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params4-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8df7f27f8210d009[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m8df7f27f8210d009[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params4-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m10a0ec5d62c3e963[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m10a0ec5d62c3e963[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params4-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mfe3a67b99324e89e[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mfe3a67b99324e89e[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params5-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mbda064d4d60a4735[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mbda064d4d60a4735[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params5-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m793812ea16542a41[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m793812ea16542a41[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params5-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8c8a8a58882709e9[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m8c8a8a58882709e9[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params6-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md8d069b7969345ac[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90md8d069b7969345ac[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params6-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mb16b7ea590b58bed[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mb16b7ea590b58bed[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params6-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4bd2c9406c821022[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m4bd2c9406c821022[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params7-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md6eee0d069db33d2[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90md6eee0d069db33d2[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params7-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m283972ece9dae453[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m283972ece9dae453[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params7-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me12bfcb794aabf09[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me12bfcb794aabf09[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params8-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m97927d40bd26c86d[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m97927d40bd26c86d[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params8-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m63dd4a9a39d604a8[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m63dd4a9a39d604a8[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params8-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mb2de610b26a34dce[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mb2de610b26a34dce[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params9-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m87b72fd8cdad0787[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m87b72fd8cdad0787[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params9-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma6ea6b1591811e1a[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90ma6ea6b1591811e1a[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params9-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me393860e4794116b[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90me393860e4794116b[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params10-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mc0ca4d699074e9bc[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mc0ca4d699074e9bc[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params10-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m1d5ea134e7c4e605[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m1d5ea134e7c4e605[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params10-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m28284ccb463bd51d[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m28284ccb463bd51d[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params11-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m59270e613aa0ead0[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m59270e613aa0ead0[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params11-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mc96054f0993af156[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mc96054f0993af156[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params11-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mb8fee8437f91b895[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mb8fee8437f91b895[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params12-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m77c33c247ccf7609[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m77c33c247ccf7609[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params12-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m68447251789b080e[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m68447251789b080e[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params12-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma4dbe504de93ebe4[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90ma4dbe504de93ebe4[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params13-/v1/messages] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m108df625d9c8bf99[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m108df625d9c8bf99[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params13-/v1/chat/completions] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4c57dad9ad7d4a63[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m4c57dad9ad7d4a63[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ TestThinkingLevels.test_unsupported_or_conflicting_params_rejected[params13-/v1/responses] _
+tests\integration\test_gateway_openai.py:234: in test_unsupported_or_conflicting_params_rejected
+    await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
+tests\integration\test_gateway_openai.py:248: in _assert_rejected
+    assert res.status_code == 400
+E   assert 503 == 400
+E    +  where 503 = <Response [503 Service Unavailable]>.status_code
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m74ebf22e566b3dd0[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90m74ebf22e566b3dd0[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+=========================== short test summary info ===========================
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params0-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params0-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params1-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params1-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params2-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params2-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params3-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params3-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params4-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params4-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params5-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params5-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params6-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params6-responses_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params7-openai_to_anthropic]
+FAILED tests/unit/test_openai_compat.py::TestThinkingParams::test_invalid_original_params_rejected[params7-responses_to_anthropic]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_omitted_effort_uses_upstream_default[params3-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[minimal-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[minimal-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[minimal-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[medium-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[medium-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[medium-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[xhigh-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[xhigh-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[xhigh-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[none-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[none-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[none-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[off-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[off-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[off-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[disabled-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[disabled-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[disabled-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[unknown-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[unknown-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[unknown-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[HIGH-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[HIGH-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[HIGH-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[ low -/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[ low -/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[ low -/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[None-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[None-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[None-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[False-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[False-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[False-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[1-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[1-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[1-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort13-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort13-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort13-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort14-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort14-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_invalid_effort_rejected_before_selection[effort14-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params0-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params0-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params0-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params1-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params1-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params1-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params2-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params2-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params2-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params3-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params3-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params3-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params4-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params4-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params4-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params5-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params5-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params5-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params6-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params6-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params6-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params7-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params7-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params7-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params8-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params8-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params8-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params9-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params9-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params9-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params10-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params10-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params10-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params11-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params11-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params11-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params12-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params12-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params12-/v1/responses]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params13-/v1/messages]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params13-/v1/chat/completions]
+FAILED tests/integration/test_gateway_openai.py::TestThinkingLevels::test_unsupported_or_conflicting_params_rejected[params13-/v1/responses]
+104 failed, 29 passed in 27.81s

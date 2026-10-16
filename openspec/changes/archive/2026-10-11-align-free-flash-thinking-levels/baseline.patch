@@ -1,0 +1,373 @@
+diff --git a/app/routes/gateway.py b/app/routes/gateway.py
+index bd98090..4378c4d 100644
+--- a/app/routes/gateway.py
++++ b/app/routes/gateway.py
+@@ -554,6 +554,7 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
+     conv = StreamConverter(model)
+     async def _iter():
+         usage = reqlog.extract_usage(None)
++        completed = False
+         try:
+             yield conv.start()
+             async for line in up.resp.aiter_lines():
+@@ -565,9 +566,12 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
+                 evt = _safe_json(data_str)
+                 if isinstance(evt, dict):
+                     _check_stream_error(evt)
++                    completed = completed or evt.get("type") == "message_stop"
+                     usage = _extract_event_usage(evt, usage)
+                     for out in conv.feed(evt):
+                         yield out
++            if not completed and "event-stream" in up.resp.headers.get("content-type", "").lower():
++                raise _UpstreamStreamIncomplete()
+             yield conv.done()
+             up.finish_result(True, "HTTP 200 · 流式完成")
+             logs.req_ok(req_id)
+@@ -693,6 +697,8 @@ def _responses_stream_response(
+                         yield out
+                     if conv.is_finished:
+                         break
++            if not conv.is_finished and "event-stream" in up.resp.headers.get("content-type", "").lower():
++                raise _UpstreamStreamIncomplete()
+             for out in conv.done():
+                 yield out
+             up.finish_result(True, "HTTP 200 · 流式完成")
+@@ -1012,20 +1018,25 @@ def _extract_event_usage(evt: object, usage: dict) -> dict[str, int | None]:
+     return usage
+ 
+ 
+-def _extract_sse_line_usage(line_bytes: bytes, usage: dict) -> dict[str, int | None]:
++def _extract_sse_line_event(line_bytes: bytes) -> object:
+     line = line_bytes.decode("utf-8", "ignore").strip()
+     if not line.startswith("data:"):
+-        return usage
++        return None
+     payload = line[5:].strip()
+-    evt = _safe_json(payload)
+-    _check_stream_error(evt)
+-    return _extract_event_usage(evt, usage)
++    return _safe_json(payload)
+ 
+ 
+ class _UpstreamStreamError(RuntimeError):
+     """HTTP 200 流内失败，不把上游事件或凭据写入日志。"""
+ 
+ 
++class _UpstreamStreamIncomplete(_UpstreamStreamError):
++    """上游静默 EOF，复用流内失败收口。"""
++
++    def __init__(self) -> None:
++        super().__init__("上游流式响应未正常结束")
++
++
+ def _check_stream_error(evt: object) -> None:
+     if isinstance(evt, dict) and evt.get("type") == "error":
+         raise _UpstreamStreamError("上游流式响应报错")
+@@ -1099,6 +1110,7 @@ class _Upstream:
+             usage = reqlog.extract_usage(None)
+             pending_chunk = None
+             stream_error = None
++            completed = False
+             try:
+                 if up.preloaded_bytes is not None:
+                     usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
+@@ -1113,7 +1125,10 @@ class _Upstream:
+                             raw_line = bytes(line_buf[:idx])
+                             del line_buf[:idx + 1]
+                             try:
+-                                usage = _extract_sse_line_usage(raw_line, usage)
++                                evt = _extract_sse_line_event(raw_line)
++                                _check_stream_error(evt)
++                                completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
++                                usage = _extract_event_usage(evt, usage)
+                             except _UpstreamStreamError as err:
+                                 stream_error = err
+                                 up.finish_result(False, str(err))
+@@ -1127,9 +1142,14 @@ class _Upstream:
+                         pending_chunk = None
+                         yield chunk
+                     if line_buf:
+-                        usage = _extract_sse_line_usage(bytes(line_buf), usage)
++                        evt = _extract_sse_line_event(bytes(line_buf))
++                        _check_stream_error(evt)
++                        completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
++                        usage = _extract_event_usage(evt, usage)
+                     if stream_error is not None:
+                         raise stream_error
++                    if "event-stream" in up.resp.headers.get("content-type", "").lower() and not completed:
++                        raise _UpstreamStreamIncomplete()
+                 up.finish_result(True, "HTTP 200 · 流式完成")
+                 logs.req_ok(req_id)
+                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
+@@ -1144,6 +1164,9 @@ class _Upstream:
+                 reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
+                 if pending_chunk is not None:
+                     yield pending_chunk
++                if isinstance(err, _UpstreamStreamIncomplete):
++                    event = {"type": "error", "error": {"type": "upstream_error", "message": str(err)}}
++                    yield b"\n\nevent: error\ndata: " + json.dumps(event).encode() + b"\n\n"
+             except Exception as err:  # noqa: BLE001
+                 up.finish_result(False, f"流传输中断: {err}")
+                 logs.req_err(req_id, f"流传输中断: {err}")
+diff --git a/docs/development/04-api-spec.md b/docs/development/04-api-spec.md
+index 0acc9ef..10836d5 100644
+--- a/docs/development/04-api-spec.md
++++ b/docs/development/04-api-spec.md
+@@ -55,6 +55,8 @@
+ 
+ HTTP 200 SSE 中的 `type: error` 仍为失败：Messages 透传完整错误帧，Chat 返回错误帧且不补 `[DONE]`，Responses 返回 `response.failed`。请求监控和账号最近结果记为失败；已输出内容不重发，连接与并发槽正常释放。
+ 
++SSE 在未收到有效 `message_stop` 时结束也记为失败：Messages 保留原字节并追加独立错误帧，Chat / Responses 沿用上述失败收口，不补成功终态。正常终态（含输出上限）、完整 JSON 尾行与非 SSE 响应保持兼容。
++
+ ## 2. 管理端点（对内，均挂 `/admin/api/*` 且需后台密钥）
+ 
+ ### 账号池
+diff --git a/tests/integration/test_gateway_monitoring.py b/tests/integration/test_gateway_monitoring.py
+index d670ddb..75077e8 100644
+--- a/tests/integration/test_gateway_monitoring.py
++++ b/tests/integration/test_gateway_monitoring.py
+@@ -38,6 +38,70 @@ class TestMessagesBodyValidation:
+ 
+ @pytest.mark.integration
+ class TestMonitoringRecording:
++    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
++    @pytest.mark.parametrize("scenario", ["sse_empty", "sse_eof_text", "sse_eof_tool",
++                                          "sse_eof_stop", "sse_eof_malformed", "sse_truncate"])
++    async def test_silent_eof_is_not_success(self, gateway_client, fresh_app, endpoint, scenario):
++        """静默 EOF 不补成功终态、不重发，失败记录与资源释放一致。"""
++        client, mock = gateway_client
++        from app import reqlog
++        from app.routes import gateway as gw
++        from tests.conftest import seed_account
++
++        account = seed_account(fresh_app, "hEof.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="eof")
++        seed_account(fresh_app, "hEofStandby.eyJzdWIiOiJzdGFuZGJ5In0.sig", name="eof-standby")
++        fresh_app.set_setting("account_concurrency", "1")
++        start = len(mock.state.calls)
++        body = {"model": "GLM-5.3-Flash", "stream": True}
++        body["input" if endpoint == "responses" else "messages"] = (
++            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
++        )
++        response = await client.post("/v1/" + endpoint, json=body,
++                                     headers={"x-mock-scenario": scenario})
++        assert response.status_code == 200
++        entry = reqlog.snapshot()[0]
++        assert entry["ok"] is False and entry["status"] == 200
++        assert "未正常结束" in entry["error"] and entry["t_total"] is not None
++        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is False
++        assert not gw._inflight
++        calls = [call for call in mock.state.calls[start:] if call[0] == "POST" and call[1].endswith("/messages")]
++        assert len(calls) == 1
++        assert all(frame not in response.text for frame in ("[DONE]", "response.completed", "response.incomplete"))
++        if endpoint == "messages":
++            assert response.text.count("event: error\n") == 1
++            assert '\n\nevent: error\ndata: {"type": "error"' in response.text
++        elif endpoint == "chat/completions":
++            assert response.text.count('"type": "upstream_error"') == 1
++        else:
++            assert response.text.count("event: response.failed\n") == 1
++        if scenario in ("sse_eof_text", "sse_eof_stop", "sse_eof_malformed"):
++            assert "chunk-0" in response.text
++        if scenario == "sse_eof_tool":
++            assert "fixture_tool" in response.text
++
++    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
++    async def test_max_tokens_with_message_stop_is_complete(self, gateway_client, fresh_app, endpoint):
++        """达到输出上限但收到 message_stop，仍按正常协议收口。"""
++        client, _ = gateway_client
++        from app import reqlog
++        from tests.conftest import seed_account
++
++        account = seed_account(fresh_app, "hLimit.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="limit")
++        body = {"model": "GLM-5.3-Flash", "stream": True}
++        body["input" if endpoint == "responses" else "messages"] = (
++            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
++        )
++        response = await client.post("/v1/" + endpoint, json=body,
++                                     headers={"x-mock-scenario": "sse_max_tokens"})
++        assert response.status_code == 200 and reqlog.snapshot()[0]["ok"] is True
++        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is True
++        if endpoint == "responses":
++            assert response.text.count("event: response.incomplete\n") == 1
++            assert '"reason": "max_output_tokens"' in response.text
++            assert "response.failed" not in response.text
++        else:
++            assert ("message_stop" if endpoint == "messages" else "[DONE]") in response.text
++
+     @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+     @pytest.mark.parametrize("scenario", ["sse_error_first", "sse_error_text", "sse_error_tool",
+                                           "sse_error_missing"])
+diff --git a/tests/mock_upstream/server.py b/tests/mock_upstream/server.py
+index ad267ab..67fccec 100644
+--- a/tests/mock_upstream/server.py
++++ b/tests/mock_upstream/server.py
+@@ -191,6 +191,18 @@ def build_app() -> FastAPI:
+                 content = content[:cut]
+             elif scenario == "sse_truncate":
+                 content = content[: len(content) // 2]
++            elif scenario == "sse_empty":
++                content = ""
++            elif scenario in ("sse_eof_text", "sse_eof_tool", "sse_eof_stop", "sse_eof_malformed"):
++                if scenario == "sse_eof_tool":
++                    content = _sse_stream(chunks, error_scenario="sse_error_tool").split("event: error")[0]
++                else:
++                    content = content.split("event: message_stop" if scenario == "sse_eof_stop" else
++                                            "event: message_delta")[0]
++                    if scenario == "sse_eof_malformed":
++                        content += 'event: message_stop\ndata: {"type":"message_stop"'
++            elif scenario == "sse_max_tokens":
++                content = content.replace('"stop_reason":"end_turn"', '"stop_reason":"max_tokens"')
+             return Response(
+                 content, status_code=200, media_type="text/event-stream",
+                 headers={"x-mock-call-index": str(n), "cache-control": "no-cache"},
+diff --git a/tests/unit/test_gateway_usage.py b/tests/unit/test_gateway_usage.py
+index 089326f..7569103 100644
+--- a/tests/unit/test_gateway_usage.py
++++ b/tests/unit/test_gateway_usage.py
+@@ -13,16 +13,18 @@ from app.routes import gateway as gw
+ 
+ @pytest.fixture
+ def error_stream():
+-    """合成错误流，验证实际生成器的分块、取消与关闭。"""
++    """合成流，验证实际生成器的分块、取消与关闭。"""
+     reqlog.clear()
+ 
+-    def _build(protocol, size=65536, on_result=None):
+-        raw = b'data: {"type":"error","error":{"message":"fixture"}}\n\n'
++    def _build(protocol, size=65536, on_result=None, raw=None,
++               content_type="text/event-stream", preloaded_bytes=None):
++        if raw is None:
++            raw = b'data: {"type":"error","error":{"message":"fixture"}}\n\n'
+         closed = []
+ 
+         class Response:
+             status_code = 200
+-            headers = {"content-type": "text/event-stream"}
++            headers = {"content-type": content_type}
+ 
+             async def aiter_bytes(self):
+                 for i in range(0, len(raw), size):
+@@ -38,7 +40,7 @@ def error_stream():
+ 
+         reqlog.begin("error", protocol, "GLM-5.3-Flash", True)
+         up = gw._Upstream(Response(), Context(), None, on_close=lambda: closed.append("slot"),
+-                          on_result=on_result)
++                          on_result=on_result, preloaded_bytes=preloaded_bytes)
+         response = (up.to_streaming("error") if protocol == "messages" else
+                     gw._openai_stream_response(up, "GLM-5.3-Flash", "error") if protocol == "chat" else
+                     gw._responses_stream_response(up, "GLM-5.3-Flash", "error"))
+@@ -76,6 +78,82 @@ async def test_cancel_at_error_frame_preserves_failure(error_stream, protocol):
+         await iterator.aclose()
+ 
+ 
++@pytest.mark.parametrize("size", [1, 7, 65536])
++@pytest.mark.parametrize("raw", [b"", b'data: {"type":"message_stop"',
++                                  b'data: {"type":"content_block_delta","delta":{"text":"message_stop"}}'])
++async def test_eof_bytes_are_preserved_before_error_frame(error_stream, size, raw):
++    results = []
++    up, iterator, closed, _ = error_stream("messages", size=size, raw=raw,
++                                          on_result=lambda ok, detail: results.append(ok))
++    response = b"".join([chunk async for chunk in iterator])
++    assert response.startswith(raw + b"\n\nevent: error\ndata: ")
++    event = json.loads(response[len(raw):].split(b"data: ", 1)[1].strip())
++    assert event["type"] == "error" and event["error"]["type"] == "upstream_error"
++    assert "未正常结束" in event["error"]["message"]
++    assert reqlog.snapshot()[0]["ok"] is False
++    await up.close()
++    assert results == [False] and closed == ["context", "slot"]
++
++
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
++@pytest.mark.parametrize("trailing_newline", [False, True])
++async def test_complete_terminal_tail_is_not_eof_failure(error_stream, protocol, newline, trailing_newline):
++    raw = b'data: {"type":"message_start","message":{"content":[]}}' + newline * 2
++    raw += b'data: {"type":"message_stop"}' + (newline * 2 if trailing_newline else b"")
++    results = []
++    up, iterator, closed, _ = error_stream(protocol, size=7, raw=raw,
++                                          on_result=lambda ok, detail: results.append(ok))
++    chunks = [chunk async for chunk in iterator]
++    response = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
++    assert "upstream_error" not in response and "response.failed" not in response
++    assert (response.encode() == raw if protocol == "messages" else
++            "[DONE]" in response if protocol == "chat" else
++            response.count("event: response.completed\n") == 1)
++    assert reqlog.snapshot()[0]["ok"] is True
++    await up.close()
++    assert results == [True] and closed == ["context", "slot"]
++
++
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++@pytest.mark.parametrize("content_type", ["text/event-stream", "TEXT/EVENT-STREAM"])
++async def test_cancel_at_eof_error_preserves_failure(error_stream, protocol, content_type):
++    results = []
++    up, iterator, closed, _ = error_stream(protocol, raw=b"", content_type=content_type,
++                                          on_result=lambda ok, detail: results.append(ok))
++    try:
++        async for chunk in iterator:
++            text = chunk.decode() if isinstance(chunk, bytes) else chunk
++            if ("event: response.failed" in text if protocol == "responses" else '"error"' in text):
++                with pytest.raises(asyncio.CancelledError):
++                    await iterator.athrow(asyncio.CancelledError())
++                break
++        entry = reqlog.snapshot()[0]
++        assert entry["ok"] is False and entry["status"] == 200
++        assert "未正常结束" in entry["error"]
++        await up.close()
++        assert results == [False] and closed == ["context", "slot"]
++    finally:
++        await iterator.aclose()
++
++
++@pytest.mark.parametrize("preloaded", [False, True])
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++async def test_non_sse_json_does_not_require_terminal(error_stream, preloaded, protocol):
++    raw = b'{"type":"message","usage":{"input_tokens":2,"output_tokens":1}}'
++    up, iterator, closed, _ = error_stream(protocol, raw=raw, content_type="application/json",
++                                          preloaded_bytes=raw if preloaded else None)
++    chunks = [chunk async for chunk in iterator]
++    response = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
++    assert (response.encode() == raw if protocol == "messages" else
++            "[DONE]" in response if protocol == "chat" else
++            response.count("event: response.completed\n") == 1)
++    assert "upstream_error" not in response and "response.failed" not in response
++    assert reqlog.snapshot()[0]["ok"] is True
++    await up.close()
++    assert closed == ["context", "slot"]
++
++
+ @pytest.mark.parametrize("change", ["credential", "removed", "disabled"])
+ def test_stream_result_respects_current_account(fresh_app, change):
+     from app.models import Status
+@@ -120,10 +198,11 @@ def test_sse_partial_updates_are_cumulative():
+         {"type": "message_delta", "usage": {"output_tokens": None}},
+         {"type": "message_start", "message": "malformed"},
+     ]:
+-        usage = gw._extract_sse_line_usage(b'data: ' + json.dumps(event).encode(), usage)
++        evt = gw._extract_sse_line_event(b'data: ' + json.dumps(event).encode())
++        usage = gw._extract_event_usage(evt, usage)
+     assert usage == {"input_tokens": 0, "output_tokens": 5,
+                      "cache_read_input_tokens": 60, "cache_creation_input_tokens": 8}
+-    assert gw._extract_sse_line_usage(b'data: [DONE]', usage) == usage
++    assert gw._extract_event_usage(gw._extract_sse_line_event(b'data: [DONE]'), usage) == usage
+ 
+ 
+ def test_reqlog_caches_remain_nullable_and_validated():
+@@ -227,7 +306,8 @@ async def test_cached_sse_cross_chunks_and_final_line_are_unchanged(size):
+         b'data: {"type":"message_start","message":{"usage":{"input_tokens":0,'
+         b'"cache_read_input_tokens":60,"cache_creation_input_tokens":8}}}\n\n'
+         b'data: {"type":"message_delta","usage":{"output_tokens":5}}\n\n'
+-        b'data: {"type":"message_delta","usage":{"output_tokens":5}}'
++        b'data: {"type":"message_delta","usage":{"output_tokens":5}}\n\n'
++        b'data: {"type":"message_stop"}'
+     )
+ 
+     class Response:
+@@ -248,6 +328,7 @@ async def test_cached_sse_cross_chunks_and_final_line_are_unchanged(size):
+     try:
+         assert b"".join([chunk async for chunk in response.body_iterator]) == raw
+         entry = reqlog.snapshot()[0]
++        assert entry["ok"] is True
+         assert entry["input_tokens"] == 0 and entry["output_tokens"] == 5
+         assert entry["cache_read_input_tokens"] == 60 and entry["cache_creation_input_tokens"] == 8
+     finally:

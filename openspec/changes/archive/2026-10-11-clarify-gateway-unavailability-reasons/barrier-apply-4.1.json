@@ -1,0 +1,89 @@
+{
+  "changeName": "clarify-gateway-unavailability-reasons",
+  "changeDir": "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\clarify-gateway-unavailability-reasons",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\clarify-gateway-unavailability-reasons\\proposal.md"
+    ],
+    "specs": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\clarify-gateway-unavailability-reasons\\specs\\gateway-unavailability\\spec.md"
+    ],
+    "design": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\clarify-gateway-unavailability-reasons\\design.md"
+    ],
+    "tasks": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\clarify-gateway-unavailability-reasons\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 11,
+    "complete": 10,
+    "remaining": 1
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 在 `tests/integration/test_gateway_unavailability.py` 添加三协议 stream=true/false 的空池与状态排除红例，断言503/type、原因、origin及ID；复用fresh_app/gateway_client隔离夹具，保存新增断言在当前实现失败的结果，不访问生产。",
+      "done": true
+    },
+    {
+      "id": "2",
+      "description": "1.2 在Account现有谓词旁提取共同排除判定、为Store.select增加可选请求内观测，保持bool入口及选号行为；用零余量/缺失/None模型窗口、冷却到期/缺失截止、unknown状态组合、偏好与cursor反例证明原因和返回账号不漂移。",
+      "done": true
+    },
+    {
+      "id": "3",
+      "description": "1.3 在共享最终503出口接入结构化结果、X-Request-Id及reqlog可选字段，完成1.1红例为绿；在test_reqlog验证新增嵌套字段快照不污染内存，在test_gateway_monitoring验证公开与后台同源；同步04-api-spec的503字段与展示文案非分类依据说明。",
+      "done": true
+    },
+    {
+      "id": "4",
+      "description": "2.1 为所有进入最终503的换号路径传递请求内原因载荷，复用已有业务分类并分别保留原始/有效HTTP码；在Mock上游集成红绿用例验证402与HTTP200包装额度、401/403、风控、挑战耗尽、连接/预读取失败、5xx耗尽，不改变直接500/独立错误出口；同步API原因表。",
+      "done": true
+    },
+    {
+      "id": "5",
+      "description": "2.2 区分本地满槽、等待后重占槽失败、上游3008/3009/3010、明确普通限流码及未知429；在test_account_concurrency和新增集成用例验证各码/origin、内部重试次数与账号状态不变，覆盖unknown429含额度字样仍不踢号；同步API并发/限流边界。",
+      "done": true
+    },
+    {
+      "id": "6",
+      "description": "2.3 实现no_candidate与attempt_limit聚合、混合/未知及终止时覆盖核验；用尝试上限后仍有未尝试账号、相同码不同origin、未分类候选、旧阻塞已解除、先失败后成功反例验证code优先级、cause去重顺序与成功无污染；同步API停止语义。",
+      "done": true
+    },
+    {
+      "id": "7",
+      "description": "3.1 实现按候选硬/临时/未知障碍聚合retryable三态；以冷却且模型可用/冷却且零额度、全硬失败、混合硬失败加临时路径、未知429有/无可靠等待、验证码耗尽及attempt_limit红绿用例验证，不修改状态恢复或内部调度策略；同步API三态含义。",
+      "done": true
+    },
+    {
+      "id": "8",
+      "description": "3.2 保存等待绝对截止并计算对外retry_after，支持有限秒数与HTTP-date，保持原内部等待封顶；以消耗等待时间、分数向上取整、0秒、非法/缺失日期、超内部封顶秒数、多候选max/min及本地并发时点未知反例验证正文与Retry-After一致，额度expires_at不作重置时间；同步API等待规则。",
+      "done": true
+    },
+    {
+      "id": "9",
+      "description": "3.3 增加最多32条匿名后台证据与截断计数，保持cause聚合完整；验证原始/有效HTTP区分、业务码缺失为null、轨迹溢出、公开无id/name/token/额度数值/地址/原文、新增后台字段无凭据，改中文message仍不改变分类；补监控字段说明，沿用原页面与内存500条保留策略。",
+      "done": true
+    },
+    {
+      "id": "10",
+      "description": "4.1 使用项目 `.venv/Scripts/python.exe -m pytest` 跑新增不可用用例及test_gateway_monitoring、test_account_concurrency、test_gateway_connect_fail、test_gateway_risk_cooldown、test_reqlog；验收退出0及三协议字段/头/监控一致，不以Mock单一函数返回替代真实入口集成证据。",
+      "done": true
+    },
+    {
+      "id": "11",
+      "description": "4.2 跑既有test_gateway_lifecycle、test_gateway_openai、test_regression_baseline及对应流错误/截断/思考用例，证明取消、park/reacquire、流关闭、成功及非本出口错误未漂移；最终差分只包含约定源码/测试/API说明，原有发布脚本修改不被覆盖，无生产调用或新增持久化诊断写入。",
+      "done": false
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "ready",
+  "instruction": "Read context files, work through pending tasks, mark complete as you go.\nPause if you hit blockers or need clarification.",
+  "context": "ZCode 账号运营 + 网关一体机（zcode2api / zcode-hub）。\n技术栈: Python >=3.11，uv 管理依赖（uv.lock）；核心包 app/，入口 cli.py，前端 frontend/。\n测试: pytest（asyncio_mode=auto，tests/；integration=Mock 上游集成用例，e2e=compose 层端到端）。\n约定: 文档与提交为中文，规范动宾式提交；许可证 AGPL-3.0-only。\n",
+  "root": {
+    "path": "D:\\Temp\\lizi\\zcode2api",
+    "source": "nearest"
+  }
+}

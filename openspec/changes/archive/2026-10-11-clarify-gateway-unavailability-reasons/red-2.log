@@ -1,0 +1,465 @@
+FFFFFFFFFFFFF                                                            [100%]
+================================== FAILURES ===================================
+____________ test_upstream_failure[402-None-quota_exhausted-False] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA1F59A90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA1F21950>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA1ED2520>
+raw = 402, business = None, expected = 'quota_exhausted', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+____________ test_upstream_failure[200-1304-quota_exhausted-False] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA2288050>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA22134D0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA21D86B0>
+raw = 200, business = '1304', expected = 'quota_exhausted', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+__________ test_upstream_failure[401-None-credential_invalid-False] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA2288E10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21DCB00>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA1F7E750>
+raw = 401, business = None, expected = 'credential_invalid', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+__________ test_upstream_failure[403-None-credential_invalid-False] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21DE060>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21DD6E0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA22034D0>
+raw = 403, business = None, expected = 'credential_invalid', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_________ test_upstream_failure[200-3012-account_risk_blocked-False] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21DD220>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA0E64170>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA1F26A50>
+raw = 200, business = '3012', expected = 'account_risk_blocked'
+retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+________ test_upstream_failure[400-3007-captcha_retry_exhausted-None] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA0DC3770>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21D8D10>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA0E4BEE0>
+raw = 400, business = '3007', expected = 'captcha_retry_exhausted'
+retryable = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_________ test_upstream_failure[503-None-upstream_server_error-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21D9D00>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21D9150>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA21B36E0>
+raw = 503, business = None, expected = 'upstream_server_error', retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_________ test_upstream_failure[200-1120-upstream_server_error-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21DB020>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA1F7DE50>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA0DEE2E0>
+raw = 200, business = '1120', expected = 'upstream_server_error'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_______ test_upstream_failure[429-3008-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA227CA50>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA1F7F450>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA0DEFC40>
+raw = 429, business = '3008', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_______ test_upstream_failure[200-3009-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA227DE50>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21D18B0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA0DEF700>
+raw = 200, business = '3009', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_______ test_upstream_failure[429-3010-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21D23F0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA21D2120>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA0E60E50>
+raw = 429, business = '3010', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+_________ test_upstream_failure[429-1302-upstream_rate_limited-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA21D35C0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA2203BD0>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA226EEB0>
+raw = 429, business = '1302', expected = 'upstream_rate_limited'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+__________ test_upstream_failure[429-None-upstream_429_unknown-None] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000014DA22035B0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x0000014DA0D69010>)
+fresh_app = <app.store.Store object at 0x0000014DA2287D90>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000014DA226DE80>
+raw = 429, business = None, expected = 'upstream_429_unknown', retryable = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from tests.mock_upstream import server
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+>       monkeypatch.setattr(server, "_messages_result", lambda *_: (
+            raw, {"code": business, "error": {"message": "fixture", "type": "unlisted"}}, {}))
+E       AttributeError: <module 'tests.mock_upstream.server' from 'D:\\Temp\\lizi\\zcode2api\\tests\\mock_upstream\\server.py'> has no attribute '_messages_result'
+
+tests\integration\test_gateway_unavailability.py:71: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[402-None-quota_exhausted-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-1304-quota_exhausted-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[401-None-credential_invalid-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[403-None-credential_invalid-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-3012-account_risk_blocked-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[400-3007-captcha_retry_exhausted-None]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[503-None-upstream_server_error-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-1120-upstream_server_error-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-3008-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-3009-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-3010-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-1302-upstream_rate_limited-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-None-upstream_429_unknown-None]

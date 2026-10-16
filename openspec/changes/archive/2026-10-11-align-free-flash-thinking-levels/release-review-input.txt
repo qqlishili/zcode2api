@@ -1,0 +1,127 @@
+严格只读发布验收，仅审查提供的真实发布证据及源码，不调用任何工具、不改任何文件、不访问生产。中文400字以内，以VERDICT: PASS或FIX-FIRST开头，阻断须有具体依据；明确证据限制。不得将没有在生产制造静默EOF当缺陷，离线失败场景已有424受影响回归通过。以下为新发布的证据，之前的实现方案和最终源码审查均已由独立Antigravity CLI PASS。
+
+# 发布验收
+
+## 提交
+
+- `a2005cfd9021419fe279a705994197d135aeb1d6`：fix(gateway): 正确收口流式静默截断
+- `299faab762cf17d2a9560a92fd9c7fa3019fe843`：fix(gateway): 对齐免费模型三档思考契约
+
+原始工作区总差分与两个提交合计补丁 SHA256 完全相同。第一提交按暂存快照独立验证；一次夹具暂存位置错误在提交前修正，复验 66 项通过。未改写历史，未携带私有配置或 OpenSpec。
+
+## 运行证据
+
+| 检查 | 结果 |
+|------|------|
+| 本机 / GitHub main / VPS HEAD | 均为 299faab762cf17d2a9560a92fd9c7fa3019fe843 |
+| 两端工作区 | 干净 |
+| 三个核心 Python 文件 SHA256 | 两端一致 |
+| 原服务与目录 | 原服务重启成功，实际进程仍读取原目录 |
+| /meta、/v1/models | 200，版本 2.6.6、唯一免费 Flash 模型 |
+| 三接口非法 medium | 均 400 invalid_request_error，消息列出三档 |
+| 本机真实 pi → VPS → 上游 | low/high/max 三次完整 OK，stop 终态，用户配置不变 |
+| 真实 Chat 流式 high | 200、完整 OK、finish_reason=stop、[DONE] |
+| 真实 Responses 流式 max | 200、完整 OK、response.completed、effort=max |
+| 账号数据 | 发布前后 7 个账号均保留 |
+
+继续沿用既有虚拟环境、Node 依赖、服务、目录及数据；未执行 rsync、重建服务或覆盖配置。本次未人为制造生产静默 EOF，相关失败场景以已通过的隔离回归为证。Antigravity CLI 发布验收结论保存为 release-acceptance.txt。
+
+
+{
+  "targetModel": "GLM-5.3-Flash",
+  "protocol": "anthropic-messages",
+  "liveVps": true,
+  "runs": [
+    {
+      "thinking": "low",
+      "elapsedMs": 3932,
+      "exitCode": 0,
+      "completed": true,
+      "stopReason": "stop",
+      "hasOK": true,
+      "stderrPresent": false,
+      "errorPresent": false
+    },
+    {
+      "thinking": "high",
+      "elapsedMs": 6125,
+      "exitCode": 0,
+      "completed": true,
+      "stopReason": "stop",
+      "hasOK": true,
+      "stderrPresent": false,
+      "errorPresent": false
+    },
+    {
+      "thinking": "max",
+      "elapsedMs": 4516,
+      "exitCode": 0,
+      "completed": true,
+      "stopReason": "stop",
+      "hasOK": true,
+      "stderrPresent": false,
+      "errorPresent": false
+    }
+  ],
+  "originalConfigUnchanged": [
+    {
+      "file": "models.json",
+      "unchanged": true
+    },
+    {
+      "file": "settings.json",
+      "unchanged": true
+    }
+  ],
+  "verdict": "PASS"
+}
+
+
+最终共享思考校验源码
+def _apply_reasoning_params(payload: dict, body: dict) -> str | None:
+    """校验免费 Flash 思考参数，并映射到 Anthropic 体；非法时返回错误信息。"""
+    for key in ("thinking", "output_config", "reasoning"):
+        if key in payload and not isinstance(payload[key], dict):
+            return f"{key} 必须是对象；思考等级仅支持 low/high/max"
+
+    thinking = payload.get("thinking")
+    out_cfg = payload.get("output_config")
+    if "enable_thinking" in payload and payload["enable_thinking"] is not True:
+        return "enable_thinking 仅支持 true；思考等级仅支持 low/high/max，不支持关闭"
+    if isinstance(thinking, dict) and thinking.get("type") not in ("enabled", "adaptive"):
+        return "thinking.type 仅支持 enabled/adaptive；思考等级仅支持 low/high/max，不支持关闭"
+
+    # 先检查全部原始字段，避免转换覆盖非法值或冲突的档位。
+    efforts = []
+    if "reasoning_effort" in payload:
+        efforts.append(("reasoning_effort", payload["reasoning_effort"]))
+    for key in ("reasoning", "output_config"):
+        params = payload.get(key)
+        if isinstance(params, dict) and "effort" in params:
+            efforts.append((f"{key}.effort", params["effort"]))
+    for field, value in efforts:
+        if not isinstance(value, str) or value not in ("low", "high", "max"):
+            return f"{field} 仅支持 low/high/max"
+    if efforts and any(value != efforts[0][1] for _, value in efforts):
+        return "思考等级参数冲突；各字段须使用相同的 low/high/max"
+    if isinstance(thinking, dict) and "budget_tokens" in thinking and not efforts:
+        return "不支持仅设置 budget_tokens；请明确选择 low/high/max"
+
+    if isinstance(out_cfg, dict):
+        body["output_config"] = dict(out_cfg)
+    if efforts:
+        body.setdefault("output_config", {})["effort"] = efforts[0][1]
+    if efforts or thinking is not None or payload.get("enable_thinking") is True:
+        # 上游使用 enabled + effort，不发送 budget_tokens，也不推算默认档位。
+        body["thinking"] = {"type": "enabled"}
+    for key in ("reasoning_effort", "reasoning", "enable_thinking"):
+        body.pop(key, None)
+    return None
+
+
+
+
+实际本机Git记录
+299faab762cf17d2a9560a92fd9c7fa3019fe843 fix(gateway): 对齐免费模型三档思考契约
+a2005cfd9021419fe279a705994197d135aeb1d6 fix(gateway): 正确收口流式静默截断
+git status --short无输出；GitHub ls-remote和VPS rev-parse均为299faab762cf17d2a9560a92fd9c7fa3019fe843。核心app/openai_compat.py、app/responses_compat.py、app/routes/gateway.py SHA256两端一致。

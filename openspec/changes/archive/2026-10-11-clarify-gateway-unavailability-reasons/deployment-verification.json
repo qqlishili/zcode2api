@@ -1,0 +1,367 @@
+{
+  "task": "HP_ZCODE_VPS_DEPLOY_20261009_7a10f1a6",
+  "preflight": {
+    "at": "2026-10-09T06:09:20.432878+00:00",
+    "service": {
+      "MainPID": "1820332",
+      "ActiveState": "active",
+      "SubState": "running",
+      "WorkingDirectory": "/root/code/dengyie-zcode2api"
+    },
+    "exec_start_paths": [
+      "/root/code/dengyie-zcode2api/.venv/bin/python",
+      "/root/code/dengyie-zcode2api/cli.py"
+    ],
+    "process_exe": "/usr/bin/python3.12",
+    "process_cwd": "/root/code/dengyie-zcode2api",
+    "port": 18088,
+    "data_path": "/root/code/dengyie-zcode2api/data",
+    "db_path": "/root/code/dengyie-zcode2api/data/accounts.db",
+    "head": "299faab762cf17d2a9560a92fd9c7fa3019fe843",
+    "git_status": "",
+    "files": {
+      "app/models.py": {
+        "sha256": "3c820a18c15d1a14ff061518a6c097d430f6eaec76eb96f154757cee26bf855a",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "app/store.py": {
+        "sha256": "4b4db7f78cc4d5fc5aef5b65cfd705032084be0854c7dc703c47f3dec6e8217f",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "app/routes/gateway.py": {
+        "sha256": "157197951dd39d23adcbd6dc9964e559a39d17a310defb5788e291295dda243d",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      },
+      "app/reqlog.py": {
+        "sha256": "8c17c1dbe0681b1a7df2554401a8dfa8cfb2a5e37333ee5078e35b74601774ed",
+        "mode": "0o644",
+        "uid": 0,
+        "gid": 0
+      }
+    },
+    "accounts_counts": [
+      {
+        "provider": "zai",
+        "status": "exhausted",
+        "enabled": true,
+        "count": 7
+      }
+    ],
+    "monitor_http": 200,
+    "monitor_inflight": 0,
+    "status_http": 200,
+    "quota_pool": {
+      "zai": 0,
+      "bigmodel": 0
+    },
+    "gateway_key_set": true
+  },
+  "backup": {
+    "backup": "/root/.local/state/zcode2api-deploy/HP_ZCODE_VPS_DEPLOY_20261009_7a10f1a6/backup",
+    "staging": "/root/.local/state/zcode2api-deploy/HP_ZCODE_VPS_DEPLOY_20261009_7a10f1a6/staging",
+    "manifest": {
+      "app/models.py": {
+        "sha256": "3c820a18c15d1a14ff061518a6c097d430f6eaec76eb96f154757cee26bf855a",
+        "mode": 420,
+        "uid": 0,
+        "gid": 0
+      },
+      "app/store.py": {
+        "sha256": "4b4db7f78cc4d5fc5aef5b65cfd705032084be0854c7dc703c47f3dec6e8217f",
+        "mode": 420,
+        "uid": 0,
+        "gid": 0
+      },
+      "app/routes/gateway.py": {
+        "sha256": "157197951dd39d23adcbd6dc9964e559a39d17a310defb5788e291295dda243d",
+        "mode": 420,
+        "uid": 0,
+        "gid": 0
+      },
+      "app/reqlog.py": {
+        "sha256": "8c17c1dbe0681b1a7df2554401a8dfa8cfb2a5e37333ee5078e35b74601774ed",
+        "mode": 420,
+        "uid": 0,
+        "gid": 0
+      }
+    }
+  },
+  "deployment": {
+    "at": "2026-10-09T06:12:28.471847+00:00",
+    "restart_started": "2026-10-09T06:12:26.196901+00:00",
+    "old_pid": "1820332",
+    "new_pid": 3578010,
+    "service": {
+      "MainPID": "3578010",
+      "NRestarts": "0",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    "process_cwd": "/root/code/dengyie-zcode2api",
+    "files": {
+      "app/models.py": "39216f4d0849dc7dd25bdd083a44707370d2385290604b32937c7a27aef12cae",
+      "app/store.py": "874258435061a050b9d779b4b4944b52749b4af2832475ca22af14d6b10335a0",
+      "app/routes/gateway.py": "ef257114d3b7dea79d9eda55c63f49075abaea0713bcd1c6ea8353630d7fa3e4",
+      "app/reqlog.py": "ad4a565629ca7fbf529a47329ea8965ecffe84d184f2ca21f1fbd45467a6fcfc"
+    },
+    "inflight_observations": [
+      0
+    ],
+    "status_http": 200,
+    "quota_pool": {
+      "zai": 0,
+      "bigmodel": 0
+    },
+    "rollback": false
+  },
+  "verification": {
+    "at": "2026-10-09T06:14:42.791883+00:00",
+    "monitor_http": 200,
+    "matched": [
+      {
+        "req_id": "ba1fe58553c669b5",
+        "ts": 1791526423.4458318,
+        "endpoint": "messages",
+        "model": "GLM-5.3-Flash",
+        "stream": true,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      },
+      {
+        "req_id": "d58bc36a3d464218",
+        "ts": 1791526423.6747549,
+        "endpoint": "messages",
+        "model": "GLM-5.3-Flash",
+        "stream": false,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      },
+      {
+        "req_id": "7ca6a7601512cdd2",
+        "ts": 1791526423.9178798,
+        "endpoint": "chat",
+        "model": "GLM-5.3-Flash",
+        "stream": true,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      },
+      {
+        "req_id": "55caaab00d93a9ba",
+        "ts": 1791526424.1419108,
+        "endpoint": "chat",
+        "model": "GLM-5.3-Flash",
+        "stream": false,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      },
+      {
+        "req_id": "322af5409da0784d",
+        "ts": 1791526424.3641276,
+        "endpoint": "responses",
+        "model": "GLM-5.3-Flash",
+        "stream": true,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      },
+      {
+        "req_id": "25afa55243c0f90b",
+        "ts": 1791526424.5859113,
+        "endpoint": "responses",
+        "model": "GLM-5.3-Flash",
+        "stream": false,
+        "status": 503,
+        "ok": false,
+        "error_code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "stop_reason": "no_candidate",
+        "coverage_complete": true,
+        "unresolved_count": 0,
+        "evidence_truncated": 0,
+        "error_causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ],
+        "evidence_count": 14
+      }
+    ],
+    "inflight": 0,
+    "service": {
+      "MainPID": "3578010",
+      "NRestarts": "0",
+      "WorkingDirectory": "/root/code/dengyie-zcode2api",
+      "ActiveState": "active",
+      "SubState": "running"
+    },
+    "process_cwd": "/root/code/dengyie-zcode2api",
+    "process_exe": "/usr/bin/python3.12",
+    "journal_categories": {
+      "startup_complete": 1
+    },
+    "accounts_counts": [
+      {
+        "provider": "zai",
+        "status": "exhausted",
+        "enabled": true,
+        "count": 7
+      }
+    ],
+    "head": "299faab762cf17d2a9560a92fd9c7fa3019fe843",
+    "git_status": "M app/models.py\n M app/reqlog.py\n M app/routes/gateway.py\n M app/store.py",
+    "files": {
+      "app/models.py": {
+        "sha256": "39216f4d0849dc7dd25bdd083a44707370d2385290604b32937c7a27aef12cae",
+        "mode": "0o644"
+      },
+      "app/store.py": {
+        "sha256": "874258435061a050b9d779b4b4944b52749b4af2832475ca22af14d6b10335a0",
+        "mode": "0o644"
+      },
+      "app/routes/gateway.py": {
+        "sha256": "ef257114d3b7dea79d9eda55c63f49075abaea0713bcd1c6ea8353630d7fa3e4",
+        "mode": "0o644"
+      },
+      "app/reqlog.py": {
+        "sha256": "ad4a565629ca7fbf529a47329ea8965ecffe84d184f2ca21f1fbd45467a6fcfc",
+        "mode": "0o644"
+      }
+    }
+  },
+  "uploads": [
+    {
+      "file": "app/models.py",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"ok\": true,\n  \"transferId\": \"cbb2f2a7-cd2d-4cd5-a14d-0739e9cf158c\",\n  \"totalBytes\": 12326\n}"
+          }
+        ]
+      }
+    },
+    {
+      "file": "app/store.py",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"ok\": true,\n  \"transferId\": \"78661b26-ff20-4d2a-95af-1cfb941d915f\",\n  \"totalBytes\": 17329\n}"
+          }
+        ]
+      }
+    },
+    {
+      "file": "app/routes/gateway.py",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"ok\": true,\n  \"transferId\": \"03645981-03e6-4108-ad1f-d8934a763920\",\n  \"totalBytes\": 72130\n}"
+          }
+        ]
+      }
+    },
+    {
+      "file": "app/reqlog.py",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"ok\": true,\n  \"transferId\": \"810dea81-356b-498b-b783-85dd4dc8ceef\",\n  \"totalBytes\": 3974\n}"
+          }
+        ]
+      }
+    }
+  ],
+  "commands": {
+    "preflight": "python3 - <<'PY'\nimport os,json,subprocess,hashlib,pathlib,datetime,ast,sqlite3,urllib.request\nroot=pathlib.Path('/root/code/dengyie-zcode2api')\nprops=dict(line.split('=',1) for line in subprocess.check_output(['systemctl','show','zcode2api.service','--property=MainPID,ActiveState,SubState,WorkingDirectory,ExecStart'],text=True).splitlines() if '=' in line)\npid=int(props['MainPID']); proc=pathlib.Path('/proc')/str(pid)\nenv=dict(item.split('=',1) for item in (proc/'environ').read_bytes().decode().split('\\0') if '=' in item)\nargs=(proc/'cmdline').read_bytes().decode().split('\\0')\ndata=env.get('ZCODE_DATA_DIR')\nif not data:\n    for line in (root/'.env').read_text().splitlines() if (root/'.env').exists() else []:\n        if line.strip().startswith('ZCODE_DATA_DIR='): data=line.split('=',1)[1].strip().strip('\"').strip(\"'\")\ndata=pathlib.Path(data or 'data'); data=data if data.is_absolute() else root/data\ntree=ast.parse((root/'app/store.py').read_text())\nnames={n.targets[0].id:ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and n.targets[0].id in ('_META','_TBL')}\ndb=sqlite3.connect((data/'accounts.db').as_uri()+'?mode=ro',uri=True); db.execute('PRAGMA query_only=ON')\nkeys=dict(db.execute('SELECT key,value FROM '+names['_META']+' WHERE key IN (?,?)',('admin_key','gateway_key')))\ncounts=[{'provider':p,'status':s,'enabled':bool(e),'count':c} for p,s,e,c in db.execute('SELECT provider,status,enabled,count(*) FROM '+names['_TBL']+' GROUP BY provider,status,enabled')]\ndef get(path):\n    req=urllib.request.Request('http://127.0.0.1:18088'+path,headers={'Authorization':'Bearer '+keys['admin_key']})\n    with urllib.request.urlopen(req,timeout=15) as r:return r.status,json.load(r)\nstatus,monitor=get('/admin/api/monitoring')\nentries=monitor['entries']; active=sum(e.get('ok') is None for e in entries)\nstatuscode,st=get('/admin/api/status')\nfiles={}\nfor rel in ['app/models.py','app/store.py','app/routes/gateway.py','app/reqlog.py']:\n    p=root/rel;s=p.stat();files[rel]={'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'mode':oct(s.st_mode&0o777),'uid':s.st_uid,'gid':s.st_gid}\nprint(json.dumps({'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'service':{k:props[k] for k in ('MainPID','ActiveState','SubState','WorkingDirectory')},'exec_start_paths':[a for a in args if a.startswith(str(root))], 'process_exe':str((proc/'exe').resolve()),'process_cwd':str((proc/'cwd').resolve()),'port':18088,'data_path':str(data),'db_path':str(data/'accounts.db'),'head':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),'git_status':subprocess.check_output(['git','-C',str(root),'status','--porcelain'],text=True).strip(),'files':files,'accounts_counts':counts,'monitor_http':status,'monitor_inflight':active,'status_http':statuscode,'quota_pool':st['quota_pool'],'gateway_key_set':bool(keys.get('gateway_key'))}))\nPY",
+    "backup": "python3 - <<'PY'\nimport pathlib,hashlib,shutil,json,os\nroot=pathlib.Path('/root/code/dengyie-zcode2api')\nbase=pathlib.Path('/root/.local/state/zcode2api-deploy/HP_ZCODE_VPS_DEPLOY_20261009_7a10f1a6')\nold={'app/models.py':'3c820a18c15d1a14ff061518a6c097d430f6eaec76eb96f154757cee26bf855a','app/store.py':'4b4db7f78cc4d5fc5aef5b65cfd705032084be0854c7dc703c47f3dec6e8217f','app/routes/gateway.py':'157197951dd39d23adcbd6dc9964e559a39d17a310defb5788e291295dda243d','app/reqlog.py':'8c17c1dbe0681b1a7df2554401a8dfa8cfb2a5e37333ee5078e35b74601774ed'}\nassert not base.exists(),'deployment path exists'\nfor rel,digest in old.items():assert hashlib.sha256((root/rel).read_bytes()).hexdigest()==digest,'source drift'\nbase.mkdir(parents=True,mode=0o700)\nmanifest={}\nfor rel,digest in old.items():\n    src=root/rel; dst=base/'backup'/rel\n    dst.parent.mkdir(parents=True,exist_ok=True)\n    shutil.copy2(src,dst)\n    s=src.stat();os.chown(dst,s.st_uid,s.st_gid)\n    assert hashlib.sha256(dst.read_bytes()).hexdigest()==digest\n    manifest[rel]={'sha256':digest,'mode':s.st_mode&0o777,'uid':s.st_uid,'gid':s.st_gid}\n    (base/'staging'/rel).parent.mkdir(parents=True,exist_ok=True)\n(base/'manifest.json').write_text(json.dumps(manifest,indent=2))\nprint(json.dumps({'backup':str(base/'backup'),'staging':str(base/'staging'),'manifest':manifest}))\nPY",
+    "deploy": "python3 - <<'PY'\nimport pathlib,hashlib,json,shutil,os,subprocess,sqlite3,urllib.request,time,datetime,ast\nroot=pathlib.Path('/root/code/dengyie-zcode2api')\nbase=pathlib.Path('/root/.local/state/zcode2api-deploy/HP_ZCODE_VPS_DEPLOY_20261009_7a10f1a6')\nmanifest=json.loads((base/'manifest.json').read_text())\nnew={'app/models.py':'39216f4d0849dc7dd25bdd083a44707370d2385290604b32937c7a27aef12cae','app/store.py':'874258435061a050b9d779b4b4944b52749b4af2832475ca22af14d6b10335a0','app/routes/gateway.py':'ef257114d3b7dea79d9eda55c63f49075abaea0713bcd1c6ea8353630d7fa3e4','app/reqlog.py':'ad4a565629ca7fbf529a47329ea8965ecffe84d184f2ca21f1fbd45467a6fcfc'}\nfor rel,h in new.items():\n    assert hashlib.sha256((base/'staging'/rel).read_bytes()).hexdigest()==h,'upload mismatch'\n    assert hashlib.sha256((root/rel).read_bytes()).hexdigest()==manifest[rel]['sha256'],'source drift'\n    compile((base/'staging'/rel).read_text(),rel,'exec')\ndb=sqlite3.connect((root/'data/accounts.db').as_uri()+'?mode=ro',uri=True);db.execute('PRAGMA query_only=ON')\ntable=next(ast.literal_eval(n.value) for n in ast.parse((root/'app/store.py').read_text()).body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and n.targets[0].id=='_META')\nkey=db.execute('SELECT value FROM '+table+\" WHERE key='admin_key'\").fetchone()[0]\ndef get(path):\n    with urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:18088'+path,headers={'Authorization':'Bearer '+key}),timeout=5) as r:return json.load(r)\nwaits=[]\nfor i in range(4):\n    count=sum(e.get('ok') is None for e in get('/admin/api/monitoring')['entries'])\n    waits.append(count)\n    if count==0:break\n    if i<3:time.sleep(5)\nassert count==0,'inflight not drained; no files changed'\noldpid=subprocess.check_output(['systemctl','show','zcode2api.service','--property=MainPID','--value'],text=True).strip()\nstart=datetime.datetime.now(datetime.timezone.utc).isoformat()\nchanged=False\ntry:\n    for rel in new:\n        target=root/rel;temp=target.with_name(target.name+'.deploy-7a10f1a6.tmp')\n        assert not temp.exists()\n        shutil.copy2(base/'staging'/rel,temp)\n        os.chmod(temp,manifest[rel]['mode']);os.chown(temp,manifest[rel]['uid'],manifest[rel]['gid'])\n        changed=True;os.replace(temp,target)\n    subprocess.run(['systemctl','restart','zcode2api.service'],check=True,timeout=25)\n    for i in range(10):\n        try: status=get('/admin/api/status');break\n        except Exception:\n            if i==9:raise\n            time.sleep(1)\n    props=dict(line.split('=',1) for line in subprocess.check_output(['systemctl','show','zcode2api.service','--property=MainPID,ActiveState,SubState,NRestarts'],text=True).splitlines())\n    assert props['ActiveState']=='active' and props['SubState']=='running'\n    pid=int(props['MainPID'])\n    assert str((pathlib.Path('/proc')/str(pid)/'cwd').resolve())==str(root)\n    hashes={rel:hashlib.sha256((root/rel).read_bytes()).hexdigest() for rel in new}\n    assert hashes==new\n    result={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'restart_started':start,'old_pid':oldpid,'new_pid':pid,'service':props,'process_cwd':str(root),'files':hashes,'inflight_observations':waits,'status_http':200,'quota_pool':status['quota_pool'],'rollback':False}\nexcept Exception as err:\n    if changed:\n        for rel in manifest:\n            target=root/rel;temp=target.with_name(target.name+'.rollback-7a10f1a6.tmp')\n            shutil.copy2(base/'backup'/rel,temp)\n            os.chmod(temp,manifest[rel]['mode']);os.chown(temp,manifest[rel]['uid'],manifest[rel]['gid']);os.replace(temp,target)\n        subprocess.run(['systemctl','restart','zcode2api.service'],check=True,timeout=25)\n    result={'rollback':changed,'failure_class':type(err).__name__,'restored_hashes':{rel:hashlib.sha256((root/rel).read_bytes()).hexdigest() for rel in manifest}}\n    print(json.dumps(result));raise SystemExit(1)\nprint(json.dumps(result))\nPY",
+    "verify": "python3 - <<'PY'\nimport pathlib,sqlite3,ast,urllib.request,json,subprocess,datetime,hashlib\nroot=pathlib.Path('/root/code/dengyie-zcode2api')\nmeta=next(ast.literal_eval(n.value) for n in ast.parse((root/'app/store.py').read_text()).body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and n.targets[0].id=='_META')\ntbl=next(ast.literal_eval(n.value) for n in ast.parse((root/'app/store.py').read_text()).body if isinstance(n,ast.Assign) and isinstance(n.targets[0],ast.Name) and n.targets[0].id=='_TBL')\ndb=sqlite3.connect((root/'data/accounts.db').as_uri()+'?mode=ro',uri=True);db.execute('PRAGMA query_only=ON')\nkey=db.execute('SELECT value FROM '+meta+\" WHERE key='admin_key'\").fetchone()[0]\nwith urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:18088/admin/api/monitoring',headers={'Authorization':'Bearer '+key}),timeout=15) as r:\n    status=r.status;entries=json.load(r)['entries']\nids=['ba1fe58553c669b5','d58bc36a3d464218','7ca6a7601512cdd2','55caaab00d93a9ba','322af5409da0784d','25afa55243c0f90b']\nrows=[]\nfor req_id in ids:\n    e=next(e for e in entries if e['req_id']==req_id)\n    row={k:e.get(k) for k in ['req_id','ts','endpoint','model','stream','status','ok','error_code','retryable','retry_after','stop_reason','coverage_complete','unresolved_count','evidence_truncated']}\n    row['error_causes']=[{'code':c['code'],'origin':c['origin']} for c in e['error_causes']]\n    row['evidence_count']=len(e.get('evidence',[]))\n    assert row['status']==503 and row['ok'] is False and row['error_code']=='quota_exhausted'\n    assert row['retryable'] is False and row['retry_after'] is None\n    assert row['error_causes']==[{'code':'quota_exhausted','origin':'account_state'}]\n    rows.append(row)\nprops=dict(line.split('=',1) for line in subprocess.check_output(['systemctl','show','zcode2api.service','--property=MainPID,ActiveState,SubState,NRestarts,WorkingDirectory'],text=True).splitlines())\npid=props['MainPID'];proc=pathlib.Path('/proc')/pid\nassert pid=='3578010' and props['NRestarts']=='0' and props['ActiveState']=='active'\njournal=subprocess.check_output(['journalctl','-u','zcode2api.service','--since','2026-10-09 06:12:26 UTC','--utc','--no-pager','-o','json'],text=True)\ncategories={}\nfor line in journal.splitlines():\n    try:record=json.loads(line)\n    except ValueError:continue\n    message=str(record.get('MESSAGE',''))\n    for marker,category in [('Traceback','traceback'),('ImportError','import_error'),('SyntaxError','syntax_error'),('ModuleNotFoundError','missing_module'),('Application startup complete','startup_complete')]:\n        if marker in message:categories[category]=categories.get(category,0)+1\nassert not any(categories.get(k) for k in ['traceback','import_error','syntax_error','missing_module'])\ncounts=[{'provider':p,'status':s,'enabled':bool(e),'count':c} for p,s,e,c in db.execute('SELECT provider,status,enabled,count(*) FROM '+tbl+' GROUP BY provider,status,enabled')]\nresult={'at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'monitor_http':status,'matched':rows,'inflight':sum(e.get('ok') is None for e in entries),'service':props,'process_cwd':str((proc/'cwd').resolve()),'process_exe':str((proc/'exe').resolve()),'journal_categories':categories,'accounts_counts':counts,'head':subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip(),'git_status':subprocess.check_output(['git','-C',str(root),'status','--porcelain'],text=True).strip(),'files':{rel:{'sha256':hashlib.sha256((root/rel).read_bytes()).hexdigest(),'mode':oct((root/rel).stat().st_mode&0o777)} for rel in ['app/models.py','app/store.py','app/routes/gateway.py','app/reqlog.py']}}\nprint(json.dumps(result))\nPY"
+  },
+  "earlier_attempt": {
+    "exit_code": 1,
+    "reason": "StopIteration: assumed metadata table name; failed before replacing files; corrected using AST _META constant"
+  },
+  "local_client_command": ".\\.venv\\Scripts\\python.exe openspec/changes/clarify-gateway-unavailability-reasons/deployment-client-probe.py",
+  "client_exit": 0,
+  "rollback_performed": false
+}

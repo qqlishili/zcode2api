@@ -1,0 +1,149 @@
+{
+  "source": "Windows client, direct IP (no proxy)",
+  "requests": [
+    {
+      "at": "2026-10-09T06:13:45.274951+00:00",
+      "url": "http://107.174.244.167:18088/v1/messages",
+      "stream": true,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "ba1fe58553c669b5",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "ba1fe58553c669b5",
+        "Retry-After": null
+      }
+    },
+    {
+      "at": "2026-10-09T06:13:45.514269+00:00",
+      "url": "http://107.174.244.167:18088/v1/messages",
+      "stream": false,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "d58bc36a3d464218",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "d58bc36a3d464218",
+        "Retry-After": null
+      }
+    },
+    {
+      "at": "2026-10-09T06:13:45.737224+00:00",
+      "url": "http://107.174.244.167:18088/v1/chat/completions",
+      "stream": true,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "7ca6a7601512cdd2",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "7ca6a7601512cdd2",
+        "Retry-After": null
+      }
+    },
+    {
+      "at": "2026-10-09T06:13:45.980809+00:00",
+      "url": "http://107.174.244.167:18088/v1/chat/completions",
+      "stream": false,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "55caaab00d93a9ba",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "55caaab00d93a9ba",
+        "Retry-After": null
+      }
+    },
+    {
+      "at": "2026-10-09T06:13:46.201854+00:00",
+      "url": "http://107.174.244.167:18088/v1/responses",
+      "stream": true,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "322af5409da0784d",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "322af5409da0784d",
+        "Retry-After": null
+      }
+    },
+    {
+      "at": "2026-10-09T06:13:46.423277+00:00",
+      "url": "http://107.174.244.167:18088/v1/responses",
+      "stream": false,
+      "status": 503,
+      "error": {
+        "type": "no_available_account",
+        "code": "quota_exhausted",
+        "retryable": false,
+        "retry_after": null,
+        "request_id": "25afa55243c0f90b",
+        "causes": [
+          {
+            "code": "quota_exhausted",
+            "origin": "account_state"
+          }
+        ]
+      },
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Request-Id": "25afa55243c0f90b",
+        "Retry-After": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "source": "Windows direct IP, no proxy",
+  "requests": [
+    {
+      "at": "2026-10-09T06:59:15.684558+00:00",
+      "url": "http://107.174.244.167:18088/meta",
+      "status": 200,
+      "version": "2.6.6"
+    },
+    {
+      "at": "2026-10-09T06:59:15.935388+00:00",
+      "url": "http://107.174.244.167:18088/v1/models",
+      "status": 200,
+      "models": [
+        "GLM-5.3-Flash"
+      ]
+    }
+  ]
+}

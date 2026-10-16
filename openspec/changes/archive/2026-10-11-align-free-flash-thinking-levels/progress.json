@@ -1,0 +1,69 @@
+{
+  "changeName": "align-free-flash-thinking-levels",
+  "changeDir": "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\align-free-flash-thinking-levels",
+  "schemaName": "spec-driven",
+  "contextFiles": {
+    "proposal": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\align-free-flash-thinking-levels\\proposal.md"
+    ],
+    "specs": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\align-free-flash-thinking-levels\\specs\\free-flash-thinking-levels\\spec.md"
+    ],
+    "design": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\align-free-flash-thinking-levels\\design.md"
+    ],
+    "tasks": [
+      "D:\\Temp\\lizi\\zcode2api\\openspec\\changes\\align-free-flash-thinking-levels\\tasks.md"
+    ]
+  },
+  "progress": {
+    "total": 7,
+    "complete": 7,
+    "remaining": 0
+  },
+  "tasks": [
+    {
+      "id": "1",
+      "description": "1.1 严格校验 OpenSpec，Antigravity CLI 只读审查实际方案与源码，修复阻断意见并保存结论。",
+      "done": true
+    },
+    {
+      "id": "2",
+      "description": "2.1 备份并仅合并 zcode/GLM-5.3-Flash 模型项；实际 pi 注册表和 localhost CLI 验证三档、成功内容、默认 high、其他私有配置不变，保存脱敏报告。",
+      "done": true
+    },
+    {
+      "id": "3",
+      "description": "3.1 添加三协议合法/默认/非法/关闭/预算/冲突反例，取得原实现失败证据。",
+      "done": true
+    },
+    {
+      "id": "4",
+      "description": "3.2 复用思考映射校验原始输入，删除预算推算和多模型归一分支，使三协议测试转绿，非法输入无选号和上游调用。",
+      "done": true
+    },
+    {
+      "id": "5",
+      "description": "3.3 API 文档仅补三档字段和 400 契约；核对差分保留原有静默截断说明，无大面积状态扩写。",
+      "done": true
+    },
+    {
+      "id": "6",
+      "description": "4.1 Ruff、受影响单元与 TCP 集成回归通过，验证流内错误/静默 EOF/取消/资源释放未回退，核对本轮增量与私密信息栅栏。",
+      "done": true
+    },
+    {
+      "id": "7",
+      "description": "4.2 独立 Antigravity CLI 只读验收实际源码、差分、OpenSpec 与运行证据，修复问题后完成任务并给出 OpenSpec 验证结论。",
+      "done": true
+    }
+  ],
+  "taskTrackingConfigured": true,
+  "state": "all_done",
+  "instruction": "All tasks are complete! This change is ready to be archived.\nConsider running tests and reviewing the changes before archiving.",
+  "context": "ZCode 账号运营 + 网关一体机（zcode2api / zcode-hub）。\n技术栈: Python >=3.11，uv 管理依赖（uv.lock）；核心包 app/，入口 cli.py，前端 frontend/。\n测试: pytest（asyncio_mode=auto，tests/；integration=Mock 上游集成用例，e2e=compose 层端到端）。\n约定: 文档与提交为中文，规范动宾式提交；许可证 AGPL-3.0-only。\n",
+  "root": {
+    "path": "D:\\Temp\\lizi\\zcode2api",
+    "source": "nearest"
+  }
+}

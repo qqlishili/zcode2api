@@ -1,0 +1,15 @@
+........................................................................ [ 40%]
+..................................................F..................... [ 81%]
+................................                                         [100%]
+================================== FAILURES ===================================
+_ TestGatewayCrossChunkAnd200BusinessErrors.test_upstream_to_streaming_extracts_tokens_across_tiny_chunks _
+tests\unit\test_regression_baseline.py:623: in test_upstream_to_streaming_extracts_tokens_across_tiny_chunks
+    assert collected == sse_bytes
+E   assert b'event: mess...\u675f"}}\n\n' == b'event: mess...ens":19}}\n\n'
+E     
+E     Use -v to get more diff
+---------------------------- Captured stdout call -----------------------------
+  [31m<!>[0m [90mchunktest1[0m  ������ʽ��Ӧδ��������
+=========================== short test summary info ===========================
+FAILED tests/unit/test_regression_baseline.py::TestGatewayCrossChunkAnd200BusinessErrors::test_upstream_to_streaming_extracts_tokens_across_tiny_chunks
+1 failed, 175 passed in 35.05s

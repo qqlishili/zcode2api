@@ -1,0 +1,72 @@
+VERDICT [PASS]
+
+实读路径：
+1. 变更与规约：implementation.diff、spec.md、design.md、tasks.md、regression.log
+2. 核心源码：app/routes/gateway.py、app/reqlog.py、app/responses_compat.py
+3. 测试与文档：test_gateway_monitoring.py、test_gateway_usage.py、mock_upstream/server.py、04-api-spec.md
+
+核验结论：
+三协议流内错误收口完整，错误帧首帧/部分输出/工具调用及缺省对象均转失败终态且不补发正常帧；Messages跨块透传与取消保护成立；账号结果单次记录且防旧凭据写回；连接与槽位幂等释放；正常/非流式/499与Responses完成取消保持原有逻辑。152项回归与Ruff全过。无阻断项。覆盖限制：仅针对免费GLM-5.3-Flash流内错误，未覆盖非错误事件的网络硬截断。
+
+发布验收（018a48b）
+
+### 结论
+
+**VERDICT [PASS]**
+
+---
+
+### 一、实读证据（本轮代码与配置静态核验）
+
+通过只读方式对工作区文件进行审查，核对结果如下：
+
+1. **原子提交与改动范围收敛**：
+   - 查看 [release-implementation.diff](file:///D:/Temp/lizi/zcode2api/openspec/changes/fix-free-flash-stream-errors/release-implementation.diff) 及对应提交范围 `d394b99..018a48b`：
+     - `d2acbe1` 仅在 [.gitignore](file:///D:/Temp/lizi/zcode2api/.gitignore#L9) 增加 `openspec/`，隔离本地工作文件；
+     - `018a48b` 集中于收口流内错误与账号结果，未扩展架构或引入无关依赖。
+2. **三协议流内错误收口与终态保证**（[gateway.py](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py)）：
+   - **错误识别**：[`_check_stream_error`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1029-L1032) 统一拦截 `type == "error"` 并抛出自定义 [`_UpstreamStreamError`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1025-L1027)。
+   - **Messages 透传**：[`to_streaming`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1094-L1156) 在行缓冲旁路捕获错误，保证错误事件及闭合空行完整传达给下游后中断，不补发 `message_stop`。
+   - **Chat 转换**：[`_openai_stream_response`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L552-L593) 遇到流内错误直接输出错误 JSON 帧并结束，不执行 `conv.done()`，杜绝伪造 `[DONE]`。
+   - **Responses 转换**：[`_responses_stream_response`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L675-L728) 捕获流错误后调用 [`conv.fail()`](file:///D:/Temp/lizi/zcode2api/app/responses_compat.py#L758-L777) 产出 `response.failed`，不产出 `response.completed`。
+   - **单次上游调用**：错误分支均在生成器内终止，未触发换号重试或重复请求。
+3. **账号终态单次记录与凭据栅栏**：
+   - [`_Upstream.finish_result`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1073-L1079) 在回调触发后立即置空 `self.on_result = None`，保证结果单次写入，后续取消或关闭无法覆盖。
+   - [`_make_result_recorder`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1034-L1042) 在记录结果前比对当前内存账号与发起请求时的凭据元组 `(live.mode, live.jwt_token, live.api_key) == credential`，防止账号已被删除或凭据刷新后写回脏状态。
+   - 报错信息固定为 `"上游流式响应报错"`，未将上游报文、凭据或原始 Token 拼入错误文案与日志中。
+4. **资源释放与取消兼容性**：
+   - 错误、正常完成和客户端断开统一走 `finally: await up.close()`，[`_Upstream.close()`](file:///D:/Temp/lizi/zcode2api/app/routes/gateway.py#L1080-L1093) 幂等执行上下文管理器退出及并发槽释放回调。
+   - 客户端正常中断（`asyncio.CancelledError`）记录 499；Responses 流在已生成终态帧（`conv.is_finished`）后的断开保留成功记录。
+5. **文档与回归测试一致性**：
+   - [04-api-spec.md](file:///D:/Temp/lizi/zcode2api/docs/development/04-api-spec.md#L56) 仅补充一段 HTTP 200 SSE 失败契约说明，无多余冗余改动。
+   - [test_gateway_monitoring.py](file:///D:/Temp/lizi/zcode2api/tests/integration/test_gateway_monitoring.py#L40-L75) 与 [test_gateway_usage.py](file:///D:/Temp/lizi/zcode2api/tests/unit/test_gateway_usage.py#L14-L68) 覆盖了首帧报错、部分输出后报错、工具调用中报错、缺省错误字段、跨分块传输、错误帧产出时取消以及凭据漂移等场景。
+
+---
+
+### 二、主执行方运行证据核验（依据交付日志与元数据）
+
+根据交付件 [release-checks.json](file:///D:/Temp/lizi/zcode2api/openspec/changes/fix-free-flash-stream-errors/release-checks.json)、[acceptance.txt](file:///D:/Temp/lizi/zcode2api/openspec/changes/fix-free-flash-stream-errors/acceptance.txt) 和 [regression.log](file:///D:/Temp/lizi/zcode2api/openspec/changes/fix-free-flash-stream-errors/regression.log) 记录：
+
+1. **版本一致性与快进发布**：
+   - 本地 `local_head`、远程 `github_main` 与 VPS `vps_head` 完整 Commit SHA 一致，均为 `018a48bc79eea7d681e2a93f9f203255d2041dc8`。
+   - 本地与 VPS 两侧工作区均为干净状态，采用 `--ff-only` 合并，未重写提交历史。
+   - 生产与本地运行文件网关哈希一致（`538034c5bde9f7e6bbad90081aaad7db77d4c1459dcd70cf1d4f96b431437e8c`）。
+2. **服务健康与页面可达性**：
+   - VPS 原 systemd 服务保留并在原路径正常重启，重启后 traceback 计数为 0，版本标识为 `2.6.6`。
+   - 本机公网验证 `/admin/monitoring`（HTTP 200）和 `/admin/login`（HTTP 200），页面渲染正常。
+3. **真实上游与异常探针**：
+   - VPS 本地使用真实免费 `GLM-5.3-Flash` 进行 Chat 流式调用，返回 HTTP 200、`exact_release_ok: true`，正常完成输出并接收 `[DONE]`，请求监控与账号最新状态均记为成功，消耗输入 317 / 输出 16 Tokens。
+   - 记录中最初试探请求因显式关闭思考导致上游返回 1210 / 400（该模型要求思考参数为 low/high/max），经修正验证参数为 `reasoning_effort: low` 后通过，未对项目代码做额外防御。
+4. **自动化检验**：
+   - 隔离回归测试 152 项通过（耗时 22.28s），改动 Python 文件通过 Ruff 检查，OpenSpec 6 项任务全部闭环。
+
+---
+
+### 三、覆盖限制声明
+
+1. **真实链路覆盖边界**：真实上游冒烟仅覆盖了 VPS 本地对免费 `GLM-5.3-Flash` 的 Chat 流式成功请求；公网侧仅验证了页面渲染与元数据。
+2. **错误用例验证边界**：三协议的流内错误（首帧错误、中间分块错误、工具调用报错等）均由本地隔离的 TCP Mock 服务验证，未向真实生产上游注入破坏性错误。
+3. **故障场景边界**：本次任务聚焦于上游显式返回 `type: error` 事件的流内收口，不包含未发送错误事件的底层 TCP 硬截断或静默超时处理。
+
+主执行方证据核对：报告中的公网 /admin/monitoring 为路径笔误；实际验证 /meta 与 /admin/login，两者 HTTP 200，详见 release-checks.json。
+

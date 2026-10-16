@@ -1,0 +1,1026 @@
+diff --git a/app/openai_compat.py b/app/openai_compat.py
+index ebdd8f1..5ea5b89 100644
+--- a/app/openai_compat.py
++++ b/app/openai_compat.py
+@@ -2,11 +2,11 @@
+ 
+ 入站：OpenAI 请求体 → Anthropic messages 体（system/developer 提取为 system 参数、
+ content 分块、tool_calls / tool_result / 图片(data URL) best-effort 映射、
+-reasoning_effort / thinking / output_config 推理参数透传）。
++reasoning_effort / thinking / output_config 三档思考参数映射）。
+ 出站：Anthropic 响应（JSON 或 SSE 事件流）→ OpenAI 格式。
+ 
+ 与 body_transform 同一原则：对畸形输入保持宽容，映射不了的部件安静跳过，
+-绝不放大请求失败。
++绝不放大请求失败；思考参数按免费模型契约校验。
+ """
+ 
+ from __future__ import annotations
+@@ -76,36 +76,45 @@ def _blocks_from_user_content(content: object) -> list[dict]:
+     return blocks or [{"type": "text", "text": ""}]
+ 
+ 
+-def _apply_reasoning_params(payload: dict, body: dict) -> None:
+-    """将 OpenAI 兼容端的 reasoning_effort / reasoning / thinking / output_config 映射到 Anthropic 体。"""
+-    # 1) 直接透传客户端显式带的 thinking / output_config 字典
+-    if isinstance(payload.get("thinking"), dict):
+-        body["thinking"] = dict(payload["thinking"])
+-    elif isinstance(payload.get("enable_thinking"), bool):
+-        body["thinking"] = {"type": "enabled" if payload["enable_thinking"] else "disabled"}
+-
+-    if isinstance(payload.get("output_config"), dict):
+-        body["output_config"] = dict(payload["output_config"])
+-
+-    # 2) OpenAI reasoning_effort 或 reasoning.effort
+-    effort = payload.get("reasoning_effort")
+-    if effort is None and isinstance(payload.get("reasoning"), dict):
+-        effort = payload["reasoning"].get("effort")
+-    if isinstance(effort, str) and effort.strip():
+-        eff_low = effort.strip().lower()
+-        if eff_low in ("disabled", "none", "off"):
+-            body["thinking"] = {"type": "disabled"}
+-            if isinstance(body.get("output_config"), dict):
+-                body["output_config"].pop("effort", None)
+-                if not body["output_config"]:
+-                    body.pop("output_config", None)
+-        elif eff_low in ("minimal", "low", "medium", "high", "xhigh", "max"):
+-            body["thinking"] = {"type": "enabled"}
+-            out_cfg = dict(body.get("output_config")) if isinstance(body.get("output_config"), dict) else {}
+-            out_cfg["effort"] = eff_low
+-            body["output_config"] = out_cfg
+-        elif eff_low in ("enabled", "adaptive", "auto"):
+-            body["thinking"] = {"type": "enabled"}
++def _apply_reasoning_params(payload: dict, body: dict) -> str | None:
++    """校验免费 Flash 思考参数，并映射到 Anthropic 体；非法时返回错误信息。"""
++    for key in ("thinking", "output_config", "reasoning"):
++        if key in payload and not isinstance(payload[key], dict):
++            return f"{key} 必须是对象；思考等级仅支持 low/high/max"
++
++    thinking = payload.get("thinking")
++    out_cfg = payload.get("output_config")
++    if "enable_thinking" in payload and payload["enable_thinking"] is not True:
++        return "enable_thinking 仅支持 true；思考等级仅支持 low/high/max，不支持关闭"
++    if isinstance(thinking, dict) and thinking.get("type") not in ("enabled", "adaptive"):
++        return "thinking.type 仅支持 enabled/adaptive；思考等级仅支持 low/high/max，不支持关闭"
++
++    # 先检查全部原始字段，避免转换覆盖非法值或冲突的档位。
++    efforts = []
++    if "reasoning_effort" in payload:
++        efforts.append(("reasoning_effort", payload["reasoning_effort"]))
++    for key in ("reasoning", "output_config"):
++        params = payload.get(key)
++        if isinstance(params, dict) and "effort" in params:
++            efforts.append((f"{key}.effort", params["effort"]))
++    for field, value in efforts:
++        if not isinstance(value, str) or value not in ("low", "high", "max"):
++            return f"{field} 仅支持 low/high/max"
++    if efforts and any(value != efforts[0][1] for _, value in efforts):
++        return "思考等级参数冲突；各字段须使用相同的 low/high/max"
++    if isinstance(thinking, dict) and "budget_tokens" in thinking and not efforts:
++        return "不支持仅设置 budget_tokens；请明确选择 low/high/max"
++
++    if isinstance(out_cfg, dict):
++        body["output_config"] = dict(out_cfg)
++    if efforts:
++        body.setdefault("output_config", {})["effort"] = efforts[0][1]
++    if efforts or thinking is not None or payload.get("enable_thinking") is True:
++        # 上游使用 enabled + effort，不发送 budget_tokens，也不推算默认档位。
++        body["thinking"] = {"type": "enabled"}
++    for key in ("reasoning_effort", "reasoning", "enable_thinking"):
++        body.pop(key, None)
++    return None
+ 
+ 
+ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
+@@ -192,7 +201,9 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
+     if payload.get("stream"):
+         body["stream"] = True
+ 
+-    _apply_reasoning_params(payload, body)
++    err = _apply_reasoning_params(payload, body)
++    if err:
++        return None, err
+ 
+     user_tag = payload.get("user")
+     if isinstance(user_tag, str) and user_tag.strip():
+diff --git a/app/responses_compat.py b/app/responses_compat.py
+index 92555bd..b32c195 100644
+--- a/app/responses_compat.py
++++ b/app/responses_compat.py
+@@ -260,7 +260,9 @@ def responses_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
+     if payload.get("stream"):
+         body["stream"] = True
+ 
+-    _apply_reasoning_params(payload, body)
++    err = _apply_reasoning_params(payload, body)
++    if err:
++        return None, err
+ 
+     # 会话亲和：优先取 prompt_cache_key / conversation / previous_response_id / user
+     for sk in ("prompt_cache_key", "conversation", "previous_response_id", "user"):
+diff --git a/app/routes/gateway.py b/app/routes/gateway.py
+index bd98090..263fa48 100644
+--- a/app/routes/gateway.py
++++ b/app/routes/gateway.py
+@@ -23,7 +23,7 @@ from ..agent import build_request
+ from ..auth_admin import verify_gateway_key
+ from ..captcha import captcha_manager
+ from ..models import Account, Status
+-from ..openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
++from ..openai_compat import StreamConverter, _apply_reasoning_params, anthropic_to_openai, openai_to_anthropic
+ from ..quota import fetch_quota
+ from ..responses_compat import ResponsesStreamConverter, anthropic_to_responses, responses_to_anthropic
+ from ..store import store
+@@ -63,10 +63,6 @@ MODEL_NAME_MAP = constants.MODEL_NAME_MAP
+ AVAILABLE_MODELS = constants.AVAILABLE_MODELS
+ _EXHAUST_KEYWORDS = constants.EXHAUST_KEYWORDS
+ 
+-# 对齐官方 ZCode zcode-builtin.json (rev 30) 与 model-execution.ts 的模型思考等级矩阵
+-_EFFORT_MODELS_53 = {"GLM-5.3", "GLM-5.3-FLASH"}
+-_EFFORT_MODELS_52 = {"GLM-5.2"}
+-
+ 
+ def _detect_provider(body: dict, headers) -> str:
+     model = body.get("model") or ""
+@@ -75,104 +71,6 @@ def _detect_provider(body: dict, headers) -> str:
+     return "zai"
+ 
+ 
+-def _normalize_thinking_for_model(body: dict, model: str | None) -> None:
+-    """按官方 ZCode zcode-builtin.json 思考契约归一化 thinking 与 output_config.effort。
+-
+-    - GLM-5.3 / GLM-5.3-Flash：thinking_mode="effort"，仅支持 ["low", "high", "max"]
+-      （客户端若发 "medium"/"minimal"/"xhigh" 或 budget_tokens，自动折叠到合法档位）
+-    - GLM-5.2：thinking_mode="effort"，仅支持 ["disabled", "high", "max"]
+-    - 其它 GLM 模型（GLM-5-Turbo / GLM-5.1 / GLM-4.7）：thinking_mode="enable"，
+-      不支持 output_config.effort，剥离 effort 并转为 thinking.type = enabled/disabled。
+-    """
+-    if not isinstance(model, str):
+-        return
+-    model_up = model.strip().upper()
+-    if not model_up.startswith("GLM-"):
+-        return
+-
+-    thinking = body.get("thinking")
+-    out_cfg = body.get("output_config")
+-    effort: str | None = None
+-    if isinstance(out_cfg, dict) and isinstance(out_cfg.get("effort"), str):
+-        effort = out_cfg["effort"].strip().lower()
+-
+-    # Anthropic 标准 budget_tokens → 转换为 effort 档位并移除 budget_tokens（GLM 上游不支持 budget_tokens）
+-    if isinstance(thinking, dict) and "budget_tokens" in thinking:
+-        raw_bt = thinking.pop("budget_tokens", None)
+-        try:
+-            bt = int(float(raw_bt)) if raw_bt is not None and not isinstance(raw_bt, bool) else 0
+-        except (TypeError, ValueError):
+-            bt = 0
+-        if effort is None and bt > 0:
+-            if bt < 8192:
+-                effort = "low"
+-            elif bt <= 24576:
+-                effort = "high"
+-            else:
+-                effort = "max"
+-        if thinking.get("type") not in ("enabled", "disabled"):
+-            thinking["type"] = "enabled"
+-
+-    if model_up in _EFFORT_MODELS_53:
+-        if effort is not None:
+-            if effort in ("disabled", "off"):
+-                body["thinking"] = {"type": "disabled"}
+-                if isinstance(out_cfg, dict):
+-                    out_cfg.pop("effort", None)
+-                    if not out_cfg:
+-                        body.pop("output_config", None)
+-                return
+-            if effort in ("minimal", "none", "low"):
+-                mapped = "low"
+-            elif effort in ("xhigh", "max"):
+-                mapped = "max"
+-            else:
+-                # medium / high / enabled / adaptive 统一归并到官方支持的 high
+-                mapped = "high"
+-            new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+-            new_cfg["effort"] = mapped
+-            body["output_config"] = new_cfg
+-            body["thinking"] = {"type": "enabled"}
+-        elif isinstance(thinking, dict):
+-            t_type = str(thinking.get("type") or "").lower()
+-            if t_type == "disabled":
+-                body["thinking"] = {"type": "disabled"}
+-            elif t_type in ("enabled", "adaptive"):
+-                body["thinking"] = {"type": "enabled"}
+-    elif model_up in _EFFORT_MODELS_52:
+-        if effort is not None:
+-            if effort in ("disabled", "none", "off"):
+-                body["thinking"] = {"type": "disabled"}
+-                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+-                new_cfg["effort"] = "disabled"
+-                body["output_config"] = new_cfg
+-            else:
+-                mapped = "max" if effort in ("xhigh", "max") else "high"
+-                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+-                new_cfg["effort"] = mapped
+-                body["output_config"] = new_cfg
+-                body["thinking"] = {"type": "enabled"}
+-        elif isinstance(thinking, dict):
+-            t_type = str(thinking.get("type") or "").lower()
+-            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
+-    else:
+-        # GLM-5-Turbo / GLM-5.1 / GLM-4.7：仅支持 thinking: {type: enabled|disabled}，剥离 output_config.effort
+-        if isinstance(out_cfg, dict) and "effort" in out_cfg:
+-            out_cfg = dict(out_cfg)
+-            out_cfg.pop("effort", None)
+-            if out_cfg:
+-                body["output_config"] = out_cfg
+-            else:
+-                body.pop("output_config", None)
+-        if effort is not None and not isinstance(thinking, dict):
+-            body["thinking"] = {
+-                "type": "disabled" if effort in ("disabled", "none", "off") else "enabled"
+-            }
+-        elif isinstance(thinking, dict):
+-            t_type = str(thinking.get("type") or "").lower()
+-            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
+-
+-
+ def _normalize_body(body: dict) -> dict:
+     # 纯免费赠送池模式：将任意外部请求模型名统一归一化为 DEFAULT_MODEL（GLM-5.3-Flash），
+     # 防止客户端传入 claude-*/gpt-*/glm-5.2 等触发上游 3006 model not allowed 或误耗非免费池窗口
+@@ -192,8 +90,6 @@ def _normalize_body(body: dict) -> dict:
+                 logs.warn("gateway", f"max_tokens {mt} 超出上游范围 [1,{constants.MAX_TOKENS_LIMIT}]，钳制为 {clamped}")
+             body["max_tokens"] = clamped
+ 
+-    _normalize_thinking_for_model(body, model)
+-
+     messages = body.get("messages")
+     if isinstance(messages, list):
+         bridged = []
+@@ -448,6 +344,10 @@ async def messages(request: Request):
+             status_code=400,
+         )
+ 
++    err = _apply_reasoning_params(body, body)
++    if err:
++        return JSONResponse({"error": {"message": err, "type": "invalid_request_error"}}, status_code=400)
++
+     incoming_headers = dict(request.headers)
+     provider = _detect_provider(body, request.headers)
+     body = _normalize_body(body)
+@@ -554,6 +454,7 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
+     conv = StreamConverter(model)
+     async def _iter():
+         usage = reqlog.extract_usage(None)
++        completed = False
+         try:
+             yield conv.start()
+             async for line in up.resp.aiter_lines():
+@@ -565,9 +466,12 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
+                 evt = _safe_json(data_str)
+                 if isinstance(evt, dict):
+                     _check_stream_error(evt)
++                    completed = completed or evt.get("type") == "message_stop"
+                     usage = _extract_event_usage(evt, usage)
+                     for out in conv.feed(evt):
+                         yield out
++            if not completed and "event-stream" in up.resp.headers.get("content-type", "").lower():
++                raise _UpstreamStreamIncomplete()
+             yield conv.done()
+             up.finish_result(True, "HTTP 200 · 流式完成")
+             logs.req_ok(req_id)
+@@ -693,6 +597,8 @@ def _responses_stream_response(
+                         yield out
+                     if conv.is_finished:
+                         break
++            if not conv.is_finished and "event-stream" in up.resp.headers.get("content-type", "").lower():
++                raise _UpstreamStreamIncomplete()
+             for out in conv.done():
+                 yield out
+             up.finish_result(True, "HTTP 200 · 流式完成")
+@@ -1012,20 +918,25 @@ def _extract_event_usage(evt: object, usage: dict) -> dict[str, int | None]:
+     return usage
+ 
+ 
+-def _extract_sse_line_usage(line_bytes: bytes, usage: dict) -> dict[str, int | None]:
++def _extract_sse_line_event(line_bytes: bytes) -> object:
+     line = line_bytes.decode("utf-8", "ignore").strip()
+     if not line.startswith("data:"):
+-        return usage
++        return None
+     payload = line[5:].strip()
+-    evt = _safe_json(payload)
+-    _check_stream_error(evt)
+-    return _extract_event_usage(evt, usage)
++    return _safe_json(payload)
+ 
+ 
+ class _UpstreamStreamError(RuntimeError):
+     """HTTP 200 流内失败，不把上游事件或凭据写入日志。"""
+ 
+ 
++class _UpstreamStreamIncomplete(_UpstreamStreamError):
++    """上游静默 EOF，复用流内失败收口。"""
++
++    def __init__(self) -> None:
++        super().__init__("上游流式响应未正常结束")
++
++
+ def _check_stream_error(evt: object) -> None:
+     if isinstance(evt, dict) and evt.get("type") == "error":
+         raise _UpstreamStreamError("上游流式响应报错")
+@@ -1099,6 +1010,7 @@ class _Upstream:
+             usage = reqlog.extract_usage(None)
+             pending_chunk = None
+             stream_error = None
++            completed = False
+             try:
+                 if up.preloaded_bytes is not None:
+                     usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
+@@ -1113,7 +1025,10 @@ class _Upstream:
+                             raw_line = bytes(line_buf[:idx])
+                             del line_buf[:idx + 1]
+                             try:
+-                                usage = _extract_sse_line_usage(raw_line, usage)
++                                evt = _extract_sse_line_event(raw_line)
++                                _check_stream_error(evt)
++                                completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
++                                usage = _extract_event_usage(evt, usage)
+                             except _UpstreamStreamError as err:
+                                 stream_error = err
+                                 up.finish_result(False, str(err))
+@@ -1127,9 +1042,14 @@ class _Upstream:
+                         pending_chunk = None
+                         yield chunk
+                     if line_buf:
+-                        usage = _extract_sse_line_usage(bytes(line_buf), usage)
++                        evt = _extract_sse_line_event(bytes(line_buf))
++                        _check_stream_error(evt)
++                        completed = completed or isinstance(evt, dict) and evt.get("type") == "message_stop"
++                        usage = _extract_event_usage(evt, usage)
+                     if stream_error is not None:
+                         raise stream_error
++                    if "event-stream" in up.resp.headers.get("content-type", "").lower() and not completed:
++                        raise _UpstreamStreamIncomplete()
+                 up.finish_result(True, "HTTP 200 · 流式完成")
+                 logs.req_ok(req_id)
+                 reqlog.finish_ok(req_id, t_first=up.t_first, status=up.resp.status_code,
+@@ -1144,6 +1064,9 @@ class _Upstream:
+                 reqlog.finish_error(req_id, str(err), status=up.resp.status_code, t_first=up.t_first)
+                 if pending_chunk is not None:
+                     yield pending_chunk
++                if isinstance(err, _UpstreamStreamIncomplete):
++                    event = {"type": "error", "error": {"type": "upstream_error", "message": str(err)}}
++                    yield b"\n\nevent: error\ndata: " + json.dumps(event).encode() + b"\n\n"
+             except Exception as err:  # noqa: BLE001
+                 up.finish_result(False, f"流传输中断: {err}")
+                 logs.req_err(req_id, f"流传输中断: {err}")
+diff --git a/docs/development/04-api-spec.md b/docs/development/04-api-spec.md
+index 0acc9ef..8b111b1 100644
+--- a/docs/development/04-api-spec.md
++++ b/docs/development/04-api-spec.md
+@@ -36,6 +36,20 @@
+ - `previous_response_id` 仅作会话亲和线索，无历史 LRU；缺少完整 `input` 时返回参数错误。
+ - 流生命周期解耦与终态防护（499 误判根除）：上游发送 `message_stop` 并生成 `response.completed` 后，转换器置 `is_finished=True` 并主动 `break` 退出上游读取循环，避免上游 HTTP Keep-Alive 未断连接时下游 Codex 客户端主动断开导致 Uvicorn 注入 `asyncio.CancelledError` 误记录为 499；即使在产出终态后客户端立即掐断连接，网关依据 `conv.is_finished` 仍准确判定为 200 成功。
+ 
++### 1.5 思考等级
++
++免费模型 `GLM-5.3-Flash` 仅支持 `low` / `high` / `max`，合法档位原值映射到上游 `output_config.effort`，不折叠或降档。
++
++| 接口 | 思考等级字段 |
++|------|-------------|
++| Messages | `output_config.effort` |
++| Chat Completions | `reasoning_effort` |
++| Responses | `reasoning.effort` |
++
++省略等级沿用上游默认；`thinking.type=enabled/adaptive` 映射为 `enabled`。显式关闭、非法等级或参数形状、冲突等级、仅设置 `budget_tokens` 均在选号前返回 400 `invalid_request_error`，错误信息列出三档。多处等级须相同；明确等级附带预算时移除预算，不推算等级。
++
++pi 在该模型项设置 `thinkingLevelMap` 仅启用 `low/high/max`（其他档位为 `null`），并设 `compat.forceAdaptiveThinking=true`。这限制可用选项；强制非法 CLI 档位仍可能由 pi 自行钳制，网关校验实际收到的值。
++
+ ### 1.6 错误格式
+ 
+ ```json
+@@ -55,6 +69,8 @@
+ 
+ HTTP 200 SSE 中的 `type: error` 仍为失败：Messages 透传完整错误帧，Chat 返回错误帧且不补 `[DONE]`，Responses 返回 `response.failed`。请求监控和账号最近结果记为失败；已输出内容不重发，连接与并发槽正常释放。
+ 
++SSE 在未收到有效 `message_stop` 时结束也记为失败：Messages 保留原字节并追加独立错误帧，Chat / Responses 沿用上述失败收口，不补成功终态。正常终态（含输出上限）、完整 JSON 尾行与非 SSE 响应保持兼容。
++
+ ## 2. 管理端点（对内，均挂 `/admin/api/*` 且需后台密钥）
+ 
+ ### 账号池
+diff --git a/tests/integration/test_gateway_monitoring.py b/tests/integration/test_gateway_monitoring.py
+index d670ddb..75077e8 100644
+--- a/tests/integration/test_gateway_monitoring.py
++++ b/tests/integration/test_gateway_monitoring.py
+@@ -38,6 +38,70 @@ class TestMessagesBodyValidation:
+ 
+ @pytest.mark.integration
+ class TestMonitoringRecording:
++    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
++    @pytest.mark.parametrize("scenario", ["sse_empty", "sse_eof_text", "sse_eof_tool",
++                                          "sse_eof_stop", "sse_eof_malformed", "sse_truncate"])
++    async def test_silent_eof_is_not_success(self, gateway_client, fresh_app, endpoint, scenario):
++        """静默 EOF 不补成功终态、不重发，失败记录与资源释放一致。"""
++        client, mock = gateway_client
++        from app import reqlog
++        from app.routes import gateway as gw
++        from tests.conftest import seed_account
++
++        account = seed_account(fresh_app, "hEof.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="eof")
++        seed_account(fresh_app, "hEofStandby.eyJzdWIiOiJzdGFuZGJ5In0.sig", name="eof-standby")
++        fresh_app.set_setting("account_concurrency", "1")
++        start = len(mock.state.calls)
++        body = {"model": "GLM-5.3-Flash", "stream": True}
++        body["input" if endpoint == "responses" else "messages"] = (
++            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
++        )
++        response = await client.post("/v1/" + endpoint, json=body,
++                                     headers={"x-mock-scenario": scenario})
++        assert response.status_code == 200
++        entry = reqlog.snapshot()[0]
++        assert entry["ok"] is False and entry["status"] == 200
++        assert "未正常结束" in entry["error"] and entry["t_total"] is not None
++        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is False
++        assert not gw._inflight
++        calls = [call for call in mock.state.calls[start:] if call[0] == "POST" and call[1].endswith("/messages")]
++        assert len(calls) == 1
++        assert all(frame not in response.text for frame in ("[DONE]", "response.completed", "response.incomplete"))
++        if endpoint == "messages":
++            assert response.text.count("event: error\n") == 1
++            assert '\n\nevent: error\ndata: {"type": "error"' in response.text
++        elif endpoint == "chat/completions":
++            assert response.text.count('"type": "upstream_error"') == 1
++        else:
++            assert response.text.count("event: response.failed\n") == 1
++        if scenario in ("sse_eof_text", "sse_eof_stop", "sse_eof_malformed"):
++            assert "chunk-0" in response.text
++        if scenario == "sse_eof_tool":
++            assert "fixture_tool" in response.text
++
++    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
++    async def test_max_tokens_with_message_stop_is_complete(self, gateway_client, fresh_app, endpoint):
++        """达到输出上限但收到 message_stop，仍按正常协议收口。"""
++        client, _ = gateway_client
++        from app import reqlog
++        from tests.conftest import seed_account
++
++        account = seed_account(fresh_app, "hLimit.eyJzdWIiOiJmaXh0dXJlIn0.sig", name="limit")
++        body = {"model": "GLM-5.3-Flash", "stream": True}
++        body["input" if endpoint == "responses" else "messages"] = (
++            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}]
++        )
++        response = await client.post("/v1/" + endpoint, json=body,
++                                     headers={"x-mock-scenario": "sse_max_tokens"})
++        assert response.status_code == 200 and reqlog.snapshot()[0]["ok"] is True
++        assert len(account.recent_results) == 1 and account.recent_results[0]["ok"] is True
++        if endpoint == "responses":
++            assert response.text.count("event: response.incomplete\n") == 1
++            assert '"reason": "max_output_tokens"' in response.text
++            assert "response.failed" not in response.text
++        else:
++            assert ("message_stop" if endpoint == "messages" else "[DONE]") in response.text
++
+     @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+     @pytest.mark.parametrize("scenario", ["sse_error_first", "sse_error_text", "sse_error_tool",
+                                           "sse_error_missing"])
+diff --git a/tests/integration/test_gateway_openai.py b/tests/integration/test_gateway_openai.py
+index 5b0a9df..3fca4a8 100644
+--- a/tests/integration/test_gateway_openai.py
++++ b/tests/integration/test_gateway_openai.py
+@@ -12,6 +12,24 @@ import pytest
+ 
+ _GOOD_JWT = "hO.eyJzdWIiOiJvIn0.sig"
+ 
++_THINKING_ENDPOINTS = ["/v1/messages", "/v1/chat/completions", "/v1/responses"]
++
++
++def _thinking_payload(endpoint, effort=None):
++    payload = {"model": "GLM-5.3-Flash", "max_tokens": 64}
++    if endpoint == "/v1/responses":
++        payload["input"] = "hi"
++        if effort is not None:
++            payload["reasoning"] = {"effort": effort}
++    else:
++        payload["messages"] = [{"role": "user", "content": "hi"}]
++        if effort is not None:
++            if endpoint == "/v1/messages":
++                payload["output_config"] = {"effort": effort}
++            else:
++                payload["reasoning_effort"] = effort
++    return payload
++
+ 
+ @pytest.mark.integration
+ class TestChatCompletions:
+@@ -151,3 +169,112 @@ class TestChatCompletions:
+             assert res.status_code == 503  # 鉴权通过，进入调度（无账号）
+         finally:
+             fresh_app.set_setting("gateway_key", "")
++
++
++@pytest.mark.integration
++class TestThinkingLevels:
++    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
++    @pytest.mark.parametrize("effort", ["low", "high", "max"])
++    @pytest.mark.parametrize("stream", [False, True])
++    async def test_effort_reaches_upstream_unchanged(self, gateway_client, fresh_app, endpoint, effort, stream):
++        client, mock = gateway_client
++        from tests.conftest import seed_account
++
++        seed_account(fresh_app, _GOOD_JWT)
++        res = await client.post(endpoint, json={**_thinking_payload(endpoint, effort), "stream": stream})
++        assert res.status_code == 200
++        upstream = json.loads(mock.state.calls[-1][3])
++        assert upstream["output_config"] == {"effort": effort}
++        assert upstream["thinking"] == {"type": "enabled"}
++        if stream:
++            events = [json.loads(line[6:]) for line in res.text.splitlines()
++                      if line.startswith("data: ") and line != "data: [DONE]"]
++            if endpoint == "/v1/responses":
++                completed = next(evt for evt in events if evt.get("type") == "response.completed")
++                assert completed["response"]["reasoning"] == {"effort": effort}
++            elif endpoint == "/v1/chat/completions":
++                assert "data: [DONE]" in res.text
++            else:
++                assert any(evt.get("type") == "message_stop" for evt in events)
++        elif endpoint == "/v1/responses":
++            assert res.json()["reasoning"] == {"effort": effort}
++
++    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
++    @pytest.mark.parametrize("params", [{}, {"thinking": {"type": "enabled"}},
++                                        {"thinking": {"type": "adaptive"}}, {"enable_thinking": True}])
++    async def test_omitted_effort_uses_upstream_default(self, gateway_client, fresh_app, endpoint, params):
++        client, mock = gateway_client
++        from tests.conftest import seed_account
++
++        seed_account(fresh_app, _GOOD_JWT)
++        res = await client.post(endpoint, json={**_thinking_payload(endpoint), **params})
++        assert res.status_code == 200
++        upstream = json.loads(mock.state.calls[-1][3])
++        assert "effort" not in upstream.get("output_config", {})
++        if not params:
++            assert "thinking" not in upstream
++        else:
++            assert upstream["thinking"] == {"type": "enabled"}
++
++    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
++    @pytest.mark.parametrize("effort", ["minimal", "medium", "xhigh", "none", "off", "disabled",
++                                        "unknown", "", "HIGH", " low ", None, False, 1, [], {}])
++    async def test_invalid_effort_rejected_before_selection(self, gateway_client, fresh_app, monkeypatch,
++                                                           endpoint, effort):
++        params = {"output_config": {"effort": effort}}
++        if endpoint == "/v1/chat/completions":
++            params = {"reasoning_effort": effort}
++        elif endpoint == "/v1/responses":
++            params = {"reasoning": {"effort": effort}}
++        await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
++
++    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
++    @pytest.mark.parametrize("params", [
++        {"enable_thinking": False}, {"thinking": {"type": "disabled"}},
++        {"thinking": {"type": "enabled", "budget_tokens": 8192}},
++        {"reasoning_effort": "high", "output_config": {"effort": "low"}},
++        {"reasoning_effort": "high", "reasoning": {"effort": "invalid"}},
++        {"reasoning_effort": "high", "thinking": {"type": "disabled"}},
++        {"reasoning_effort": "high", "enable_thinking": False},
++        {"reasoning_effort": "high", "output_config": {"effort": None}},
++        {"thinking": None}, {"thinking": {"type": "auto"}}, {"thinking": {}},
++        {"reasoning": []}, {"output_config": "high"}, {"enable_thinking": "true"},
++    ])
++    async def test_unsupported_or_conflicting_params_rejected(self, gateway_client, fresh_app, monkeypatch,
++                                                            endpoint, params):
++        await self._assert_rejected(gateway_client, fresh_app, monkeypatch, endpoint, params)
++
++    async def _assert_rejected(self, gateway_client, fresh_app, monkeypatch, endpoint, params):
++        client, mock = gateway_client
++        selected = []
++        original_select = fresh_app.select
++
++        def select(*args, **kwargs):
++            selected.append(True)
++            return original_select(*args, **kwargs)
++
++        monkeypatch.setattr(fresh_app, "select", select)
++        calls_before = len(mock.state.calls)
++        res = await client.post(endpoint, json={**_thinking_payload(endpoint), **params})
++        assert res.status_code == 400
++        error = res.json()["error"]
++        assert error["type"] == "invalid_request_error"
++        assert all(level in error["message"] for level in ("low", "high", "max"))
++        assert selected == []
++        assert len(mock.state.calls) == calls_before
++
++    @pytest.mark.parametrize("endpoint", _THINKING_ENDPOINTS)
++    async def test_same_efforts_with_budget_keep_explicit_level(self, gateway_client, fresh_app, endpoint):
++        client, mock = gateway_client
++        from tests.conftest import seed_account
++
++        seed_account(fresh_app, _GOOD_JWT)
++        res = await client.post(endpoint, json={
++            **_thinking_payload(endpoint, "max"), "reasoning_effort": "max",
++            "reasoning": {"effort": "max"}, "output_config": {"effort": "max"},
++            "thinking": {"type": "adaptive", "budget_tokens": 1024},
++        })
++        assert res.status_code == 200
++        upstream = json.loads(mock.state.calls[-1][3])
++        assert upstream["output_config"] == {"effort": "max"}
++        assert upstream["thinking"] == {"type": "enabled"}
+diff --git a/tests/mock_upstream/server.py b/tests/mock_upstream/server.py
+index ad267ab..67fccec 100644
+--- a/tests/mock_upstream/server.py
++++ b/tests/mock_upstream/server.py
+@@ -191,6 +191,18 @@ def build_app() -> FastAPI:
+                 content = content[:cut]
+             elif scenario == "sse_truncate":
+                 content = content[: len(content) // 2]
++            elif scenario == "sse_empty":
++                content = ""
++            elif scenario in ("sse_eof_text", "sse_eof_tool", "sse_eof_stop", "sse_eof_malformed"):
++                if scenario == "sse_eof_tool":
++                    content = _sse_stream(chunks, error_scenario="sse_error_tool").split("event: error")[0]
++                else:
++                    content = content.split("event: message_stop" if scenario == "sse_eof_stop" else
++                                            "event: message_delta")[0]
++                    if scenario == "sse_eof_malformed":
++                        content += 'event: message_stop\ndata: {"type":"message_stop"'
++            elif scenario == "sse_max_tokens":
++                content = content.replace('"stop_reason":"end_turn"', '"stop_reason":"max_tokens"')
+             return Response(
+                 content, status_code=200, media_type="text/event-stream",
+                 headers={"x-mock-call-index": str(n), "cache-control": "no-cache"},
+diff --git a/tests/unit/test_gateway_usage.py b/tests/unit/test_gateway_usage.py
+index 089326f..7569103 100644
+--- a/tests/unit/test_gateway_usage.py
++++ b/tests/unit/test_gateway_usage.py
+@@ -13,16 +13,18 @@ from app.routes import gateway as gw
+ 
+ @pytest.fixture
+ def error_stream():
+-    """合成错误流，验证实际生成器的分块、取消与关闭。"""
++    """合成流，验证实际生成器的分块、取消与关闭。"""
+     reqlog.clear()
+ 
+-    def _build(protocol, size=65536, on_result=None):
+-        raw = b'data: {"type":"error","error":{"message":"fixture"}}\n\n'
++    def _build(protocol, size=65536, on_result=None, raw=None,
++               content_type="text/event-stream", preloaded_bytes=None):
++        if raw is None:
++            raw = b'data: {"type":"error","error":{"message":"fixture"}}\n\n'
+         closed = []
+ 
+         class Response:
+             status_code = 200
+-            headers = {"content-type": "text/event-stream"}
++            headers = {"content-type": content_type}
+ 
+             async def aiter_bytes(self):
+                 for i in range(0, len(raw), size):
+@@ -38,7 +40,7 @@ def error_stream():
+ 
+         reqlog.begin("error", protocol, "GLM-5.3-Flash", True)
+         up = gw._Upstream(Response(), Context(), None, on_close=lambda: closed.append("slot"),
+-                          on_result=on_result)
++                          on_result=on_result, preloaded_bytes=preloaded_bytes)
+         response = (up.to_streaming("error") if protocol == "messages" else
+                     gw._openai_stream_response(up, "GLM-5.3-Flash", "error") if protocol == "chat" else
+                     gw._responses_stream_response(up, "GLM-5.3-Flash", "error"))
+@@ -76,6 +78,82 @@ async def test_cancel_at_error_frame_preserves_failure(error_stream, protocol):
+         await iterator.aclose()
+ 
+ 
++@pytest.mark.parametrize("size", [1, 7, 65536])
++@pytest.mark.parametrize("raw", [b"", b'data: {"type":"message_stop"',
++                                  b'data: {"type":"content_block_delta","delta":{"text":"message_stop"}}'])
++async def test_eof_bytes_are_preserved_before_error_frame(error_stream, size, raw):
++    results = []
++    up, iterator, closed, _ = error_stream("messages", size=size, raw=raw,
++                                          on_result=lambda ok, detail: results.append(ok))
++    response = b"".join([chunk async for chunk in iterator])
++    assert response.startswith(raw + b"\n\nevent: error\ndata: ")
++    event = json.loads(response[len(raw):].split(b"data: ", 1)[1].strip())
++    assert event["type"] == "error" and event["error"]["type"] == "upstream_error"
++    assert "未正常结束" in event["error"]["message"]
++    assert reqlog.snapshot()[0]["ok"] is False
++    await up.close()
++    assert results == [False] and closed == ["context", "slot"]
++
++
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
++@pytest.mark.parametrize("trailing_newline", [False, True])
++async def test_complete_terminal_tail_is_not_eof_failure(error_stream, protocol, newline, trailing_newline):
++    raw = b'data: {"type":"message_start","message":{"content":[]}}' + newline * 2
++    raw += b'data: {"type":"message_stop"}' + (newline * 2 if trailing_newline else b"")
++    results = []
++    up, iterator, closed, _ = error_stream(protocol, size=7, raw=raw,
++                                          on_result=lambda ok, detail: results.append(ok))
++    chunks = [chunk async for chunk in iterator]
++    response = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
++    assert "upstream_error" not in response and "response.failed" not in response
++    assert (response.encode() == raw if protocol == "messages" else
++            "[DONE]" in response if protocol == "chat" else
++            response.count("event: response.completed\n") == 1)
++    assert reqlog.snapshot()[0]["ok"] is True
++    await up.close()
++    assert results == [True] and closed == ["context", "slot"]
++
++
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++@pytest.mark.parametrize("content_type", ["text/event-stream", "TEXT/EVENT-STREAM"])
++async def test_cancel_at_eof_error_preserves_failure(error_stream, protocol, content_type):
++    results = []
++    up, iterator, closed, _ = error_stream(protocol, raw=b"", content_type=content_type,
++                                          on_result=lambda ok, detail: results.append(ok))
++    try:
++        async for chunk in iterator:
++            text = chunk.decode() if isinstance(chunk, bytes) else chunk
++            if ("event: response.failed" in text if protocol == "responses" else '"error"' in text):
++                with pytest.raises(asyncio.CancelledError):
++                    await iterator.athrow(asyncio.CancelledError())
++                break
++        entry = reqlog.snapshot()[0]
++        assert entry["ok"] is False and entry["status"] == 200
++        assert "未正常结束" in entry["error"]
++        await up.close()
++        assert results == [False] and closed == ["context", "slot"]
++    finally:
++        await iterator.aclose()
++
++
++@pytest.mark.parametrize("preloaded", [False, True])
++@pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
++async def test_non_sse_json_does_not_require_terminal(error_stream, preloaded, protocol):
++    raw = b'{"type":"message","usage":{"input_tokens":2,"output_tokens":1}}'
++    up, iterator, closed, _ = error_stream(protocol, raw=raw, content_type="application/json",
++                                          preloaded_bytes=raw if preloaded else None)
++    chunks = [chunk async for chunk in iterator]
++    response = "".join(chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks)
++    assert (response.encode() == raw if protocol == "messages" else
++            "[DONE]" in response if protocol == "chat" else
++            response.count("event: response.completed\n") == 1)
++    assert "upstream_error" not in response and "response.failed" not in response
++    assert reqlog.snapshot()[0]["ok"] is True
++    await up.close()
++    assert closed == ["context", "slot"]
++
++
+ @pytest.mark.parametrize("change", ["credential", "removed", "disabled"])
+ def test_stream_result_respects_current_account(fresh_app, change):
+     from app.models import Status
+@@ -120,10 +198,11 @@ def test_sse_partial_updates_are_cumulative():
+         {"type": "message_delta", "usage": {"output_tokens": None}},
+         {"type": "message_start", "message": "malformed"},
+     ]:
+-        usage = gw._extract_sse_line_usage(b'data: ' + json.dumps(event).encode(), usage)
++        evt = gw._extract_sse_line_event(b'data: ' + json.dumps(event).encode())
++        usage = gw._extract_event_usage(evt, usage)
+     assert usage == {"input_tokens": 0, "output_tokens": 5,
+                      "cache_read_input_tokens": 60, "cache_creation_input_tokens": 8}
+-    assert gw._extract_sse_line_usage(b'data: [DONE]', usage) == usage
++    assert gw._extract_event_usage(gw._extract_sse_line_event(b'data: [DONE]'), usage) == usage
+ 
+ 
+ def test_reqlog_caches_remain_nullable_and_validated():
+@@ -227,7 +306,8 @@ async def test_cached_sse_cross_chunks_and_final_line_are_unchanged(size):
+         b'data: {"type":"message_start","message":{"usage":{"input_tokens":0,'
+         b'"cache_read_input_tokens":60,"cache_creation_input_tokens":8}}}\n\n'
+         b'data: {"type":"message_delta","usage":{"output_tokens":5}}\n\n'
+-        b'data: {"type":"message_delta","usage":{"output_tokens":5}}'
++        b'data: {"type":"message_delta","usage":{"output_tokens":5}}\n\n'
++        b'data: {"type":"message_stop"}'
+     )
+ 
+     class Response:
+@@ -248,6 +328,7 @@ async def test_cached_sse_cross_chunks_and_final_line_are_unchanged(size):
+     try:
+         assert b"".join([chunk async for chunk in response.body_iterator]) == raw
+         entry = reqlog.snapshot()[0]
++        assert entry["ok"] is True
+         assert entry["input_tokens"] == 0 and entry["output_tokens"] == 5
+         assert entry["cache_read_input_tokens"] == 60 and entry["cache_creation_input_tokens"] == 8
+     finally:
+diff --git a/tests/unit/test_openai_compat.py b/tests/unit/test_openai_compat.py
+index eb7e4db..c6d4704 100644
+--- a/tests/unit/test_openai_compat.py
++++ b/tests/unit/test_openai_compat.py
+@@ -4,7 +4,10 @@ from __future__ import annotations
+ 
+ import json
+ 
++import pytest
++
+ from app.openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
++from app.responses_compat import responses_to_anthropic
+ 
+ 
+ class TestOpenaiToAnthropic:
+@@ -134,16 +137,51 @@ class TestOpenaiToAnthropic:
+     def test_reasoning_effort_and_user_session_mapped(self):
+         body, err = openai_to_anthropic({
+             "model": "glm-5.3-flash",
+-            "reasoning_effort": "medium",
++            "reasoning_effort": "high",
+             "user": "sess-custom-42",
+             "messages": [{"role": "user", "content": "hi"}],
+         })
+         assert err is None and body is not None
+         assert body["thinking"] == {"type": "enabled"}
+-        assert body["output_config"] == {"effort": "medium"}
++        assert body["output_config"] == {"effort": "high"}
+         assert body["metadata"]["session_id"] == "sess-custom-42"
+ 
+ 
++class TestThinkingParams:
++    @pytest.mark.parametrize("convert", [openai_to_anthropic, responses_to_anthropic])
++    @pytest.mark.parametrize("effort", ["low", "high", "max"])
++    def test_explicit_effort_preserved(self, convert, effort):
++        payload = {
++            "model": "GLM-5.3-Flash", "messages": [{"role": "user", "content": "hi"}], "input": "hi",
++            "reasoning_effort": effort, "reasoning": {"effort": effort},
++            "output_config": {"effort": effort},
++            "thinking": {"type": "adaptive", "budget_tokens": 8192},
++        }
++        body, err = convert(payload)
++        assert err is None
++        assert body["output_config"] == {"effort": effort}
++        assert body["thinking"] == {"type": "enabled"}
++        assert payload["thinking"] == {"type": "adaptive", "budget_tokens": 8192}
++
++    @pytest.mark.parametrize("convert", [openai_to_anthropic, responses_to_anthropic])
++    @pytest.mark.parametrize("params", [
++        {"reasoning_effort": "medium"}, {"reasoning": {"effort": "none"}},
++        {"reasoning_effort": "max", "output_config": {"effort": "low"}},
++        {"reasoning_effort": "max", "reasoning": {"effort": "invalid"}},
++        {"reasoning_effort": "max", "enable_thinking": False},
++        {"reasoning_effort": "max", "thinking": {"type": "disabled"}},
++        {"reasoning_effort": "max", "output_config": {"effort": None}},
++        {"thinking": {"type": "enabled", "budget_tokens": 8192}},
++    ])
++    def test_invalid_original_params_rejected(self, convert, params):
++        body, err = convert({
++            "model": "GLM-5.3-Flash", "messages": [{"role": "user", "content": "hi"}], "input": "hi",
++            **params,
++        })
++        assert body is None
++        assert err is not None and all(level in err for level in ("low", "high", "max"))
++
++
+ class TestAnthropicToOpenai:
+     def test_text_response(self):
+         out = anthropic_to_openai({
+diff --git a/tests/unit/test_regression_baseline.py b/tests/unit/test_regression_baseline.py
+index cd86667..e7888e9 100644
+--- a/tests/unit/test_regression_baseline.py
++++ b/tests/unit/test_regression_baseline.py
+@@ -12,12 +12,12 @@ import time
+ import pytest
+ 
+ from app.models import Account, Status
++from app.openai_compat import _apply_reasoning_params
+ from app.routes.gateway import (
+     _detect_provider,
+     _is_captcha_error,
+     _is_exhausted,
+     _normalize_body,
+-    _normalize_thinking_for_model,
+ )
+ 
+ 
+@@ -33,6 +33,7 @@ class TestNormalizeBody:
+ 
+     def test_unknown_model_normalized_to_default_flash(self):
+         body = {"model": "claude-3-5-sonnet", "output_config": {"effort": "high"}}
++        assert _apply_reasoning_params(body, body) is None
+         norm = _normalize_body(body)
+         assert norm["model"] == "GLM-5.3-Flash"
+         assert norm["output_config"] == {"effort": "high"}
+@@ -340,93 +341,36 @@ def fresh_account(secret: str) -> Account:
+ 
+ # ── 思考档位与业务错误码归一（3.14.3 对齐）──────────────────────────────────
+ class TestThinkingNormalization:
+-    def test_glm53_coerces_medium_and_minimal_effort(self):
+-        b1 = _normalize_body({
+-            "model": "glm-5.3-flash",
+-            "output_config": {"effort": "medium"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b1["model"] == "GLM-5.3-Flash"
+-        assert b1["output_config"] == {"effort": "high"}
+-        assert b1["thinking"] == {"type": "enabled"}
+-
+-        b2 = _normalize_body({
+-            "model": "GLM-5.3",
+-            "output_config": {"effort": "minimal"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b2["model"] == "GLM-5.3-Flash"
+-        assert b2["output_config"] == {"effort": "low"}
+-        assert b2["thinking"] == {"type": "enabled"}
+-
+-        b3 = _normalize_body({
+-            "model": "GLM-5.3",
+-            "output_config": {"effort": "xhigh"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b3["model"] == "GLM-5.3-Flash"
+-        assert b3["output_config"] == {"effort": "max"}
+-
+-    def test_glm53_disabled_effort_removes_output_config(self):
+-        b = _normalize_body({
+-            "model": "GLM-5.3-Flash",
+-            "output_config": {"effort": "disabled"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b["thinking"] == {"type": "disabled"}
+-        assert "output_config" not in b
+-
+-    def test_glm52_coerces_low_to_high_and_keeps_disabled(self):
+-        b1 = {
+-            "model": "GLM-5.2",
+-            "output_config": {"effort": "low"},
++    @pytest.mark.parametrize("effort", ["low", "high", "max"])
++    def test_free_model_keeps_explicit_effort(self, effort):
++        body = {
++            "model": "GLM-5.2", "output_config": {"effort": effort},
+             "messages": [{"role": "user", "content": "hi"}],
+         }
+-        _normalize_thinking_for_model(b1, "GLM-5.2")
+-        assert b1["output_config"] == {"effort": "high"}
+-        assert b1["thinking"] == {"type": "enabled"}
+-
+-        b2 = {
+-            "model": "GLM-5.2",
+-            "output_config": {"effort": "disabled"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        }
+-        _normalize_thinking_for_model(b2, "GLM-5.2")
+-        assert b2["output_config"] == {"effort": "disabled"}
+-        assert b2["thinking"] == {"type": "disabled"}
+-
+-    def test_glm5_turbo_strips_effort_and_uses_enable_mode(self):
+-        b = {
+-            "model": "GLM-5-Turbo",
+-            "output_config": {"effort": "high"},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        }
+-        _normalize_thinking_for_model(b, "GLM-5-Turbo")
+-        assert "output_config" not in b
+-        assert b["thinking"] == {"type": "enabled"}
+-
+-    def test_budget_tokens_converted_to_effort(self):
+-        b_low = _normalize_body({
+-            "model": "GLM-5.3-Flash",
+-            "thinking": {"type": "enabled", "budget_tokens": 4096},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert "budget_tokens" not in b_low["thinking"]
+-        assert b_low["output_config"] == {"effort": "low"}
+-
+-        b_high = _normalize_body({
+-            "model": "GLM-5.3",
+-            "thinking": {"type": "enabled", "budget_tokens": 16384},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b_high["output_config"] == {"effort": "high"}
+-
+-        b_max = _normalize_body({
+-            "model": "GLM-5.3",
+-            "thinking": {"type": "enabled", "budget_tokens": 32768},
+-            "messages": [{"role": "user", "content": "hi"}],
+-        })
+-        assert b_max["output_config"] == {"effort": "max"}
++        assert _apply_reasoning_params(body, body) is None
++        assert _normalize_body(body)["model"] == "GLM-5.3-Flash"
++        assert body["output_config"] == {"effort": effort}
++        assert body["thinking"] == {"type": "enabled"}
++
++    @pytest.mark.parametrize("params", [
++        {"output_config": {"effort": "medium"}},
++        {"output_config": {"effort": "minimal"}},
++        {"output_config": {"effort": "xhigh"}},
++        {"output_config": {"effort": "disabled"}},
++        {"thinking": {"type": "enabled", "budget_tokens": 16384}},
++    ])
++    def test_legacy_folding_and_budget_inference_rejected(self, params):
++        body = {"model": "GLM-5.3-Flash", **params}
++        before = json.dumps(body)
++        err = _apply_reasoning_params(body, body)
++        assert err is not None and "low/high/max" in err
++        assert json.dumps(body) == before
++
++    def test_omitted_thinking_not_injected(self):
++        body = {"model": "GLM-5.3-Flash"}
++        assert _apply_reasoning_params(body, body) is None
++        _normalize_body(body)
++        assert "thinking" not in body and "output_config" not in body
+ 
+ 
+ class TestBusinessErrorClassification:
+@@ -602,6 +546,7 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
+             b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n'
+             b'event: message_delta\n'
+             b'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":19}}\n\n'
++            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+         )
+ 
+         class _ChunkedResp:

@@ -1,0 +1,32 @@
+........................................................................ [ 41%]
+..................F..................................................... [ 82%]
+...............................                                          [100%]
+================================== FAILURES ===================================
+___________ TestMonitoringRecording.test_no_account_error_recorded ____________
+
+self = <tests.integration.test_gateway_monitoring.TestMonitoringRecording object at 0x0000020DAB397E30>
+fresh_app = <app.store.Store object at 0x0000020DAC0D66D0>
+
+    async def test_no_account_error_recorded(self, fresh_app):
+        from httpx import ASGITransport, AsyncClient
+    
+        from app.main import create_app
+    
+        app = create_app()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post("/v1/messages", json={
+                "model": "GLM-5.3", "messages": [{"role": "user", "content": "hi"}],
+            })
+            assert res.status_code == 503
+            res = await client.get("/admin/api/monitoring", headers=ADMIN_AUTH)
+        e = res.json()["entries"][0]
+        assert e["ok"] is False and e["status"] == 503
+>       assert "�޿����˺�" in e["error"]
+E       AssertionError: assert '�޿����˺�' in '�����˺ž������á����������򲢷����������ں�̨����˺�״̬'
+
+tests\integration\test_gateway_monitoring.py:249: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf058c4ff177e34f4[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"hi"[0m
+  [31m<!>[0m [90mf058c4ff177e34f4[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_no_account_error_recorded

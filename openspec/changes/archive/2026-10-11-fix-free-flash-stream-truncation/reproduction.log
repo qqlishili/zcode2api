@@ -1,0 +1,148 @@
+FFFFFFFFFFFFFFFFFF                                                       [100%]
+================================== FAILURES ===================================
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_empty-messages] __
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m6b3d182db36483d8[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m6b3d182db36483d8[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_empty-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m1beec5f36fccf133[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m1beec5f36fccf133[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_empty-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m3d52ba1a84d8d89d[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m3d52ba1a84d8d89d[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_text-messages] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m97e41eb5083f56f3[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m97e41eb5083f56f3[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_text-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m16e037a905e3bcc3[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m16e037a905e3bcc3[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_text-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m169ff19fb7bfbf65[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m169ff19fb7bfbf65[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_tool-messages] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m84d68647eab3859b[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m84d68647eab3859b[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_tool-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m22196a909a4c135a[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m22196a909a4c135a[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_tool-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m74d9d8e99bb3e366[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m74d9d8e99bb3e366[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_stop-messages] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m631365a31c84feec[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m631365a31c84feec[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_stop-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m7afe5ab21a4e31d6[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m7afe5ab21a4e31d6[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_stop-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mab4b99a821b56a14[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90mab4b99a821b56a14[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_malformed-messages] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md52d2e3257525ba3[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90md52d2e3257525ba3[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_malformed-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mdbb814e492735461[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90mdbb814e492735461[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_eof_malformed-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m244caf4418a6e99c[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m244caf4418a6e99c[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_truncate-messages] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m96ff071e4847e29a[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m96ff071e4847e29a[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_truncate-chat/completions] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md78b3d2fa0254602[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90md78b3d2fa0254602[0m
+_ TestMonitoringRecording.test_silent_eof_is_not_success[sse_truncate-responses] _
+tests\integration\test_gateway_monitoring.py:63: in test_silent_eof_is_not_success
+    assert entry["ok"] is False and entry["status"] == 200
+E   assert (True is False)
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8b714d33ae031e88[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [32m<<<[0m [90m8b714d33ae031e88[0m
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_empty-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_empty-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_empty-responses]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_text-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_text-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_text-responses]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_tool-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_tool-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_tool-responses]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_stop-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_stop-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_stop-responses]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_malformed-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_malformed-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_eof_malformed-responses]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_truncate-messages]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_truncate-chat/completions]
+FAILED tests/integration/test_gateway_monitoring.py::TestMonitoringRecording::test_silent_eof_is_not_success[sse_truncate-responses]
+18 failed, 32 deselected in 6.31s

@@ -1,0 +1,70 @@
+{
+  "release_commit": "018a48bc79eea7d681e2a93f9f203255d2041dc8",
+  "previous_commit": "d394b999b2f70139292748e949d5efde520d2d28",
+  "commits": [
+    "d2acbe1 chore: 忽略本地 OpenSpec 工作文件",
+    "018a48b fix(gateway): 正确收口流内错误与账号结果"
+  ],
+  "git": {
+    "local_head": "018a48bc79eea7d681e2a93f9f203255d2041dc8",
+    "github_main": "018a48bc79eea7d681e2a93f9f203255d2041dc8",
+    "vps_head": "018a48bc79eea7d681e2a93f9f203255d2041dc8",
+    "local_worktree_clean": true,
+    "vps_worktree_clean": true,
+    "update_method": "git fetch origin main; git merge --ff-only <release_commit>",
+    "history_rewritten": false,
+    "local_gateway_sha256": "538034c5bde9f7e6bbad90081aaad7db77d4c1459dcd70cf1d4f96b431437e8c",
+    "vps_gateway_sha256": "538034c5bde9f7e6bbad90081aaad7db77d4c1459dcd70cf1d4f96b431437e8c"
+  },
+  "service": {
+    "existing_service_restarted": true,
+    "original_directory_preserved": true,
+    "active": true,
+    "application_startup_complete": true,
+    "startup_failure": false,
+    "traceback_count_since_restart": 0,
+    "restart_count": 0,
+    "meta_version": "2.6.6"
+  },
+  "windows_client": {
+    "meta_http_status": 200,
+    "login_http_status": 200,
+    "html_received": true,
+    "version_in_html": true,
+    "template_resolved": true
+  },
+  "real_upstream_smoke": {
+    "request_location": "VPS 本地 HTTP 客户端",
+    "endpoint": "/v1/chat/completions",
+    "model": "GLM-5.3-Flash",
+    "stream": true,
+    "reasoning_effort": "low",
+    "max_tokens": 256,
+    "http_status": 200,
+    "stream_done": true,
+    "has_error": false,
+    "exact_release_ok": true,
+    "monitoring_ok": true,
+    "account_latest_result_ok": true,
+    "input_tokens": 317,
+    "output_tokens": 16
+  },
+  "failed_initial_probe": {
+    "http_status": 400,
+    "upstream_code": "1210",
+    "cause": "验证请求关闭思考，但该模型要求 low、high 或 max；已修正验证参数，未修改项目代码",
+    "monitoring_ok": false
+  },
+  "verification_scope": {
+    "regression_passed": 152,
+    "implementation_cli_verdict": "PASS",
+    "publication_cli_verdict": "PASS",
+    "ruff_changed_python_files_passed": true,
+    "openspec_strict_validation_passed": true,
+    "openspec_completed_tasks": 6,
+    "openspec_total_tasks": 6,
+    "real_upstream_error_event_forced": false,
+    "paid_subscription_used": false,
+    "private_credentials_recorded": false
+  }
+}

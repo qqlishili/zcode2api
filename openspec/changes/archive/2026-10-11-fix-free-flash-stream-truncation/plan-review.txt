@@ -1,0 +1,22 @@
+### 审查结论
+
+**VERDICT [PASS]**
+
+---
+
+### 证据与审阅意见
+
+1. **截断识别与终态判定准确收敛**
+   方案将成功判定严格锚定为已解析的 `type: message_stop`（Chat/Messages 在循环旁路检测，Responses 复用既有 `conv.is_finished`），彻底终结了静默 EOF 误入 `reqlog.finish_ok`、`up.finish_result(True)` 以及 Chat 虚假补发 `conv.done()`（`[DONE]`）的根因。
+
+2. **协议收口精准且不重复显式错误**
+   静默 EOF 复用 `_UpstreamStreamError` 失败管线：Chat 走错误帧输出、Responses 走 `conv.fail()`，Messages 仅对静默 EOF 追加标准错误帧且前置补全帧分隔（`\n\n`），有效隔离上游残片；显式 `type: error` 则保持原样透传，不重复注入错误。
+
+3. **资源释放、取消竞态与凭据栅栏保持完备**
+   账号回调（`finish_result`）的一次性回调置空与请求监控（`reqlog`）的 `_inflight.pop` 机制天然保证单次记录，静默 EOF 记失败后即使客户端断开也不会被 499 覆盖；连接与并发槽均受 `finally: await up.close()` 幂等保护，且无重新请求或换号重发。
+
+4. **非 SSE 与边界兼容性设计周密**
+   非 SSE / 完整 JSON 直通分支跳过流式终态检查，正常 `max_tokens`（上游仍发 `message_stop`）与尾行无换行（`line_buf` 尾包）均纳入合法终态规范与回归要求，未引入多余的帧顺序校验框架。
+
+5. **测试断言演进策略合理可逆**
+   方案已明确识别并指出旧用量测试（如 `USG-002`）缺少终态的现状，规划在保留尾行/跨块验证的同时显式补全合法终态，并为真实截断场景建立独立反例复现与红绿验证，避免虚假变绿。

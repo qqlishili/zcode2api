@@ -1,0 +1,1129 @@
+FFFFFFFFFFFFFFFFFFFFFF                                                   [100%]
+================================== FAILURES ===================================
+____________ test_upstream_failure[402-None-quota_exhausted-False] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B19B5A90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B18C2210>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B19D9CD0>
+raw = 402, business = None, expected = 'quota_exhausted', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m9962b1fc46175427[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m9962b1fc46175427[0m �˺� private-fixture ������꣬�л���һ��
+  [31m<!>[0m [90m9962b1fc46175427[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+____________ test_upstream_failure[200-1304-quota_exhausted-False] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1B07490>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B195E5D0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1976360>
+raw = 200, business = '1304', expected = 'quota_exhausted', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md0e66691996173f3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90md0e66691996173f3[0m �˺� private-fixture ������꣬�л���һ��
+  [31m<!>[0m [90md0e66691996173f3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_upstream_failure[401-None-credential_invalid-False] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1C8B790>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1C25940>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C0DC50>
+raw = 401, business = None, expected = 'credential_invalid', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m1845a007ce8e1a00[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m1845a007ce8e1a00[0m �˺� private-fixture ��Ȩʧ�� 401���л���һ��
+  [31m<!>[0m [90m1845a007ce8e1a00[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_upstream_failure[403-None-credential_invalid-False] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1A4B350>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1B04510>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C5C590>
+raw = 403, business = None, expected = 'credential_invalid', retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma65c16065790aeb3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90ma65c16065790aeb3[0m �˺� private-fixture ��Ȩʧ�� 403���л���һ��
+  [31m<!>[0m [90ma65c16065790aeb3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_upstream_failure[200-3012-account_risk_blocked-False] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1A67A70>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1938EF0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B163A2D0>
+raw = 200, business = '3012', expected = 'account_risk_blocked'
+retryable = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m286d8b45fc408423[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m286d8b45fc408423[0m �˺� private-fixture ���з�� HTTP 405���ѽ��ã��ۼƵ� 1 �Σ����л���һ��
+  [31m<!>[0m [90m286d8b45fc408423[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+________ test_upstream_failure[400-3007-captcha_retry_exhausted-None] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1CAF4D0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1C88490>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1B3E830>
+raw = 400, business = '3007', expected = 'captcha_retry_exhausted'
+retryable = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m414534d91e747ef3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m414534d91e747ef3[0m �˺� private-fixture ��֤����ս��in-body-3007����ˢ������
+  [33m[~][0m [90m414534d91e747ef3[0m �˺� private-fixture ��֤����ս��in-body-3007����ˢ������
+  [33m[~][0m [90m414534d91e747ef3[0m �˺� private-fixture ��֤������ʧ�ܣ��л���һ��
+  [31m<!>[0m [90m414534d91e747ef3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_upstream_failure[503-None-upstream_server_error-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B19229C0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20627A0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B19527B0>
+raw = 503, business = None, expected = 'upstream_server_error', retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m19998376a96c6db0[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m19998376a96c6db0[0m �˺� private-fixture ���� HTTP 503��5s �����ԣ�1/1��
+  [33m[~][0m [90m19998376a96c6db0[0m �˺� private-fixture ���� 503 ���Ժľ�����ȴ 300s���л���һ��
+  [31m<!>[0m [90m19998376a96c6db0[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_upstream_failure[200-1120-upstream_server_error-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1AA1310>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1C0EA50>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C4F5B0>
+raw = 200, business = '1120', expected = 'upstream_server_error'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m57a81ed15b0f7b65[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m57a81ed15b0f7b65[0m �˺� private-fixture ���� HTTP 500��5s �����ԣ�1/1��
+  [33m[~][0m [90m57a81ed15b0f7b65[0m �˺� private-fixture ���� 500 ���Ժľ�����ȴ 300s���л���һ��
+  [31m<!>[0m [90m57a81ed15b0f7b65[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______ test_upstream_failure[429-3008-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B2107950>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B2120550>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C66580>
+raw = 429, business = '3008', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mca85af0ca2256d96[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90mca85af0ca2256d96[0m �˺� private-fixture �������� 429�������л���һ�����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mca85af0ca2256d96[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______ test_upstream_failure[200-3009-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A3E90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B15B74D0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B2069630>
+raw = 200, business = '3009', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf88096dd61cfe068[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90mf88096dd61cfe068[0m �˺� private-fixture �������� 429�������л���һ�����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mf88096dd61cfe068[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______ test_upstream_failure[429-3010-upstream_concurrency_limit-True] _______
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A3A10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1C05310>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B2069240>
+raw = 429, business = '3010', expected = 'upstream_concurrency_limit'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m96d596d923bd27f3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m96d596d923bd27f3[0m �˺� private-fixture �������� 429�������л���һ�����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m96d596d923bd27f3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_upstream_failure[429-1302-upstream_rate_limited-True] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A3110>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20BA0B0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B206BBD0>
+raw = 429, business = '1302', expected = 'upstream_rate_limited'
+retryable = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf9eaf0101cceaa02[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90mf9eaf0101cceaa02[0m �˺� private-fixture ������ 429��60s �����ԣ�1/1��
+  [33m[~][0m [90mf9eaf0101cceaa02[0m �˺� private-fixture 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mf9eaf0101cceaa02[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_upstream_failure[429-None-upstream_429_unknown-None] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A3590>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1971E10>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1A8BAF0>
+raw = 429, business = None, expected = 'upstream_429_unknown', retryable = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("raw,business,expected,retryable", [
+        (402, None, "quota_exhausted", False), (200, "1304", "quota_exhausted", False),
+        (401, None, "credential_invalid", False), (403, None, "credential_invalid", False),
+        (200, "3012", "account_risk_blocked", False), (400, "3007", "captcha_retry_exhausted", None),
+        (503, None, "upstream_server_error", True), (200, "1120", "upstream_server_error", True),
+        (429, "3008", "upstream_concurrency_limit", True), (200, "3009", "upstream_concurrency_limit", True),
+        (429, "3010", "upstream_concurrency_limit", True), (429, "1302", "upstream_rate_limited", True),
+        (429, None, "upstream_429_unknown", None)])
+    async def test_upstream_failure(gateway_client, fresh_app, mock_server, monkeypatch, raw, business, expected, retryable):
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        import json
+    
+        async def no_wait(_):
+            pass
+    
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(settings, "RETRY_5XX_TIMES", 1)
+        # ��ʵTCP���Σ�HTTP200��װ��������Ϣ�˵���Ӧ·����
+        calls = []
+        async def upstream():
+            calls.append(raw)
+            return Response(json.dumps({"code": business, "error": {"message": "fixture", "type": "unlisted"}}),
+                            status_code=raw, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/diagnostic")
+        account = seed_account(fresh_app, "reason.fixture.sig", name="private-fixture")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "stream": False,
+                                                           "messages": [{"role": "user", "content": "fixture"}]})
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["code"] == expected
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:88: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m905cbeb276c71bc9[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90m905cbeb276c71bc9[0m �˺� private-fixture ������ 429��60s �����ԣ�1/1��
+  [33m[~][0m [90m905cbeb276c71bc9[0m �˺� private-fixture 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m905cbeb276c71bc9[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_cooling_and_model[cooling-quota0-account_cooling-True] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1AA3D10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1CCB110>, state = 'cooling'
+quota = {}, code = 'account_cooling', retry = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("state,quota,code,retry", [
+        ("cooling", {}, "account_cooling", True),
+        ("cooling", {"GLM-5.3-Flash": {"remaining": 0}}, "mixed_unavailability", False),
+        ("active", {"GLM-5.3-Flash": {"remaining": 0}}, "model_quota_exhausted", False),
+        ("missing_cooling", {}, "unknown_unavailability", None)])
+    async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, retry):
+        import time
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "cooling.fixture.sig")
+        account.status = "cooling" if state == "missing_cooling" else state
+        account.cooling_until = None if state == "missing_cooling" else time.time() + 60
+        account.quota = quota
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == code and error["retryable"] is retry
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:150: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m29ee469841f2bf88[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [31m<!>[0m [90m29ee469841f2bf88[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______ test_cooling_and_model[cooling-quota1-mixed_unavailability-False] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B216E8D0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1AA3E90>, state = 'cooling'
+quota = {'GLM-5.3-Flash': {'remaining': 0}}, code = 'mixed_unavailability'
+retry = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("state,quota,code,retry", [
+        ("cooling", {}, "account_cooling", True),
+        ("cooling", {"GLM-5.3-Flash": {"remaining": 0}}, "mixed_unavailability", False),
+        ("active", {"GLM-5.3-Flash": {"remaining": 0}}, "model_quota_exhausted", False),
+        ("missing_cooling", {}, "unknown_unavailability", None)])
+    async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, retry):
+        import time
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "cooling.fixture.sig")
+        account.status = "cooling" if state == "missing_cooling" else state
+        account.cooling_until = None if state == "missing_cooling" else time.time() + 60
+        account.quota = quota
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == code and error["retryable"] is retry
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:150: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m595ad4bb1167af96[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [31m<!>[0m [90m595ad4bb1167af96[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______ test_cooling_and_model[active-quota2-model_quota_exhausted-False] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B2107A10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B2105CD0>, state = 'active'
+quota = {'GLM-5.3-Flash': {'remaining': 0}}, code = 'model_quota_exhausted'
+retry = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("state,quota,code,retry", [
+        ("cooling", {}, "account_cooling", True),
+        ("cooling", {"GLM-5.3-Flash": {"remaining": 0}}, "mixed_unavailability", False),
+        ("active", {"GLM-5.3-Flash": {"remaining": 0}}, "model_quota_exhausted", False),
+        ("missing_cooling", {}, "unknown_unavailability", None)])
+    async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, retry):
+        import time
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "cooling.fixture.sig")
+        account.status = "cooling" if state == "missing_cooling" else state
+        account.cooling_until = None if state == "missing_cooling" else time.time() + 60
+        account.quota = quota
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == code and error["retryable"] is retry
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:150: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m82807074af85d89c[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [31m<!>[0m [90m82807074af85d89c[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ test_cooling_and_model[missing_cooling-quota3-unknown_unavailability-None] __
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1AA1850>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20AB070>
+state = 'missing_cooling', quota = {}, code = 'unknown_unavailability'
+retry = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("state,quota,code,retry", [
+        ("cooling", {}, "account_cooling", True),
+        ("cooling", {"GLM-5.3-Flash": {"remaining": 0}}, "mixed_unavailability", False),
+        ("active", {"GLM-5.3-Flash": {"remaining": 0}}, "model_quota_exhausted", False),
+        ("missing_cooling", {}, "unknown_unavailability", None)])
+    async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, retry):
+        import time
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "cooling.fixture.sig")
+        account.status = "cooling" if state == "missing_cooling" else state
+        account.cooling_until = None if state == "missing_cooling" else time.time() + 60
+        account.quota = quota
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == code and error["retryable"] is retry
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:150: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m0b205e59d8b73e8e[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [31m<!>[0m [90m0b205e59d8b73e8e[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________________ test_retry_headers_and_internal_cap[0-0] ___________________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B2105E50>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20A9C80>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C86040>
+value = '0', expected = 0
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
+    async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+    
+        waits = []
+        async def no_wait(seconds):
+            waits.append(seconds)
+    
+        async def upstream():
+            return Response(json.dumps({"error": {"message": "quota exceeded", "type": "private-type"}}),
+                            status_code=429, media_type="application/json",
+                            headers={"retry-after": value} if value is not None else {})
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/retry-diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/retry-diagnostic")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        account = seed_account(fresh_app, "retryHeader.fixture.sig")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == "upstream_429_unknown"
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:298: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m855eb79f9a471cbf[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [33m[~][0m [90m855eb79f9a471cbf[0m �˺� t ������ 429��60s �����ԣ�1/1��
+  [33m[~][0m [90m855eb79f9a471cbf[0m �˺� t 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m855eb79f9a471cbf[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________________ test_retry_headers_and_internal_cap[1.25-2] _________________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B2106150>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B1C5A7B0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C86C80>
+value = '1.25', expected = 2
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
+    async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+    
+        waits = []
+        async def no_wait(seconds):
+            waits.append(seconds)
+    
+        async def upstream():
+            return Response(json.dumps({"error": {"message": "quota exceeded", "type": "private-type"}}),
+                            status_code=429, media_type="application/json",
+                            headers={"retry-after": value} if value is not None else {})
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/retry-diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/retry-diagnostic")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        account = seed_account(fresh_app, "retryHeader.fixture.sig")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == "upstream_429_unknown"
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:298: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mcffb5ab4d62f848a[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [33m[~][0m [90mcffb5ab4d62f848a[0m �˺� t ������ 429��1s �����ԣ�1/1��
+  [33m[~][0m [90mcffb5ab4d62f848a[0m �˺� t 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mcffb5ab4d62f848a[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______________ test_retry_headers_and_internal_cap[7200-7200] ________________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B1CC5850>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20A4C30>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B1C86E40>
+value = '7200', expected = 7200
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
+    async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+    
+        waits = []
+        async def no_wait(seconds):
+            waits.append(seconds)
+    
+        async def upstream():
+            return Response(json.dumps({"error": {"message": "quota exceeded", "type": "private-type"}}),
+                            status_code=429, media_type="application/json",
+                            headers={"retry-after": value} if value is not None else {})
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/retry-diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/retry-diagnostic")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        account = seed_account(fresh_app, "retryHeader.fixture.sig")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == "upstream_429_unknown"
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:298: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m2d2f8406b79f403c[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [33m[~][0m [90m2d2f8406b79f403c[0m �˺� t ������ 429��120s �����ԣ�1/1��
+  [33m[~][0m [90m2d2f8406b79f403c[0m �˺� t 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m2d2f8406b79f403c[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+________________ test_retry_headers_and_internal_cap[bad-None] ________________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A2F90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B20B2690>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B18E3700>
+value = 'bad', expected = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
+    async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+    
+        waits = []
+        async def no_wait(seconds):
+            waits.append(seconds)
+    
+        async def upstream():
+            return Response(json.dumps({"error": {"message": "quota exceeded", "type": "private-type"}}),
+                            status_code=429, media_type="application/json",
+                            headers={"retry-after": value} if value is not None else {})
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/retry-diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/retry-diagnostic")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        account = seed_account(fresh_app, "retryHeader.fixture.sig")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == "upstream_429_unknown"
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:298: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mecf484d0dd326e78[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [33m[~][0m [90mecf484d0dd326e78[0m �˺� t ������ 429��60s �����ԣ�1/1��
+  [33m[~][0m [90mecf484d0dd326e78[0m �˺� t 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mecf484d0dd326e78[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______________ test_retry_headers_and_internal_cap[None-None] ________________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000294B20A0410>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>)
+fresh_app = <app.store.Store object at 0x00000294B2100DD0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000294B1586900>, 2876)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000294B220EBA0>
+value = None, expected = None
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("value,expected", [("0", 0), ("1.25", 2), ("7200", 7200), ("bad", None), (None, None)])
+    async def test_retry_headers_and_internal_cap(gateway_client, fresh_app, mock_server, monkeypatch, value, expected):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from app.routes import gateway
+        from tests.conftest import seed_account
+    
+        waits = []
+        async def no_wait(seconds):
+            waits.append(seconds)
+    
+        async def upstream():
+            return Response(json.dumps({"error": {"message": "quota exceeded", "type": "private-type"}}),
+                            status_code=429, media_type="application/json",
+                            headers={"retry-after": value} if value is not None else {})
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/retry-diagnostic", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/retry-diagnostic")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 1)
+        monkeypatch.setattr(gateway, "_sleep", no_wait)
+        account = seed_account(fresh_app, "retryHeader.fixture.sig")
+        client, _ = gateway_client
+        response = await client.post("/v1/messages", json={"messages": []})
+        error = response.json()["error"]
+>       assert error["code"] == "upstream_429_unknown"
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:298: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m3fe0a4a82d47215f[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m""[0m
+  [33m[~][0m [90m3fe0a4a82d47215f[0m �˺� t ������ 429��60s �����ԣ�1/1��
+  [33m[~][0m [90m3fe0a4a82d47215f[0m �˺� t 429 ���� 1 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m3fe0a4a82d47215f[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+============================== warnings summary ===============================
+.venv\Lib\site-packages\_pytest\config\__init__.py:1345
+  D:\Temp\lizi\zcode2api\.venv\Lib\site-packages\_pytest\config\__init__.py:1345: PytestAssertRewriteWarning: Module already imported so cannot be rewritten; anyio
+    self._mark_plugins_for_rewrite(hook, disable_autoload)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[402-None-quota_exhausted-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-1304-quota_exhausted-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[401-None-credential_invalid-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[403-None-credential_invalid-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-3012-account_risk_blocked-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[400-3007-captcha_retry_exhausted-None]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[503-None-upstream_server_error-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-1120-upstream_server_error-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-3008-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[200-3009-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-3010-upstream_concurrency_limit-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-1302-upstream_rate_limited-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_upstream_failure[429-None-upstream_429_unknown-None]
+FAILED tests/integration/test_gateway_unavailability.py::test_cooling_and_model[cooling-quota0-account_cooling-True]
+FAILED tests/integration/test_gateway_unavailability.py::test_cooling_and_model[cooling-quota1-mixed_unavailability-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_cooling_and_model[active-quota2-model_quota_exhausted-False]
+FAILED tests/integration/test_gateway_unavailability.py::test_cooling_and_model[missing_cooling-quota3-unknown_unavailability-None]
+FAILED tests/integration/test_gateway_unavailability.py::test_retry_headers_and_internal_cap[0-0]
+FAILED tests/integration/test_gateway_unavailability.py::test_retry_headers_and_internal_cap[1.25-2]
+FAILED tests/integration/test_gateway_unavailability.py::test_retry_headers_and_internal_cap[7200-7200]
+FAILED tests/integration/test_gateway_unavailability.py::test_retry_headers_and_internal_cap[bad-None]
+FAILED tests/integration/test_gateway_unavailability.py::test_retry_headers_and_internal_cap[None-None]

@@ -1,0 +1,60 @@
+VERDICT [PASS]
+
+---
+
+### 一、 验收结论概述
+
+本次提交（基于基线 `018a48bc79eea7d681e2a93f9f203255d2041dc8`，5 个跟踪文件，+197 / -15）完全落实了规格中关于“上游 SSE 静默 EOF 识别与安全收口”的全部定义。实现遵循**减法与复用**原则，未引入冗余状态机或第三方依赖，有效阻止了静默 EOF 导致的虚假成功，且保留了非流式、输出截断（`max_tokens`）、跨分块尾行与取消语义的兼容性。
+
+---
+
+### 二、 核心维度评估与文件证据
+
+#### 1. 完整性（Completeness）
+- **三协议收口栅栏与终态判定**：
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L566-L574)：Chat 协议在迭代器结束后，通过 `completed` 变量确认是否收到 `message_stop`，未收到且属于 SSE 时抛出 `_UpstreamStreamIncomplete`，拒绝补发 `[DONE]` 并输出 OpenAI 错误帧。
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L698-L701)：Responses 协议在迭代器结束后，校验 `conv.is_finished` 与 SSE 标头，未终态时触发 `_UpstreamStreamIncomplete`，在异常块中通过 [`conv.fail()`](file:///d:/Temp/lizi/zcode2api/app/responses_compat.py#L758-L777) 补发单次 `response.failed`，拒绝补发 `response.completed` / `response.incomplete`。
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1125-L1152)：Messages 协议在 `aiter_bytes` 分行及尾部 `line_buf` 检查中追踪 `type == "message_stop"`，缺失时触发 `_UpstreamStreamIncomplete`。
+- **协议错误帧独立性与原样保留**：
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1167-L1169)：Messages 在发生静默 EOF 时保留既有字节并追加独立错误帧（`\n\nevent: error\ndata: ...\n\n`），带双换行独立栅栏，防止与截断残余字节粘连；上游显式返回的 `type: error` 则保持原样透传，不重复补帧。
+- **文档同步**：
+  - [docs/development/04-api-spec.md](file:///d:/Temp/lizi/zcode2api/docs/development/04-api-spec.md#L58-L60)：契约文档同步更新静默 EOF 判定规则。
+
+#### 2. 正确性（Correctness）
+- **第一性原理与归一化解析**：
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1018-L1038)：将 `_extract_sse_line_usage` 重构为 `_extract_sse_line_event`，统一调用 `_safe_json` 与 `_check_stream_error`。任何无法解析为合法 JSON 对象的尾部残缺数据（如截断的 `{"type":"message_stop"`）均归一化为 `None`，不触发 `completed = True`。
+- **无换行尾行、CRLF 与边界兼容**：
+  - Messages 协议在 `line_buf` 残余处理（1141-1146行）中对无尾随换行的完整终态帧补充解析，配合 [test_gateway_usage.py](file:///d:/Temp/lizi/zcode2api/tests/unit/test_gateway_usage.py#L98-L115) 覆盖了 `\n`、`\r\n` 及有无尾随换行的情况。
+  - `max_tokens` 场景下，上游伴随发送的 `message_stop` 正常将 `completed` 置为 `True`，Responses 协议正常走 `response.incomplete`（[test_gateway_monitoring.py](file:///d:/Temp/lizi/zcode2api/tests/integration/test_gateway_monitoring.py#L82-L104) 验证通过）。
+- **非 SSE 请求兼容**：
+  - 终态校验栅栏显式增加 `"event-stream" in up.resp.headers.get("content-type", "").lower()` 防护，确保非 SSE JSON（预加载或非预加载）不被误判为静默 EOF（[test_gateway_usage.py](file:///d:/Temp/lizi/zcode2api/tests/unit/test_gateway_usage.py#L139-L155)）。
+- **禁止重发与凭据安全**：
+  - `_UpstreamStreamIncomplete` 继承自 `_UpstreamStreamError`，统一使用固定提示文案 `"上游流式响应未正常结束"`，无上游原始报文与凭据泄露；集成测试（[test_gateway_monitoring.py](file:///d:/Temp/lizi/zcode2api/tests/integration/test_gateway_monitoring.py#L67-L68)）严格断言 mock 调用仅 1 次，无重试或轮换。
+
+#### 3. 一致性（Consistency）
+- **监控与账号结果单次写入**：
+  - 异常触发时均调用 `up.finish_result(False, ...)` 与 [`reqlog.finish_error(..., status=up.resp.status_code)`](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1164)，准确记录实际 HTTP 200 状态码与耗时。
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1084-L1090)：`finish_result` 内部清空 `self.on_result` 回调，保证账号终态只记录一次。
+- **取消语义与二阶思维（Second-Order Thinking）**：
+  - 客户端在静默 EOF 错误帧输出时断开（`CancelledError`），因失败终态已先行通过 `finish_result` 和 `reqlog.finish_error` 确认，不会被 499 客户端断开覆盖（[test_gateway_usage.py](file:///d:/Temp/lizi/zcode2api/tests/unit/test_gateway_usage.py#L118-L136) 覆盖）；终态前的客户端主动断开仍保持 499 语义。
+- **资源释放栅栏（RAII / 幂等）**：
+  - [app/routes/gateway.py](file:///d:/Temp/lizi/zcode2api/app/routes/gateway.py#L1091-L1104, L1175)：`finally: await up.close()` 保证无论正常、静默 EOF 还是中途取消，连接上下文 `cm` 与并发槽位 `on_close()` 均幂等释放一次。
+
+---
+
+### 三、 架构设计原则符合度
+
+1. **减法与复用（Subtraction & Reuse）**：
+   - `_UpstreamStreamIncomplete` 直接继承现有的 `_UpstreamStreamError`，完全复用现有流异常捕获、错误帧输出、监控上报和资源释放逻辑，无新增分支链路。
+   - 重构 `_extract_sse_line_event` 代替原本专用的 `_extract_sse_line_usage`，将事件提取、错误校验和 usage 解析合流。
+2. **栅栏（Fencing）**：
+   - 在流正常结束位置设置显式栅栏（`if not completed ... raise _UpstreamStreamIncomplete()`），彻底堵死上游静默 EOF 穿透为客户端 HTTP 200 流式成功的漏洞。
+3. **可证伪性（Falsifiability）**：
+   - 包含反例重现证据（`reproduction.log` 记录了原基线在 18 个截断测试中的红灯），并通过单元与集成测试形成可验证闭环。
+
+---
+
+### 四、 验收范围与局限声明
+
+- **覆盖范围**：本验收依据完整的 git diff、关联核心源码片段以及隔离环境下的 206 项自动化测试通过日志（含合成流单元测试与本地 FastAPI Mock 服务集成测试）。
+- **局限声明**：未连接实际生产环境、未访问实际 VPS，未向智谱 GLM-5.3-Flash 真实上游发起网络调用。本轮不包含 Git 提交、推送或部署操作。OpenSpec 变更中 3.2 任务已具备达成条件。

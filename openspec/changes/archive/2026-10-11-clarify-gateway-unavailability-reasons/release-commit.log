@@ -1,0 +1,5 @@
+[main 82a355f] fix(gateway): 区分账号不可用原因与重试建议
+ 11 files changed, 907 insertions(+), 40 deletions(-)
+ create mode 100644 tests/integration/test_gateway_unavailability.py
+ create mode 100644 tests/unit/test_selection_evidence.py
+ create mode 100644 tests/unit/test_unavailability_result.py

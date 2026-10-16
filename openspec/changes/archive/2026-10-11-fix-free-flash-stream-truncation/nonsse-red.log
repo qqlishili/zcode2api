@@ -1,0 +1,32 @@
+..FFFF                                                                   [100%]
+================================== FAILURES ===================================
+___________ test_non_sse_json_does_not_require_terminal[chat-False] ___________
+tests\unit\test_gateway_usage.py:147: in test_non_sse_json_does_not_require_terminal
+    assert (response.encode() == raw if protocol == "messages" else
+E   assert False
+---------------------------- Captured stdout call -----------------------------
+  [31m<!>[0m [90merror[0m  上游流式响应未正常结束
+___________ test_non_sse_json_does_not_require_terminal[chat-True] ____________
+tests\unit\test_gateway_usage.py:147: in test_non_sse_json_does_not_require_terminal
+    assert (response.encode() == raw if protocol == "messages" else
+E   assert False
+---------------------------- Captured stdout call -----------------------------
+  [31m<!>[0m [90merror[0m  上游流式响应未正常结束
+________ test_non_sse_json_does_not_require_terminal[responses-False] _________
+tests\unit\test_gateway_usage.py:147: in test_non_sse_json_does_not_require_terminal
+    assert (response.encode() == raw if protocol == "messages" else
+E   assert False
+---------------------------- Captured stdout call -----------------------------
+  [31m<!>[0m [90merror[0m  上游流式响应未正常结束
+_________ test_non_sse_json_does_not_require_terminal[responses-True] _________
+tests\unit\test_gateway_usage.py:147: in test_non_sse_json_does_not_require_terminal
+    assert (response.encode() == raw if protocol == "messages" else
+E   assert False
+---------------------------- Captured stdout call -----------------------------
+  [31m<!>[0m [90merror[0m  上游流式响应未正常结束
+=========================== short test summary info ===========================
+FAILED tests/unit/test_gateway_usage.py::test_non_sse_json_does_not_require_terminal[chat-False]
+FAILED tests/unit/test_gateway_usage.py::test_non_sse_json_does_not_require_terminal[chat-True]
+FAILED tests/unit/test_gateway_usage.py::test_non_sse_json_does_not_require_terminal[responses-False]
+FAILED tests/unit/test_gateway_usage.py::test_non_sse_json_does_not_require_terminal[responses-True]
+4 failed, 2 passed in 0.59s

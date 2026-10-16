@@ -1,0 +1,63 @@
+{
+  "mode": "index",
+  "branch": "main",
+  "head": "299faab762cf17d2a9560a92fd9c7fa3019fe843",
+  "files": [
+    {
+      "path": "app/models.py",
+      "sha256": "39216f4d0849dc7dd25bdd083a44707370d2385290604b32937c7a27aef12cae",
+      "matches_tested": true
+    },
+    {
+      "path": "app/store.py",
+      "sha256": "874258435061a050b9d779b4b4944b52749b4af2832475ca22af14d6b10335a0",
+      "matches_tested": true
+    },
+    {
+      "path": "app/routes/gateway.py",
+      "sha256": "ef257114d3b7dea79d9eda55c63f49075abaea0713bcd1c6ea8353630d7fa3e4",
+      "matches_tested": true
+    },
+    {
+      "path": "app/reqlog.py",
+      "sha256": "ad4a565629ca7fbf529a47329ea8965ecffe84d184f2ca21f1fbd45467a6fcfc",
+      "matches_tested": true
+    },
+    {
+      "path": "docs/development/04-api-spec.md",
+      "sha256": "382faecefe6b776472c354d4438944f3a4e14a822effc1038339b34bf5fdac50",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/integration/test_gateway_unavailability.py",
+      "sha256": "a1c2d84a0ad419a7b06898336460360a17ad7b16fe3ff090b8edddc90d5e1aa2",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/integration/test_gateway_monitoring.py",
+      "sha256": "d874d45ad605a06dac50a51a4e056b74a91141bdb71acf4325b13dc42af9a4c6",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/unit/test_selection_evidence.py",
+      "sha256": "5a2869334b1c12553e1b06ef37860228bb315b212803554d8d460d769b57041e",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/unit/test_unavailability_result.py",
+      "sha256": "a322ed25e516918486031474b4bfba35df443fd214ff23444d4130e0c513a4c1",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/unit/test_reqlog.py",
+      "sha256": "4a5c21770459d3a24bbad6e55172b43268b498336c1d66ce03cce20f5ae46d4d",
+      "matches_tested": true
+    },
+    {
+      "path": "tests/unit/test_regression_baseline.py",
+      "sha256": "d1f6d280a1da3265f259e6578894f7e0d1c0c717f841c8e16e50a77817162692",
+      "matches_tested": true
+    }
+  ],
+  "protected_baseline": "6 matched"
+}

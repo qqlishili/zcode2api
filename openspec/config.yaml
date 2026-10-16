@@ -1,0 +1,38 @@
+schema: spec-driven
+
+# Project context
+context: |
+  ZCode 账号运营 + 网关一体机（zcode2api / zcode-hub）。
+  技术栈: Python >=3.11，uv 管理依赖（uv.lock）；核心包 app/，入口 cli.py，前端 frontend/。
+  测试: pytest（asyncio_mode=auto，tests/；integration=Mock 上游集成用例，e2e=compose 层端到端）。
+  约定: 文档与提交为中文，规范动宾式提交；许可证 AGPL-3.0-only。
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

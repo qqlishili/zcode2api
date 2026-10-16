@@ -1,0 +1,328 @@
+FFFFFFFFF                                                                [100%]
+================================== FAILURES ===================================
+____________ test_disabled_during_upstream_response[True-messages] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000019164502120>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x000001916461D950>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019164655E00>
+endpoint = 'messages', stream = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4770ed91988b4d55[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [33m[~][0m [90m4770ed91988b4d55[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m4770ed91988b4d55[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+________ test_disabled_during_upstream_response[True-chat/completions] ________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000191647D9450>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x0000019164556E90>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001916472A360>
+endpoint = 'chat/completions', stream = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m3af408e400778f29[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [33m[~][0m [90m3af408e400778f29[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90m3af408e400778f29[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+___________ test_disabled_during_upstream_response[True-responses] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000191648649D0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x00000191648655B0>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019164871D50>
+endpoint = 'responses', stream = True
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me6e135989e052158[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [33m[~][0m [90me6e135989e052158[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90me6e135989e052158[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+___________ test_disabled_during_upstream_response[False-messages] ____________
+
+gateway_client = (<httpx.AsyncClient object at 0x00000191649489E0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x0000019164866520>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019164869D30>
+endpoint = 'messages', stream = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma15e95045762174f[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90ma15e95045762174f[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90ma15e95045762174f[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_______ test_disabled_during_upstream_response[False-chat/completions] ________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000019164872550>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x00000191648F9130>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019164688650>
+endpoint = 'chat/completions', stream = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma724e04924e47089[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90ma724e04924e47089[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90ma724e04924e47089[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+___________ test_disabled_during_upstream_response[False-responses] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x0000019164857980>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>)
+fresh_app = <app.store.Store object at 0x0000019164D48270>
+mock_server = (<tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x00000191631E9160>, 10221)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000019164767EE0>
+endpoint = 'responses', stream = False
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    async def test_disabled_during_upstream_response(gateway_client, fresh_app, mock_server, monkeypatch, endpoint, stream):
+        import json
+        from fastapi import Response
+        from fastapi.routing import APIRoute
+        from app import reqlog, settings
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        async def upstream():
+            account.enabled = False
+            return Response(json.dumps({"code": "1302", "message": "fixture"}),
+                            status_code=429, media_type="application/json")
+    
+        mock, port = mock_server
+        monkeypatch.setattr(mock.router, "routes", mock.router.routes + [APIRoute("/barrier", upstream, methods=["POST"])])
+        monkeypatch.setitem(settings.UPSTREAM, "zai", f"http://127.0.0.1:{port}/barrier")
+        monkeypatch.setattr(settings, "RETRY_429_TIMES", 0)
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\integration\test_gateway_unavailability.py:360: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mce28535a0a9d23a7[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [33m[~][0m [90mce28535a0a9d23a7[0m �˺� t 429 ���� 0 �κľ����л���һ�����˺ű��ֿ��ã�
+  [31m<!>[0m [90mce28535a0a9d23a7[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_ test_same_observed_hard_barrier_blocks_temporary_retry[disabled-account_disabled] _
+
+fresh_app = <app.store.Store object at 0x0000019164D91F20>, state = 'disabled'
+reason = 'account_disabled'
+
+    @pytest.mark.parametrize("state,reason", [("disabled", "account_disabled"),
+        ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    def test_same_observed_hard_barrier_blocks_temporary_retry(fresh_app, state, reason):
+        from app.routes.gateway import _AccountFailure
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        account.status = state
+        failure = _AccountFailure("upstream_rate_limited", "upstream", state_code=reason)
+        error, _ = result(fresh_app, {account.id: failure})
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\unit\test_unavailability_result.py:158: AssertionError
+_ test_same_observed_hard_barrier_blocks_temporary_retry[invalid-credential_invalid] _
+
+fresh_app = <app.store.Store object at 0x0000019164D40350>, state = 'invalid'
+reason = 'credential_invalid'
+
+    @pytest.mark.parametrize("state,reason", [("disabled", "account_disabled"),
+        ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    def test_same_observed_hard_barrier_blocks_temporary_retry(fresh_app, state, reason):
+        from app.routes.gateway import _AccountFailure
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        account.status = state
+        failure = _AccountFailure("upstream_rate_limited", "upstream", state_code=reason)
+        error, _ = result(fresh_app, {account.id: failure})
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\unit\test_unavailability_result.py:158: AssertionError
+_ test_same_observed_hard_barrier_blocks_temporary_retry[exhausted-quota_exhausted] _
+
+fresh_app = <app.store.Store object at 0x0000019164873D50>, state = 'exhausted'
+reason = 'quota_exhausted'
+
+    @pytest.mark.parametrize("state,reason", [("disabled", "account_disabled"),
+        ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    def test_same_observed_hard_barrier_blocks_temporary_retry(fresh_app, state, reason):
+        from app.routes.gateway import _AccountFailure
+        from tests.conftest import seed_account
+    
+        account = seed_account(fresh_app, "barrier.fixture.sig")
+        account.status = state
+        failure = _AccountFailure("upstream_rate_limited", "upstream", state_code=reason)
+        error, _ = result(fresh_app, {account.id: failure})
+>       assert error["retryable"] is False
+E       assert True is False
+
+tests\unit\test_unavailability_result.py:158: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[True-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[True-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[True-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[False-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[False-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_disabled_during_upstream_response[False-responses]
+FAILED tests/unit/test_unavailability_result.py::test_same_observed_hard_barrier_blocks_temporary_retry[disabled-account_disabled]
+FAILED tests/unit/test_unavailability_result.py::test_same_observed_hard_barrier_blocks_temporary_retry[invalid-credential_invalid]
+FAILED tests/unit/test_unavailability_result.py::test_same_observed_hard_barrier_blocks_temporary_retry[exhausted-quota_exhausted]
+9 failed, 79 deselected in 3.07s

@@ -1,0 +1,643 @@
+仅做只读文本审查，严禁调用任何工具。以下提供实际方案、源码和脱敏证据，足够完成本次方案审查。不要尝试读取路径、运行命令或修改文件。中文输出不超过1200字，以 VERDICT: PASS 或 FIX-FIRST 开头。检查三档原值、默认、原始输入冲突/关闭/预算校验、pi范围、回归与可逆策略；发现阻断必须给具体依据。声明仅审查所提供证据。
+
+文件 proposal.md
+# Proposal
+
+## Why
+
+免费 GLM-5.3-Flash 仅提供 low/high/max；当前网关折叠其他档位、按预算推算并允许关闭，pi 默认发送预算，导致用户选择与上游请求不一致。
+
+## What Changes
+
+- **BREAKING**：三个接口仅接受明确的 low/high/max，非法档位、关闭请求、预算独立请求在选号和上游调用前返回 400。
+- 保留合法档位原值；省略参数沿用上游默认；删除预算推算和不可达的其他模型思考分支。
+- 仅为 pi 的 zcode/GLM-5.3-Flash 配置三档映射及 adaptive thinking，不改 pi 源码或其他模型。
+- 复用现有转换、错误出口和测试夹具，仅补必要 API 契约。
+
+## Capabilities
+
+### New Capabilities
+
+- `free-flash-thinking-levels`：三协议与 pi 的免费 Flash 思考等级契约。
+
+### Modified Capabilities
+
+无。当前主规范目录未建立相关能力。
+
+## Impact
+
+涉及 app/openai_compat.py、app/routes/gateway.py、关联单元/集成测试、docs/development/04-api-spec.md 与私有 pi 模型配置。保留开始前五个未提交文件中的静默截断修复；不新增依赖，不提交、推送或部署。本地 OpenSpec 保持忽略，审查材料不含真实凭据或服务地址。
+
+
+文件 design.md
+# Design
+
+## Context
+
+见 proposal.md。Chat 与 Responses 已共用 _apply_reasoning_params；网关固定免费模型后再运行多模型归一器，预算和非法档位在此被静默折叠。pi 1.0.4 已通过真实 CLI + localhost SSE 夹具验证模型级映射可用。
+
+## Goals / Non-Goals
+
+复用现有转换与参数错误出口。仅调整思考输入契约和 pi 目标模型项，不新增设置或依赖、不改流转换器，不修改 pi 源码；保留先前静默截断差分。
+
+## Decisions
+
+1. 将现有 _apply_reasoning_params 改为返回参数错误或成功：先检查原始请求所有已支持 effort 字段、thinking/enable_thinking，再生成 Anthropic 参数。Chat/Responses 传播其错误，Messages 在 _normalize_body 前复用。这样在字段被覆盖前发现非法或冲突输入，无需新增三份校验器或异常框架。
+2. effort 仅接受精确 low/high/max；多个来源相同可复用，冲突拒绝。显式关闭无论优先级均拒绝；非法参数形状拒绝。enabled/adaptive 可在没有 effort 时沿用默认；有效 effort 配预算时移除预算，只有预算时拒绝。不再猜测最接近档位。
+3. 删除 _normalize_thinking_for_model 与其多模型常量；免费模型固定逻辑和其他规范化保持。不新增多模型矩阵或配置中心。
+4. pi 目标模型项配置 off/minimal/medium/xhigh=null，low/high/max 原值映射，compat.forceAdaptiveThinking=true。兼容字段合并保留，其他字段和 settings 逐项比对。使用模型项验证的隔离复制，不向真实服务发测试请求，不输出凭据。
+
+## Risks / Trade-offs
+
+- 老客户端继续只发预算会得到 400 → 先对齐 pi，再收紧网关；API 文档一段说明迁移。
+- pi CLI 会把某些强制非法 flag 钳到合法值 → 明确这是客户端行为；网关只能拒绝实际收到的非法参数，UI 可用档位通过实际 pi 注册表核验。
+- 同文件存在先前修复 → baseline.patch 保存本轮前差分，自审增量，不整文件回退。
+- 私有配置在工作区之外 → 修改需工具权限允许；私有备份留在 pi 配置旁，不进入项目。写前复核文件未被并发修改，按现有 JSON 格式合并。
+
+## Migration Plan
+
+Antigravity CLI 只读审查方案后，先备份并对齐 pi 模型项，以 localhost 实际 CLI 验证；再用红绿反例落实网关契约。最小文档更新后运行受影响隔离回归与 Ruff，独立 Antigravity CLI 验收。通过后完成 OpenSpec 任务，不自动 Git 发布或重启 VPS。回滚仅恢复本轮目标字段与代码增量，保留其他用户改动。
+
+
+文件 tasks.md
+# Tasks
+
+## 1. 方案审查
+
+- [ ] 1.1 严格校验 OpenSpec，Antigravity CLI 只读审查实际方案与源码，修复阻断意见并保存结论。
+
+## 2. pi 配置
+
+- [ ] 2.1 备份并仅合并 zcode/GLM-5.3-Flash 模型项；实际 pi 注册表和 localhost CLI 验证三档、成功内容、默认 high、其他私有配置不变，保存脱敏报告。
+
+## 3. 网关契约
+
+- [ ] 3.1 添加三协议合法/默认/非法/关闭/预算/冲突反例，取得原实现失败证据。
+- [ ] 3.2 复用思考映射校验原始输入，删除预算推算和多模型归一分支，使三协议测试转绿，非法输入无选号和上游调用。
+- [ ] 3.3 API 文档仅补三档字段和 400 契约；核对差分保留原有静默截断说明，无大面积状态扩写。
+
+## 4. 验收
+
+- [ ] 4.1 Ruff、受影响单元与 TCP 集成回归通过，验证流内错误/静默 EOF/取消/资源释放未回退，核对本轮增量与私密信息栅栏。
+- [ ] 4.2 独立 Antigravity CLI 只读验收实际源码、差分、OpenSpec 与运行证据，修复问题后完成任务并给出 OpenSpec 验证结论。
+
+
+文件 specs/free-flash-thinking-levels/spec.md
+# Spec Delta
+
+## Purpose
+
+约束免费 GLM-5.3-Flash 的三协议思考参数，使用户明确选择的 low/high/max 保持到上游，省略参数遵循上游默认，并通过 pi 的本地模型配置使可选档位与网关契约一致，避免关闭、折叠和预算猜测。
+
+## ADDED Requirements
+
+### Requirement: 三协议保持合法思考档位
+
+网关 SHALL 将 Chat 的 reasoning_effort、Responses 的 reasoning.effort、Messages 的 output_config.effort 中明确给出的 low/high/max 原值传为上游 output_config.effort，且 thinking.type 为 enabled。既有扩展字段使用同一契约；同一请求的多个 effort 必须相同。未给出 effort 时 SHALL 不生成 effort；未给出任何思考参数时 SHALL 不生成 thinking。
+
+#### Scenario: 明确合法档位
+- **WHEN** 三个接口分别收到 low/high/max
+- **THEN** 上游收到同一档位，max 不被降档
+
+#### Scenario: 使用上游默认
+- **WHEN** 请求没有思考参数，或仅明确启用 enabled/adaptive
+- **THEN** 网关不生成 effort，未指定 thinking 时也不生成 thinking
+
+#### Scenario: 同档扩展参数和预算
+- **WHEN** 多处明确 effort 相同，且可同时携带 budget_tokens
+- **THEN** 合法 effort 保留，budget_tokens 移除，不用于猜测档位
+
+### Requirement: 不支持的思考请求在上游前拒绝
+
+网关 SHALL 对显式关闭、非 low/high/max 的 effort（含空值或错误类型）、冲突 effort、非法思考参数形状和仅 budget_tokens 无明确 effort 返回 HTTP 400，沿用现有 invalid_request_error 格式，错误信息列出 low/high/max。拒绝发生在选号和上游调用前，不消耗账号或免费额度。
+
+#### Scenario: 非法档位
+- **WHEN** 任一接口收到 minimal/medium/xhigh/none/off/disabled、未知字符串或非字符串 effort
+- **THEN** 返回 400 并列出合法档位，没有上游调用
+
+#### Scenario: 关闭或仅预算
+- **WHEN** 请求携带 enable_thinking=false、thinking.type=disabled，或没有 effort 的 budget_tokens
+- **THEN** 返回 400，没有上游调用
+
+#### Scenario: 相互冲突的参数
+- **WHEN** 原始请求含不同 effort，或合法 effort 同时要求关闭
+- **THEN** 返回 400，转换不得覆盖非法字段后放行
+
+### Requirement: pi 模型配置对齐三档
+
+pi 的 zcode/GLM-5.3-Flash 模型项 SHALL 配置 thinkingLevelMap 仅启用 low/high/max，以及 compat.forceAdaptiveThinking=true；保留其他 provider、模型字段与已保存 high 选择。实际 CLI 出站 SHALL 携带 adaptive thinking 与对应 effort；证明请求确实完成。配置与私密备份 SHALL 不进入公开仓库。此契约限制模型可用选项，不承诺修改 pi CLI 对强制非法 flag 的自身钳制行为。
+
+#### Scenario: 三档真实 CLI 请求
+- **WHEN** 隔离配置和修改后的真实模型项分别通过实际 pi CLI 请求 low/high/max
+- **THEN** localhost 接收端收到对应 effort、没有 budget_tokens，CLI 收到完整成功内容
+
+#### Scenario: 保护其他私有配置
+- **WHEN** 合并模型配置
+- **THEN** 其他模型、密钥、地址与 settings 内容不变，脱敏结构核对通过
+
+### Requirement: 保留既有网关生命周期
+
+思考参数修改 SHALL 保持正常输出、流内错误、静默 EOF、客户端取消、账号结果及资源释放行为，不将失败误报为成功。
+
+#### Scenario: 关联回归
+- **WHEN** 运行既有流错误、静默 EOF、取消和正常终态测试
+- **THEN** 原有终态及资源释放断言保持通过
+
+
+当前 _apply_reasoning_params 源码
+def _apply_reasoning_params(payload: dict, body: dict) -> None:
+    """将 OpenAI 兼容端的 reasoning_effort / reasoning / thinking / output_config 映射到 Anthropic 体。"""
+    # 1) 直接透传客户端显式带的 thinking / output_config 字典
+    if isinstance(payload.get("thinking"), dict):
+        body["thinking"] = dict(payload["thinking"])
+    elif isinstance(payload.get("enable_thinking"), bool):
+        body["thinking"] = {"type": "enabled" if payload["enable_thinking"] else "disabled"}
+
+    if isinstance(payload.get("output_config"), dict):
+        body["output_config"] = dict(payload["output_config"])
+
+    # 2) OpenAI reasoning_effort 或 reasoning.effort
+    effort = payload.get("reasoning_effort")
+    if effort is None and isinstance(payload.get("reasoning"), dict):
+        effort = payload["reasoning"].get("effort")
+    if isinstance(effort, str) and effort.strip():
+        eff_low = effort.strip().lower()
+        if eff_low in ("disabled", "none", "off"):
+            body["thinking"] = {"type": "disabled"}
+            if isinstance(body.get("output_config"), dict):
+                body["output_config"].pop("effort", None)
+                if not body["output_config"]:
+                    body.pop("output_config", None)
+        elif eff_low in ("minimal", "low", "medium", "high", "xhigh", "max"):
+            body["thinking"] = {"type": "enabled"}
+            out_cfg = dict(body.get("output_config")) if isinstance(body.get("output_config"), dict) else {}
+            out_cfg["effort"] = eff_low
+            body["output_config"] = out_cfg
+        elif eff_low in ("enabled", "adaptive", "auto"):
+            body["thinking"] = {"type": "enabled"}
+
+
+def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
+    """OpenAI 请求体 → Anthropic messages 体。非法时返回 (None, 错误信息)。"""
+    model = payload.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return None, "必须提供 model 参数"
+    messages = payload.get("messages")
+
+当前网关归一器源码
+
+# 对齐官方 ZCode zcode-builtin.json (rev 30) 与 model-execution.ts 的模型思考等级矩阵
+_EFFORT_MODELS_53 = {"GLM-5.3", "GLM-5.3-FLASH"}
+_EFFORT_MODELS_52 = {"GLM-5.2"}
+
+
+def _detect_provider(body: dict, headers) -> str:
+    model = body.get("model") or ""
+    if model.startswith("bigmodel/") or headers.get("x-provider") == "bigmodel":
+        return "bigmodel"
+    return "zai"
+
+
+def _normalize_thinking_for_model(body: dict, model: str | None) -> None:
+    """按官方 ZCode zcode-builtin.json 思考契约归一化 thinking 与 output_config.effort。
+
+    - GLM-5.3 / GLM-5.3-Flash：thinking_mode="effort"，仅支持 ["low", "high", "max"]
+      （客户端若发 "medium"/"minimal"/"xhigh" 或 budget_tokens，自动折叠到合法档位）
+    - GLM-5.2：thinking_mode="effort"，仅支持 ["disabled", "high", "max"]
+    - 其它 GLM 模型（GLM-5-Turbo / GLM-5.1 / GLM-4.7）：thinking_mode="enable"，
+      不支持 output_config.effort，剥离 effort 并转为 thinking.type = enabled/disabled。
+    """
+    if not isinstance(model, str):
+        return
+    model_up = model.strip().upper()
+    if not model_up.startswith("GLM-"):
+        return
+
+    thinking = body.get("thinking")
+    out_cfg = body.get("output_config")
+    effort: str | None = None
+    if isinstance(out_cfg, dict) and isinstance(out_cfg.get("effort"), str):
+        effort = out_cfg["effort"].strip().lower()
+
+    # Anthropic 标准 budget_tokens → 转换为 effort 档位并移除 budget_tokens（GLM 上游不支持 budget_tokens）
+    if isinstance(thinking, dict) and "budget_tokens" in thinking:
+        raw_bt = thinking.pop("budget_tokens", None)
+        try:
+            bt = int(float(raw_bt)) if raw_bt is not None and not isinstance(raw_bt, bool) else 0
+        except (TypeError, ValueError):
+            bt = 0
+        if effort is None and bt > 0:
+            if bt < 8192:
+                effort = "low"
+            elif bt <= 24576:
+                effort = "high"
+            else:
+                effort = "max"
+        if thinking.get("type") not in ("enabled", "disabled"):
+            thinking["type"] = "enabled"
+
+    if model_up in _EFFORT_MODELS_53:
+        if effort is not None:
+            if effort in ("disabled", "off"):
+                body["thinking"] = {"type": "disabled"}
+                if isinstance(out_cfg, dict):
+                    out_cfg.pop("effort", None)
+                    if not out_cfg:
+                        body.pop("output_config", None)
+                return
+            if effort in ("minimal", "none", "low"):
+                mapped = "low"
+            elif effort in ("xhigh", "max"):
+                mapped = "max"
+            else:
+                # medium / high / enabled / adaptive 统一归并到官方支持的 high
+                mapped = "high"
+            new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+            new_cfg["effort"] = mapped
+            body["output_config"] = new_cfg
+            body["thinking"] = {"type": "enabled"}
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            if t_type == "disabled":
+                body["thinking"] = {"type": "disabled"}
+            elif t_type in ("enabled", "adaptive"):
+                body["thinking"] = {"type": "enabled"}
+    elif model_up in _EFFORT_MODELS_52:
+        if effort is not None:
+            if effort in ("disabled", "none", "off"):
+                body["thinking"] = {"type": "disabled"}
+                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+                new_cfg["effort"] = "disabled"
+                body["output_config"] = new_cfg
+            else:
+                mapped = "max" if effort in ("xhigh", "max") else "high"
+                new_cfg = dict(out_cfg) if isinstance(out_cfg, dict) else {}
+                new_cfg["effort"] = mapped
+                body["output_config"] = new_cfg
+                body["thinking"] = {"type": "enabled"}
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
+    else:
+        # GLM-5-Turbo / GLM-5.1 / GLM-4.7：仅支持 thinking: {type: enabled|disabled}，剥离 output_config.effort
+        if isinstance(out_cfg, dict) and "effort" in out_cfg:
+            out_cfg = dict(out_cfg)
+            out_cfg.pop("effort", None)
+            if out_cfg:
+                body["output_config"] = out_cfg
+            else:
+                body.pop("output_config", None)
+        if effort is not None and not isinstance(thinking, dict):
+            body["thinking"] = {
+                "type": "disabled" if effort in ("disabled", "none", "off") else "enabled"
+            }
+        elif isinstance(thinking, dict):
+            t_type = str(thinking.get("type") or "").lower()
+            body["thinking"] = {"type": "disabled" if t_type == "disabled" else "enabled"}
+
+
+def _normalize_body(body: dict) -> dict:
+    # 纯免费赠送池模式：将任意外部请求模型名统一归一化为 DEFAULT_MODEL（GLM-5.3-Flash），
+    # 防止客户端传入 claude-*/gpt-*/glm-5.2 等触发上游 3006 model not allowed 或误耗非免费池窗口
+    model = constants.DEFAULT_MODEL
+    body["model"] = model
+
+    # 上游对 max_tokens 有硬校验（400 code 1210），钳制到合法区间并记录钳制动作
+    raw = body.get("max_tokens")
+    if raw is not None and not isinstance(raw, bool):
+        try:
+            mt = int(float(raw))
+        except (TypeError, ValueError):
+            mt = None
+        if mt is not None:
+            clamped = max(1, min(mt, constants.MAX_TOKENS_LIMIT))
+            if clamped != mt:
+                logs.warn("gateway", f"max_tokens {mt} 超出上游范围 [1,{constants.MAX_TOKENS_LIMIT}]，钳制为 {clamped}")
+            body["max_tokens"] = clamped
+
+    _normalize_thinking_for_model(body, model)
+
+    messages = body.get("messages")
+    if isinstance(messages, list):
+        bridged = []
+        for msg in messages:
+            if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                bridged.append({**msg, "content": [{"type": "text", "text": msg["content"]}]})
+            else:
+                bridged.append(msg)
+        body["messages"] = bridged
+    return body
+
+
+当前 Messages 和 Chat 入口
+
+
+@router.post("/v1/messages", dependencies=[Depends(verify_gateway_key)])
+async def messages(request: Request):
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse({"error": {"message": "请求体不是合法 JSON", "type": "invalid_request"}}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"error": {"message": "请求体必须是 JSON 对象", "type": "invalid_request_error"}},
+            status_code=400,
+        )
+
+    incoming_headers = dict(request.headers)
+    provider = _detect_provider(body, request.headers)
+    body = _normalize_body(body)
+    # 验证码页面由本服务托管，端口取实际请求端口（兼容任意启动端口）
+    port = request.url.port or settings.PORT
+
+    req_id = secrets.token_hex(8)
+    logs.req(req_id, str(body.get("model") or "-"), bool(body.get("stream")), _last_user_text(body))
+    reqlog.begin(req_id, "messages", str(body.get("model") or "-"),
+                 bool(body.get("stream")), _last_user_text(body))
+
+    try:
+        result = await _dispatch(req_id, body, incoming_headers, port, provider)
+    except asyncio.CancelledError:
+        # 客户端在调度期间断开（429 重试/验证码等待可达数分钟）——CancelError
+        # 是 BaseException，不兜底会让监控条目永久滞留「进行中」
+        reqlog.finish_error(req_id, "客户端断开", status=499)
+        raise
+    except Exception as err:  # noqa: BLE001 - 调度层意外异常也要收口监控条目
+        reqlog.finish_error(req_id, f"网关内部错误: {err}", status=500)
+        return JSONResponse(
+            {"error": {"message": "网关内部错误", "type": "internal_error"}},
+            status_code=500,
+        )
+    if isinstance(result, _Upstream):
+        # dispatch 返回与流式生成器启动之间的取消窗口：兜底关闭释放并发槽位
+        try:
+            return result.to_streaming(req_id)
+        except asyncio.CancelledError:
+            await result.close()
+            raise
+    return result
+
+
+@router.post("/v1/chat/completions", dependencies=[Depends(verify_gateway_key)])
+async def chat_completions(request: Request):
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse({"error": {"message": "请求体不是合法 JSON", "type": "invalid_request_error"}}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": {"message": "请求体必须是 JSON 对象", "type": "invalid_request_error"}}, status_code=400)
+
+    body, err = openai_to_anthropic(payload)
+    if err or body is None:
+        return JSONResponse({"error": {"message": err or "请求体不合法", "type": "invalid_request_error"}}, status_code=400)
+
+    incoming_headers = dict(request.headers)
+    provider = _detect_provider(body, request.headers)
+    body = _normalize_body(body)
+    port = request.url.port or settings.PORT
+
+
+当前 Responses 入口
+@router.post("/v1/responses", dependencies=[Depends(verify_gateway_key)])
+async def responses_endpoint(request: Request):
+    """OpenAI Responses API 兼容端点（/v1/responses ↔ Anthropic /v1/messages 直转）。"""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return JSONResponse({"error": {"message": "请求体不是合法 JSON", "type": "invalid_request_error"}}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"error": {"message": "请求体必须是 JSON 对象", "type": "invalid_request_error"}}, status_code=400)
+
+    body, err = responses_to_anthropic(payload)
+    if err or body is None:
+        return JSONResponse({"error": {"message": err or "请求体不合法", "type": "invalid_request_error"}}, status_code=400)
+
+    incoming_headers = dict(request.headers)
+    provider = _detect_provider(body, request.headers)
+    body = _normalize_body(body)
+    port = request.url.port or settings.PORT
+
+    effort = None
+    out_cfg = body.get("output_config")
+    if isinstance(out_cfg, dict) and isinstance(out_cfg.get("effort"), str):
+        effort = out_cfg["effort"]
+
+    req_id = secrets.token_hex(8)
+    logs.req(req_id, str(body.get("model") or "-"), bool(payload.get("stream")), _last_user_text(body))
+    reqlog.begin(req_id, "responses", str(body.get("model") or "-"),
+                 bool(payload.get("stream")), _last_user_text(body))
+
+    try:
+        result = await _dispatch(req_id, body, incoming_headers, port, provider)
+
+当前两转换器调用
+    elif isinstance(stop, list) and stop:
+        body["stop_sequences"] = [str(s) for s in stop]
+    if payload.get("stream"):
+        body["stream"] = True
+
+    _apply_reasoning_params(payload, body)
+
+    user_tag = payload.get("user")
+    if isinstance(user_tag, str) and user_tag.strip():
+        meta = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
+            body["temperature"] = float(payload["temperature"])
+        if payload.get("top_p") is not None:
+            body["top_p"] = float(payload["top_p"])
+    except (TypeError, ValueError):
+        pass
+
+    if payload.get("stream"):
+        body["stream"] = True
+
+    _apply_reasoning_params(payload, body)
+
+    # 会话亲和：优先取 prompt_cache_key / conversation / previous_response_id / user
+    for sk in ("prompt_cache_key", "conversation", "previous_response_id", "user"):
+        sval = payload.get(sk)
+
+真实 pi CLI 隔离验证脱敏报告
+{
+  "version": "1.0.4",
+  "currentApi": "anthropic-messages",
+  "savedThinking": "high",
+  "piAvailableLevels": [
+    "low",
+    "high",
+    "max"
+  ],
+  "clampedLevels": {
+    "off": "low",
+    "minimal": "low",
+    "low": "low",
+    "medium": "high",
+    "high": "high",
+    "xhigh": "max",
+    "max": "max"
+  },
+  "runs": [
+    {
+      "requested": "default",
+      "exitCode": 0,
+      "hasOK": true,
+      "stderr": "",
+      "requests": [
+        {
+          "case": "pi-cli-default",
+          "method": "POST",
+          "path": "/v1/messages?beta=true",
+          "model": "GLM-5.3-Flash",
+          "thinking": {
+            "type": "adaptive",
+            "display": "summarized"
+          },
+          "output_config": {
+            "effort": "high"
+          }
+        }
+      ]
+    },
+    {
+      "requested": "low",
+      "exitCode": 0,
+      "hasOK": true,
+      "stderr": "",
+      "requests": [
+        {
+          "case": "pi-cli-low",
+          "method": "POST",
+          "path": "/v1/messages?beta=true",
+          "model": "GLM-5.3-Flash",
+          "thinking": {
+            "type": "adaptive",
+            "display": "summarized"
+          },
+          "output_config": {
+            "effort": "low"
+          }
+        }
+      ]
+    },
+    {
+      "requested": "high",
+      "exitCode": 0,
+      "hasOK": true,
+      "stderr": "",
+      "requests": [
+        {
+          "case": "pi-cli-high",
+          "method": "POST",
+          "path": "/v1/messages?beta=true",
+          "model": "GLM-5.3-Flash",
+          "thinking": {
+            "type": "adaptive",
+            "display": "summarized"
+          },
+          "output_config": {
+            "effort": "high"
+          }
+        }
+      ]
+    },
+    {
+      "requested": "max",
+      "exitCode": 0,
+      "hasOK": true,
+      "stderr": "",
+      "requests": [
+        {
+          "case": "pi-cli-max",
+          "method": "POST",
+          "path": "/v1/messages?beta=true",
+          "model": "GLM-5.3-Flash",
+          "thinking": {
+            "type": "adaptive",
+            "display": "summarized"
+          },
+          "output_config": {
+            "effort": "max"
+          }
+        }
+      ]
+    }
+  ],
+  "modelProbe": {
+    "models": [
+      {
+        "id": "GLM-5.3-Flash",
+        "name": "GLM-5.3-Flash"
+      }
+    ]
+  },
+  "capturedRequests": [
+    {
+      "case": "web-ui-model-probe",
+      "method": "GET",
+      "path": "/v1/models"
+    },
+    {
+      "case": "pi-cli-default",
+      "method": "POST",
+      "path": "/v1/messages?beta=true",
+      "model": "GLM-5.3-Flash",
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "output_config": {
+        "effort": "high"
+      }
+    },
+    {
+      "case": "pi-cli-low",
+      "method": "POST",
+      "path": "/v1/messages?beta=true",
+      "model": "GLM-5.3-Flash",
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "output_config": {
+        "effort": "low"
+      }
+    },
+    {
+      "case": "pi-cli-high",
+      "method": "POST",
+      "path": "/v1/messages?beta=true",
+      "model": "GLM-5.3-Flash",
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "output_config": {
+        "effort": "high"
+      }
+    },
+    {
+      "case": "pi-cli-max",
+      "method": "POST",
+      "path": "/v1/messages?beta=true",
+      "model": "GLM-5.3-Flash",
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "output_config": {
+        "effort": "max"
+      }
+    }
+  ],
+  "userConfigUnchanged": [
+    {
+      "file": "models.json",
+      "unchanged": true
+    },
+    {
+      "file": "settings.json",
+      "unchanged": true
+    }
+  ]
+}
+
+补充：tests/unit/test_regression_baseline.py 旧 TestThinkingNormalization 包含 medium/minimal/xhigh 折叠、disabled 和预算推算、GLM5.2/Turbo 分支测试，实施时必须按新契约更新；既有5个未提交文件的静默截断修复必须保留。本轮不发布。

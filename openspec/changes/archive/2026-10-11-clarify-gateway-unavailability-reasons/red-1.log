@@ -1,0 +1,885 @@
+FFFFFFFFFFFFFFFFFFFFFFFF                                                 [100%]
+================================== FAILURES ===================================
+_______________ test_final_state[None-pool_empty-True-messages] _______________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012491D30>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0123E51D0>
+endpoint = 'messages', stream = True, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m9df5e459bf7f7f5b[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m9df5e459bf7f7f5b[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+___________ test_final_state[None-pool_empty-True-chat/completions] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012773250>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012772710>
+endpoint = 'chat/completions', stream = True, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mf281401ed9a58a29[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90mf281401ed9a58a29[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______________ test_final_state[None-pool_empty-True-responses] _______________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012813B10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0127596E0>
+endpoint = 'responses', stream = True, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma9ddc3118d797188[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90ma9ddc3118d797188[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______________ test_final_state[None-pool_empty-False-messages] _______________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0127583E0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0123F90F0>
+endpoint = 'messages', stream = False, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m9a09ed419b3096c1[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m9a09ed419b3096c1[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_final_state[None-pool_empty-False-chat/completions] ___________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01275BBB0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C01275D490>
+endpoint = 'chat/completions', stream = False, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mdf2bb6de8b32cd81[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90mdf2bb6de8b32cd81[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______________ test_final_state[None-pool_empty-False-responses] ______________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0112F3BF0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0128C4270>
+endpoint = 'responses', stream = False, state = None, code = 'pool_empty'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md995fa52499586c7[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90md995fa52499586c7[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_final_state[disabled-account_disabled-True-messages] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0128EE9C0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0128EE030>
+endpoint = 'messages', stream = True, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m599d4fce1b03bd53[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m599d4fce1b03bd53[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______ test_final_state[disabled-account_disabled-True-chat/completions] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0129617B0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0128B5250>
+endpoint = 'chat/completions', stream = True, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90md7016eafe6f8319b[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90md7016eafe6f8319b[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[disabled-account_disabled-True-responses] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0128B6950>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0128B6250>
+endpoint = 'responses', stream = True, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m066796594b597ed5[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m066796594b597ed5[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[disabled-account_disabled-False-messages] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012A34550>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C01276B020>
+endpoint = 'messages', stream = False, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m0473c77824eb7412[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m0473c77824eb7412[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_____ test_final_state[disabled-account_disabled-False-chat/completions] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012A846E0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C01276BF20>
+endpoint = 'chat/completions', stream = False, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m8710953f2b486d2b[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m8710953f2b486d2b[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[disabled-account_disabled-False-responses] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012A86030>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012A4AEB0>
+endpoint = 'responses', stream = False, state = 'disabled'
+code = 'account_disabled'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mee70b1ebb0d62d23[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90mee70b1ebb0d62d23[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[invalid-credential_invalid-True-messages] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012A48830>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012AB2B30>
+endpoint = 'messages', stream = True, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m7ffc8fa10eb80979[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m7ffc8fa10eb80979[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_____ test_final_state[invalid-credential_invalid-True-chat/completions] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01296FCB0>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0129D4870>
+endpoint = 'chat/completions', stream = True, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90ma03b493ffde66e94[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90ma03b493ffde66e94[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[invalid-credential_invalid-True-responses] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0113DCC80>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012A24110>
+endpoint = 'responses', stream = True, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m36459278f7cad33f[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m36459278f7cad33f[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[invalid-credential_invalid-False-messages] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0128F2A50>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012A24350>
+endpoint = 'messages', stream = False, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m41897ae221108fb4[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m41897ae221108fb4[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_____ test_final_state[invalid-credential_invalid-False-chat/completions] _____
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01287EF90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0127BA0A0>
+endpoint = 'chat/completions', stream = False, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me072e5cb35e25540[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90me072e5cb35e25540[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+________ test_final_state[invalid-credential_invalid-False-responses] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C012A26450>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0127B94F0>
+endpoint = 'responses', stream = False, state = 'invalid'
+code = 'credential_invalid'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m45d4a6e826342bb5[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m45d4a6e826342bb5[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+__________ test_final_state[exhausted-quota_exhausted-True-messages] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C0128F2F90>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0127CB6B0>
+endpoint = 'messages', stream = True, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90me65e4af6133a2041[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90me65e4af6133a2041[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+______ test_final_state[exhausted-quota_exhausted-True-chat/completions] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01287FC50>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012A807D0>
+endpoint = 'chat/completions', stream = True, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m9a4fb65e0a1cf411[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m9a4fb65e0a1cf411[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[exhausted-quota_exhausted-True-responses] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01281C950>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012B41F40>
+endpoint = 'responses', stream = True, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m4402a4301d48f177[0m  [37mGLM-5.3-Flash[0m  [90mstream[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m4402a4301d48f177[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[exhausted-quota_exhausted-False-messages] __________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01294DC10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012B15D50>
+endpoint = 'messages', stream = False, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90mec6d0df7c1e48ef3[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90mec6d0df7c1e48ef3[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_____ test_final_state[exhausted-quota_exhausted-False-chat/completions] ______
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01294D310>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C0129CDFD0>
+endpoint = 'chat/completions', stream = False, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m60e99ca5a055dd15[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m60e99ca5a055dd15[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+_________ test_final_state[exhausted-quota_exhausted-False-responses] _________
+
+gateway_client = (<httpx.AsyncClient object at 0x000001C01294DF10>, <tests.mock_upstream.server._wrap_asgi.<locals>._Wrapped object at 0x000001C011299010>)
+fresh_app = <app.store.Store object at 0x000001C012AE5010>
+endpoint = 'responses', stream = False, state = 'exhausted'
+code = 'quota_exhausted'
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("endpoint", ["messages", "chat/completions", "responses"])
+    @pytest.mark.parametrize("stream", [True, False])
+    @pytest.mark.parametrize("state,code", [(None, "pool_empty"), ("disabled", "account_disabled"),
+                                          ("invalid", "credential_invalid"), ("exhausted", "quota_exhausted")])
+    async def test_final_state(gateway_client, fresh_app, endpoint, stream, state, code):
+        from app import reqlog
+        from tests.conftest import seed_account
+    
+        reqlog.clear()
+        if state:
+            account = seed_account(fresh_app, "diag.fixture.sig", name="private-fixture")
+            account.status = state
+        client, _ = gateway_client
+        body = {"model": "GLM-5.3-Flash", "stream": stream}
+        body["input" if endpoint == "responses" else "messages"] = (
+            "fixture" if endpoint == "responses" else [{"role": "user", "content": "fixture"}])
+        response = await client.post("/v1/" + endpoint, json=body)
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["type"] == "no_available_account"
+>       assert error["code"] == code
+               ^^^^^^^^^^^^^
+E       KeyError: 'code'
+
+tests\integration\test_gateway_unavailability.py:27: KeyError
+---------------------------- Captured stdout call -----------------------------
+  [36m>>>[0m [90m1ff5d1f6bacdc763[0m  [37mGLM-5.3-Flash[0m  [90msync[0m  [90m"fixture"[0m
+  [31m<!>[0m [90m1ff5d1f6bacdc763[0m  �޿����˺� / ��Ⱦ��Ѻľ� / ��������
+=========================== short test summary info ===========================
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-True-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-True-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-True-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-False-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-False-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[None-pool_empty-False-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-True-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-True-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-True-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-False-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-False-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[disabled-account_disabled-False-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-True-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-True-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-True-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-False-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-False-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[invalid-credential_invalid-False-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-True-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-True-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-True-responses]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-False-messages]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-False-chat/completions]
+FAILED tests/integration/test_gateway_unavailability.py::test_final_state[exhausted-quota_exhausted-False-responses]

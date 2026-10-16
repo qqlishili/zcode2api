@@ -1,0 +1,6 @@
+diff --git a/tests/unit/test_regression_baseline.py b/tests/unit/test_regression_baseline.py
+index cd86667..e7888e9 100644
+--- a/tests/unit/test_regression_baseline.py
++++ b/tests/unit/test_regression_baseline.py
+@@ -604,0 +605 @@ class TestGatewayCrossChunkAnd200BusinessErrors:
++            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
