@@ -349,20 +349,23 @@ class AccountClientPool:
                 return candidate
         return None
 
-    def serviceable_ports(self, accounts) -> list[str]:
-        """当前**可服务账号**实际绑定的出口端口集合（去重保序）。
+    def serviceable_ports(self, accounts) -> list[str | None]:
+        """当前**可服务账号**实际绑定的出口目标集合（去重保序）。
 
         预热域只能来自这里：给没有可服务账号的大区/端口预热，产出的 token 无人能
         消费，却会挤占唯一求解槽并把真正要用的端口压到 sdk_failed（2026-10-13 实测
         21301 被压后 1/3 成功、同区无人压的 21303 为 3/3）。
+        显式 direct 将所有可选 Plan 账号归到 None，与 producer 和缓存键保持一致。
 
         该路径每 3 秒被补货循环调用，故意不产生 failover/离线日志。
         """
         accounts = list(accounts or ())
         if not accounts:
             return []
+        if settings.EGRESS_MODE == "direct":
+            return [None] if any(a.uses_plan_channel() and a.is_selectable() for a in accounts) else []
         registry = self.load_registry()
-        ports: list[str] = []
+        ports: list[str | None] = []
         for account in accounts:
             if not (account.uses_plan_channel() and account.is_selectable()):
                 continue

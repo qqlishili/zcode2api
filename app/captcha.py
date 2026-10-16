@@ -342,13 +342,13 @@ class CaptchaManager:
             for a in store.list_accounts("zai")
         )
 
-    def _refill_targets(self) -> list[str]:
-        """预热域 = 当前可服务账号**实际绑定**的出口端口集合。
+    def _refill_targets(self) -> list[str | None]:
+        """预热域 = 当前可服务账号**实际绑定**的出口目标集合。
 
         不再使用「每个大区首个健康端口」：那样会给没有可服务账号的大区白造 token，
         并把这些首端口压到 sdk_failed（2026-10-13 实测 21301 仅 1/3 成功，
-        同大区无人压的 21303 为 3/3、单次 6.9s）。大区本身离线时返回空集合，
-        由调度器按栅栏原则换号，而不是预热一个账号根本用不到的端口。
+        同区无人压的 21303 为 3/3、单次 6.9s）。proxy 模式大区离线时返回空集合，
+        显式 direct 则以 None 共享无代理水库，按实际缓存水位补货。
         """
         from .client_pool import account_client_pool
 

@@ -5,12 +5,14 @@
 """
 
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app import captcha as cap
 from app.captcha import CaptchaManager, _Token
+from app.models import Account
 
 JP = "http://127.0.0.1:21301"
 TW = "http://127.0.0.1:21203"
@@ -97,3 +99,62 @@ async def test_refill_single_proxy_solves_when_empty(manager, monkeypatch):
 
     assert solve.await_count == 1
     await manager.close()
+
+
+@pytest.mark.parametrize(
+    ("mode", "region", "explicit", "watermark", "targets", "scheduled"),
+    [
+        ("direct", "TW", None, "direct", [None], []),
+        ("direct", "TW", None, "empty", [None], [None]),
+        ("direct", "HK", None, "empty", [None], [None]),
+        ("direct", "TW", JP, "direct", [None], []),
+        ("proxy", "TW", None, "direct", [TW], [TW]),
+        ("proxy", "TW", None, "proxy", [TW], []),
+        ("proxy", "HK", None, "direct", [], []),
+    ],
+)
+async def test_refill_loop_uses_actual_egress_watermark(
+    manager, isolated_client_pool, monkeypatch, mode, region, explicit, watermark, targets, scheduled,
+):
+    """实际连接池与循环共享水位键：直连缓存满后停补，代理仍只看自己的缓存。"""
+    pool = isolated_client_pool
+    pool._registry_path.write_text(json.dumps({"updated_at": 1, "regions": {"TW": [TW]}}))
+    monkeypatch.setattr(cap.settings, "EGRESS_MODE", mode)
+    monkeypatch.setattr(cap.settings, "CAPTCHA_REGIONAL_POOL_MIN", 1)
+    account = Account(id="refill", name="refill", provider="zai", mode="jwt",
+                      jwt_token="fixture", assigned_region=region, proxy=explicit)
+    monkeypatch.setattr(cap.store, "list_accounts", lambda *a, **k: [account, account])
+    if watermark != "empty":
+        manager._put(_Token("watermark-fixture", "sgp", proxy=None if watermark == "direct" else TW))
+    actual = []
+    monkeypatch.setattr(manager, "_schedule_refill", lambda proxy, **kw: actual.append(proxy))
+
+    async def stop(_seconds):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(cap.asyncio, "sleep", stop)
+    with pytest.raises(asyncio.CancelledError):
+        await manager._refill_loop()
+
+    assert manager._refill_targets() == targets
+    assert actual == scheduled
+    for target in targets:
+        async with pool.operation(proxy=target) as operation:
+            assert operation.proxy == target
+    await manager.close()
+
+
+@pytest.mark.parametrize("excluded", ["disabled", "exhausted", "cooling", "key", "not-enabled"])
+def test_direct_refill_requires_selectable_plan_account(isolated_client_pool, monkeypatch, excluded):
+    monkeypatch.setattr(cap.settings, "EGRESS_MODE", "direct")
+    account = Account(id="excluded", name="excluded", provider="zai", mode="jwt",
+                      jwt_token="fixture", assigned_region="TW")
+    if excluded == "key":
+        account.mode = "apiKey"
+    elif excluded == "not-enabled":
+        account.enabled = False
+    else:
+        account.status = excluded
+        if excluded == "cooling":
+            account.cooling_until = 9e12
+    assert isolated_client_pool.serviceable_ports([account]) == []
