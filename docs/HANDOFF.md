@@ -1,11 +1,21 @@
 # zcode2api 当前进度与交接
 
 > 整理日期：2026-10-17（CST）；direct 补货修复于 **01:44** 上线，公网及补货验收至 **01:46**，服务/账号于 **01:50** 再核对，定时探活后的出口状态更新至 **01:55**。
+> 分流方案于 **02:17** 完成规划核验；02:01 / 02:17 只读复核 VPS，未重启或发模型/领取请求。
 > 本页是当前进度入口。运行快照、已完成验证、未完成任务分别记录；逐次诊断见专项记录，早期迁移流水见 Git 历史。
 
-**线上为 `plugin + direct`。direct 验证码补货目标错配已修复、上线并通过公网普通请求/SSE与补货观察；HK / JP 对话出口尚未恢复。领取与对话分流有接口对照证据，但尚未建立独立 OpenSpec、尚未实施。**
+**线上为 `plugin + direct`。direct 验证码补货目标错配已修复上线；HK / JP 对话出口尚未恢复。领取与对话分流已建立 [split-claim-and-chat-egress](../openspec/changes/split-claim-and-chat-egress/proposal.md)，方案齐备、strict 校验通过，实施进度 0/18，尚未切流。**
 
 接手先读本页第四、五节，再读选定 change 的 proposal / tasks / execution。详细证据见[出口恢复记录](egress_recovery_20261016.md)，全部节点见[节点与机场清单](egress_node_inventory_20261016.md)。
+
+### 最新规划交接（2026-10-17 02:17 CST）
+
+- 已创建分流 proposal、design、5 份 capability 增量及 18 项未勾选 tasks；`openspec status` 的 planning complete / artifacts done 只代表方案文件齐备，**不是实现完成**。
+- 拟新增 chat / claim 用途配置，默认继承旧全局模式；首次上线建议对话继续 direct，领取配置同区固定 `(port,node_id,epoch)`；WARP 为可选对话代理，不自动启用。调用边界和配置名见[设计](../openspec/changes/split-claim-and-chat-egress/design.md)。
+- 固定领取绑定独立于对话准入；保留来源、身份、退役和固定引用保护，不能通过把 HK / JP 改成对话 active 来绕过。插件的二次直连兜底纳入待修，不能只改 claim POST。
+- 兼容变化已明示：显式领取用途下，人工选择套餐仍保留，改用服务端验证码；旧浏览器 token 接口在联网前拒绝。继承旧模式保留原浏览器路径，不冒充亲和已验证。
+- 02:17 HK `21100` / JP `21300` 来源存在、epoch=1、未退役、身份匹配，聊天 admission 仍为 draining；仅核对绑定前提，未重做真实领取。enabled JWT 分布 HK 6 / JP 5 / TW 3，TW 也需独立配置和验收，不能只配 HK/JP 后声称全账号完成。
+- 本轮仅规划与只读核对。VPS 业务 HEAD `4695bb2`、网关 PID `1132673`，原 15 份文档改动哈希保持不变；后续方案文档通过 Git 同步，无需重启服务。
 
 ### 最新修复与下一步优先级（2026-10-17 01:44–01:55 CST）
 
@@ -15,7 +25,7 @@
 - **验证**：修复前定向回归 4 失败；修正后本机相关 44 项通过，VPS 隔离相关 104 项通过（有重叠，不相加），Ruff 与 OpenSpec 校验通过。公网普通对话 200 / `OK` / stop，SSE 200 / `OK` / stop / `[DONE]`，流内错误 0。
 - **线上观察 140.5 秒，超过 token TTL 75 秒**：重启前后同长度窗口 refill 22 → 6、hit 7 → 6，均有 7 次成功业务请求；后窗口另有 2 次 foreground。满水位停止补货由回归覆盖，生产末尾 45.9 秒没有新 refill；正常消费/过期补货仍保留，不把 22 次全部判为浪费，不将短窗观察当作容量验收。
 - 01:07–01:13 已复现的本机标准 venv SSL 故障、pending 额度已生效仍显示“未生效”未修；TW `21200` 验证码失败也未由本次修复解释。早先 `ClientDisconnect` 在读取请求体、尚未派发上游，不据此判定整体对话故障。
-- **下一步：正式规划领取/对话分流，再推进待结算语义及页面验收。**本次只关闭 direct 补货错配子项，第四节主任务不越界核销。验收与回退路径见[本次执行记录](../openspec/changes/fix-direct-captcha-refill-targets/execution.md)。
+- 当时建议先规划领取/对话分流，该规划现已完成，实施仍为 0/18；之后推进待结算语义及页面验收。补货修复只关闭其错配子项，第四节主任务不越界核销。验收与回退路径见[补货执行记录](../openspec/changes/fix-direct-captcha-refill-targets/execution.md)。
 
 ## 一、当前项目状态
 
@@ -67,7 +77,7 @@
 | Mihomo `mode: rule`、`rules: [MATCH,DIRECT]` | 全局规则快照；不能因此认定指定了 proxy 的 listener 都直连。当前网关 direct 是应用主动绕过 Mihomo |
 | WARP `127.0.0.1:40000` | 可显式选用的本地代理；不是系统全局出口，不会被项目 direct 自动使用 |
 
-**目前没有领取与对话各自独立的出口开关。**二者都访问 `zcode.z.ai`，HTTPS 加密了具体路径，当前普通代理模式下 Mihomo 不能自行按“领取 / 对话”区分。后续可继续复用现有 Mihomo，由项目按用途选择直连或代理入口，无需另建代理系统。
+**当前代码仍没有领取与对话各自独立的出口开关；新配置只存在于待实施方案。**二者都访问 `zcode.z.ai`，HTTPS 加密了具体路径，当前普通代理模式下 Mihomo 不能自行按“领取 / 对话”区分。方案复用现有 Mihomo，由项目按用途选择直连或代理入口，无需另建代理系统。
 
 ### 2. 领取是否同样返回 3012
 
@@ -100,17 +110,17 @@
 
 ### 4. 分流方向与规范冲突
 
-讨论方向：**活动领取及其验证码走固定 HK / JP，对话走直连或 WARP，默认可沿用当前直连。**这是待规划方向，不是已实施功能或已创建的 OpenSpec。
+方案方向：**活动领取及其验证码走固定同区节点，对话走直连或本地 WARP，首次上线沿用当前直连。**已建立 [split-claim-and-chat-egress](../openspec/changes/split-claim-and-chat-egress/proposal.md)，尚未实施；HK / JP 以外的 TW 账号也须按本区配置，不能跨区兜底。
 
-正式方案需界定手动/自动领取、preview、领取内激活、验证码 producer/补货、额度查询、安装、后台探针的归属，保持同一领取操作的验证码与提交同出口、同身份，保留同区隔离、领取节流及退役引用。不能只给 claim POST 换代理，也不能用对话探针失败直接证明节点不能领取。
+正式方案已界定手动/自动领取、preview、领取内激活、验证码 producer/补货、额度查询、安装、后台探针的归属；实施须保持同一领取操作的验证码与提交同出口、同身份，保留同区隔离、领取节流及退役引用。不能只给 claim POST 换代理，也不能用对话探针失败直接证明节点不能领取。
 
-现有 [strict-egress-convergence](../openspec/specs/strict-egress-convergence/spec.md) 要求账号全生命周期同一物理出口，并有禁止无代理直连的旧要求。**已授权临时 direct 与原规范存在未同步差异；未来按用途分流也会改变这一要求，需要在正式 change 中调整规范及验收。**临时恢复不代表规范已更新。
+现有 [strict-egress-convergence](../openspec/specs/strict-egress-convergence/spec.md) 要求账号全生命周期同一物理出口，并有禁止无代理直连的旧要求。**新 change 已提供按用途操作一致性的增量，但尚未实施或同步主规范；已授权临时 direct 与旧主规范的差异仍存在。**规划及临时恢复均不代表主规范已更新。
 
 直连会让多个账号共享 VPS IP；共享 WARP 也不等于每账号独立 IP。上游仍可能关联账号，短时成功及 risk_strikes=0 均不能保证长期安全。
 
 ## 四、核对后的任务与剩余限制
 
-**原确认的 11 项待办没有因直连恢复而减少。另新增 1 项“出口分流待规划”，尚不是已建立或获准实施的独立 change。**下表跟踪这 12 条；TW 验证码失败作为第 10 项的独立排查子项，不重复计数。目录数、勾选数、业务待办数使用不同口径。
+**原确认的 11 项待办仍开放，另 1 项“出口分流”已完成规划、实施 0/18。**下表继续跟踪这 12 条；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
 
 | # | 任务 | 当前进度与下一步 |
 |---|---|---|
@@ -125,16 +135,17 @@
 | 9 | 指纹一致性调查 | 未完成；跨通道逐字段比较实际外发身份和上游影响 |
 | 10 | 验证码容量与失败排查 | **direct 补货目标/缓存错配子项已修复上线并验收**；冷启动、稳态及同批次命中率仍待验收；TW `21200` 拿不到有效验证码的原因仍待查，不弱化校验 |
 | 11 | 本地标准测试环境 | Windows `.venv` 的 SSL DLL 故障待修；基础 Python 预加载 SSL 的替代执行不算 venv 已修复 |
-| 新增 | 领取 / 对话独立出口配置 | **待规划**：无独立 OpenSpec、配置或实现；先明确边界与旧规范变更，再实施、验证出口和普通/SSE，有活动时补真实到账验收 |
+| 新增 | 领取 / 对话独立出口配置 | **方案已建，实施 0/18**：split-claim-and-chat-egress 的配置、边界、规范增量和 tasks 齐备；下一步按 tasks 实施，再验实际出口/普通/SSE，有活动时补真实到账 |
 
 独立运维事项保留：vendor host.js 升级评估、磁盘/旧备份清理、3 个重复 change 目录处置。本次整理没有授权自动升级、删除或归档，不算已完成。
 
 ## 五、OpenSpec 方案台账
 
-2026-10-17 本地 `openspec list --json`：**14 个未归档目录、15 个归档目录**；4 项 in-progress、3 项 complete、7 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。部分旧方案核销修订尚在第八节的 15 份未提交本地文档中。
+2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；5 项 in-progress、3 项 complete、7 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。部分旧方案核销修订尚在第八节的 15 份未提交本地文档中。
 
 | 方案 | 清单进度 | 当前判断 |
 |---|---|---|
+| [split-claim-and-chat-egress](../openspec/changes/split-claim-and-chat-egress/proposal.md) | **0/18** | 方案齐备、strict 通过；业务源码/配置未实施，HK/JP/TW 绑定及真实分流待验 |
 | [fix-direct-captcha-refill-targets](../openspec/changes/fix-direct-captcha-refill-targets/execution.md) | **6/6** | 本次修复、回归、上线与真实业务/补货观察已完成；未归档，不关闭验证码容量主线 |
 | [egress-blacklist-investigation](../openspec/changes/egress-blacklist-investigation/proposal.md) | 未拆 tasks | 调查未完；早期“被拉黑/2 个可用”不替代第三节新证据。此 change 只做调查，选路改动应另开 change |
 | [captcha-pool-capacity](../openspec/changes/captcha-pool-capacity/proposal.md) | 未拆 tasks | 容量、冷启动与稳态命中率调查未完成 |
@@ -150,7 +161,7 @@
 | [fix-captcha-failure-diagnostics-and-scheduling](../openspec/changes/fix-captcha-failure-diagnostics-and-scheduling/tasks.md) | **24/24** | 有同名归档副本；不重做，不宣称本轮全部复验 |
 | [isolate-mihomo-probe-from-production](../openspec/changes/isolate-mihomo-probe-from-production/tasks.md) | **30/30** | 有同名归档副本；历史验收不替代当前生产连续性验收 |
 
-原“10 个非重复变更 + 1 个本地环境 = 11 项”口径保留，验证码旧副本的验收缺口及本次已完成子项并入验证码主线。4 个进行中目录共 18 个未勾框，其中包含 pin 的旧副本项；**不是全项目只剩 18 个子任务**，7 项还没有正式 tasks。新增分流不在这 14 个目录内。
+原“10 个非重复变更 + 1 个本地环境 = 11 项”口径保留，再加新增分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。5 个进行中目录共 **36 个未勾框**（旧 18 + 分流 18），含 pin 的旧副本项；**不是全项目只剩 36 个子任务**，7 项还没有正式 tasks。
 
 ## 六、此前误判、失败与核销边界
 
@@ -171,6 +182,7 @@
 | `data/diagnostics/handoff-20261017/`（本地忽略目录） | 整理前交接副本、15 个既有改动的哈希基线，用于核对未误改 |
 | `data/diagnostics/status-review-20261017/`（本地忽略目录） | 01:07–01:13 本机/VPS核对、修复前 direct 补货隔离复现和生产统计、页面函数复现、原有改动哈希 |
 | `data/diagnostics/direct-refill-fix-20261017/`（本地忽略目录） | 本次红绿/104 项 JUnit、公网普通/SSE、发布 manifest、140.5 秒前后观察、最终服务及定时更新器状态、15 份原改动哈希基线 |
+| `data/diagnostics/split-claim-and-chat-egress-20261017/planning-checks.json`（本地忽略目录） | 分流方案链接/规范场景保留检查、18 项均未实施、原 15 份改动及本机/VPS 业务源码哈希核对；不是分流运行验收 |
 | VPS `/root/egress-direct-recovery-20261016-0gck0fjw/` | 回退材料，env.before / client_pool.py.before 本轮确认仍存在；保全，不入 Git |
 | VPS `/root/direct-refill-recovery-20261017-uyh4tk_q/` | 本次补货修复旧源码、配置哈希、发布及观察证据；保全，不入 Git |
 
@@ -200,7 +212,7 @@ openspec/changes/report-app-login-success-event/tasks.md
 openspec/changes/unify-activation-fingerprint/proposal.md
 ```
 
-用户此前已授权线上出口恢复、临时直连、必要真实请求/SSE，以及相关 Git 提交、推送与快进部署；已有范围内不重复索权。**本轮执行 direct 补货错配修复及其发布验收；不实施分流、不升级 vendor、不清理旧目录、不归档 change，不修改长期记忆。**上述 15 份原文档哈希与实施前一致，保持未提交。同步继续走 Git，业务服务无需因文档变动重启。
+用户此前已授权线上出口恢复、临时直连、必要真实请求/SSE，以及相关 Git 提交、推送与快进部署；已有范围内不重复索权。上一轮已完成 direct 补货错配发布验收；**本轮建立分流方案，尚未实施，不升级 vendor、不清理旧目录、不归档 change，不修改长期记忆。**上述 15 份原文档哈希与实施前一致，保持未提交。同步继续走 Git，业务服务无需因文档变动重启。
 
 运行数据在 VPS `.env`、`data/accounts.db`、`data/evidence.db`、`data/node_lifecycle.json`、`data/egress_registry.json`、`data/plugin-auth.json`；不入 Git，不向新文档复制凭证、订阅 token 或真实账号标识。`vendor/magpie-plugins` 是真 submodule，本轮 VPS pin `6a3fe9b49e7e638ed79f00d274ad6e1b93a384cd`；`vendor/magpie_host.js` 是人工维护的单文件协议来源，不自动整文件替换。扩大仓库可见范围前另核历史隐私，工作树脱敏不代表历史已脱敏。
 
@@ -210,8 +222,8 @@ openspec/changes/unify-activation-fingerprint/proposal.md
 
 ## 九、下一步建议
 
-1. **为“领取 / 对话独立出口配置”建立正式 OpenSpec**：明确 strict-egress-convergence 调整，复用 Mihomo，确定 direct / WARP 选择及后台链路归属；实施后验实际出口、同区门禁、验证码亲和和普通/SSE。WARP 若上线，再补外部客户端验收。当前尚未开始此方案。
+1. **按 [split-claim-and-chat-egress/tasks.md](../openspec/changes/split-claim-and-chat-egress/tasks.md) 实施分流**：从第 1 组配置矩阵失败回归开始，再推进用途连接池/退役及消费链路；首次生产保持对话 direct，逐地区配置领取节点并验实际出口、验证码亲和和公网普通/SSE。WARP 若上线，再补外部客户端验收。
 2. 有账号具备新活动资格时，验证领取 code 0、额度到账和本地状态刷新；1003 不核销此项。TW 验证码失败另查原因，保留有效性校验。
 3. 推进额度“待生效 / 待结算”语义和页面失败场景，再按第四、五节继续；标准测试环境、vendor 评估及磁盘事项分别跟踪。
 
-本轮完成 direct 补货错配子项，原 11 项主任务及新增分流规划仍开放。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
+补货错配子项已完成，分流规划已完成但实现仍为 0/18；原 11 项主任务及新增分流业务主线继续开放。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
