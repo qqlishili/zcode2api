@@ -22,6 +22,10 @@ The system SHALL maintain independent HTTP clients for each account and request 
 ### Requirement: Consistent proxy routing
 The system SHALL choose the effective purpose policy before account/global proxy resolution. An inherited proxy policy SHALL retain existing explicit-account and stable regional/global routing. Explicit direct SHALL override stored proxies; explicit chat proxy SHALL use its configured local endpoint; explicit claim proxy SHALL use its fixed same-region slot identity. No proxy failure SHALL silently switch to direct or another purpose's route.
 
+#### Scenario: Pending admin save does not change routing
+- **WHEN** an administrator saves a new proxy policy while the process runs with a direct policy snapshot
+- **THEN** all client acquisitions continue using that direct snapshot until restart; no caller reads the saved target as an immediately active override.
+
 #### Scenario: Explicit account proxy takes priority
 - **WHEN** an account has a non-empty proxy field and its purpose inherits the legacy proxy policy
 - **THEN** the client uses that account proxy, subject to existing admission and retirement checks.

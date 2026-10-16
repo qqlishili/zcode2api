@@ -22,6 +22,10 @@ The system MUST preserve slot offsets while evaluating admission for the request
 - **WHEN** 回收协议检查仍配置为固定领取出口的旧槽位
 - **THEN** 必须识别该固定引用；在解除绑定、关闭新准入并释放在途操作前不得回收复用端口。
 
+#### Scenario: Saved target is not the active binding
+- **WHEN** 页面保存删除旧领取绑定，但运行快照仍持有该绑定
+- **THEN** 排空协调继续报告旧固定引用，重启加载新配置之前不得回收该槽位。
+
 ### Requirement: Offline Seeding and Account Sticky Region Pinning
 The system MUST retain existing account assignments and offline deterministic seeding quotas (P0 >= 80%, P1 <= 20%, P2 = 0%). Inherited managed proxy routing and explicit claim bindings MUST stay within that region. Explicit chat direct or a configured local shared chat proxy MUST NOT rewrite the assignment or require a chat-active port in the stored region.
 

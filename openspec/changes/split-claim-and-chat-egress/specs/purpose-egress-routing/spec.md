@@ -5,10 +5,10 @@
 ## ADDED Requirements
 
 ### Requirement: Independent purpose configuration
-系统 MUST 支持 chat / claim 用途分别选择 inherit、direct 或 proxy，默认 inherit；inherit 继承旧全局模式，显式用途配置优先于全局模式和旧账号代理。显式 chat proxy MUST 指定本地 HTTP 代理，显式 claim proxy MUST 指定按账号大区配置的固定托管槽位。无效配置 MUST 明确报错，不得隐式改为直连。
+系统 MUST 支持 chat / claim 分别选择 inherit、direct 或 proxy；数据库完整策略优先于环境默认，用途 inherit 继承旧全局模式。显式用途策略优先于全局模式和旧账号代理；chat proxy MUST 指定本地 HTTP 代理，claim proxy MUST 指定同区固定托管槽位。所有运行消费端 MUST 使用启动时加载的生效快照；无效配置 MUST 明确报错，不得隐式改为直连。
 
 #### Scenario: Existing direct deployment
-- **WHEN** 原全局模式为 direct，两个用途配置均未设置
+- **WHEN** 原全局模式为 direct，两个用途配置均未设置，且不存在数据库出口覆盖
 - **THEN** 对话、领取及原有匿名启动链路保持现有直连行为，不自动启用 WARP 或修改账号大区。
 
 #### Scenario: Claim proxy with direct chat
@@ -22,6 +22,63 @@
 #### Scenario: Invalid or incomplete override
 - **WHEN** 用途模式不受支持、显式 chat proxy 缺 URL，或领取绑定结构非法
 - **THEN** 配置检查明确失败；合法绑定表未包含某账号大区时，仅该账号的领取链路报告缺少绑定，不影响其它账号对话。
+
+#### Scenario: Database override takes precedence
+- **WHEN** 已保存的完整策略为 chat direct，环境默认为 chat proxy
+- **THEN** 重启加载后 chat 实际使用数据库的 direct 策略，页面标明生效来源为数据库。
+
+### Requirement: Admin configuration management page
+系统 MUST 在现有后台设置入口提供配置管理，保留已有设置并增加出口分流区域，支持对话直连/WARP/指定本地代理、领取模式及各大区节点下拉选择。节点身份 MUST 由服务端校验，用户无需手填指纹/代次；部署路径、端口及运行时程序路径 MUST NOT 作为任意环境变量编辑器暴露。
+
+#### Scenario: Configure egress without hand-editing JSON
+- **WHEN** 已登录管理员进入配置管理并为 HK / JP / TW 选择领取节点
+- **THEN** 页面显示节点名、地区、端口和不可选原因，保存同区固定身份；既有鉴权、刷新、并发及通知配置继续可用。
+
+#### Scenario: WARP preset
+- **WHEN** 管理员选择对话 WARP
+- **THEN** 页面保存对应的本地代理配置，不要求填写底层模式组合；保存不启动 WARP 或测试上游。
+
+### Requirement: Atomic authenticated configuration persistence
+配置管理读写及候选节点接口 MUST 使用现有管理员鉴权。出口策略 MUST 作为完整对象原子持久化；校验、节点换代或数据库写入失败时 MUST 保留原保存值及运行值。旧通用设置端点 MUST NOT 接受或覆盖出口策略键；出口保存不得覆盖其它设置或写 `.env`，配置 API MUST NOT 接受任意 meta 键或返回节点密码、订阅及账号凭证。
+
+#### Scenario: Unauthenticated or invalid write
+- **WHEN** 未登录调用配置接口，或管理员提交非法枚举、URL、跨区绑定或未知字段
+- **THEN** 请求被拒绝，数据库和生效策略不变，不发任何上游请求。
+
+#### Scenario: Stale node selection
+- **WHEN** 表单打开后，所选端口的节点身份/代次改变或进入退役
+- **THEN** 保存返回冲突并要求刷新，不能把旧选择自动绑定到同端口的新节点。
+
+#### Scenario: Database failure
+- **WHEN** 完整策略校验通过但数据库提交失败
+- **THEN** 返回保存失败，不能部分更新任一出口字段、已保存视图或运行策略。
+
+#### Scenario: Legacy settings cannot modify egress policy
+- **WHEN** 旧通用设置表单保存，或调用方在旧设置端点额外提交出口策略键
+- **THEN** 该键被过滤忽略且不能修改或清空出口对象，原有鉴权、刷新及通知字段保持原契约。
+
+### Requirement: Saved and active policy visibility
+页面 MUST 区分已保存目标与当前进程生效策略、来源及待重启状态。待重启状态 MUST 由服务端比较规范化目标策略及来源与生效快照计算，两者完全等价时为 false，不依赖浏览器脏状态。保存和恢复环境默认 MUST 不改变当前出口、不重启服务、不清理在途请求；重启后各消费者 MUST 一致加载，不能把保存或节点存在当成业务可服务。
+
+#### Scenario: Save requires restart
+- **WHEN** 管理员把对话 direct 保存为 WARP，但网关尚未重启
+- **THEN** 页面刷新后仍显示当前 direct、已保存 WARP、待重启；新旧对话都继续沿用当前 direct 快照。
+
+#### Scenario: Restart loads the saved policy
+- **WHEN** 网关重启并成功加载已保存配置
+- **THEN** 页面显示新的当前策略和数据库来源、清除待重启状态，实际请求按该快照选路。
+
+#### Scenario: Restore environment defaults
+- **WHEN** 管理员恢复环境默认并保存
+- **THEN** 只移除数据库出口覆盖，页面提示重启；其它设置及当前路由不变，重启后使用当次启动的环境默认。
+
+#### Scenario: Equivalent target is not pending
+- **WHEN** 管理员保存或恢复后的规范化策略及来源与当前生效快照完全相同
+- **THEN** 服务端返回 pending_restart=false，页面重载不产生虚假的待重启提示；仅策略相同但来源不同仍需重启加载该来源。
+
+#### Scenario: Pending binding removal cannot allow reclaim
+- **WHEN** 固定领取绑定已从保存目标中移除，但当前进程尚未重启
+- **THEN** 原生效绑定仍参与退役固定引用计数并禁止端口回收，不能按待生效配置提前释放。
 
 ### Requirement: Fixed same-region claim binding
 显式代理领取 MUST 绑定账号已有大区内的一个 `(port, node_id, epoch)`，独立于对话活跃端口列表。系统 MUST 校验来源存在、身份匹配、端口大区、退役状态及领取断路器；不得将空槽、已失去来源、正在退役或已换代的槽位用于新请求。单纯对话拒绝 MUST NOT 删除领取准入。
