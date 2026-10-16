@@ -33,8 +33,8 @@
 
 ## 快速导航
 
-- 接手当前项目、查真实待办与验证边界 → [HANDOFF.md](HANDOFF.md)
-- HK / JP 出口、直连及真实 SSE 对照 → [2026-10-16 核验记录](egress_recovery_20261016.md)
+- 接手项目、查最新 VPS 快照、OpenSpec 台账、原 11 项待办及新增分流方向 → [HANDOFF.md](HANDOFF.md)
+- HK / JP 出口、领取与对话差异、直连 / WARP 及真实 SSE 证据 → [2026-10-16 核验记录](egress_recovery_20261016.md)
 - 全部机场来源、正常/拒绝/请求失败节点及端口 → [2026-10-16 全量节点清单](egress_node_inventory_20261016.md)
 - 想理解系统怎么跑 → `development/01`
 - 要写某个模块 → 先看 `development/02` 找到移植来源，再对照 `testing/02` 的用例清单写测试
