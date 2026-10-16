@@ -1344,7 +1344,7 @@ async def _try_account(req_id, account, body, incoming_headers, port, needs_capt
             if _get_shared_client is not _default_get_shared_client:
                 client = _get_shared_client()
             else:
-                operation = await account_client_pool.acquire_operation(account)
+                operation = await account_client_pool.acquire_operation(account, purpose="chat")
                 client = operation.client
         except RegionOfflineError:
             return _AccountFailure("region_offline", "network_routing", "region")
@@ -1453,6 +1453,9 @@ async def _try_account_admitted(req_id, account, body, incoming_headers, port, n
                 cm = await get_channel().send(account, url, headers, payload, client)
                 resp = await cm.__aenter__()
                 cm_closed = False
+            except RegionOfflineError:
+                account_client_pool.end_request(client, probe)
+                return next_account("region_offline", "network_routing", "region")
             except httpx.HTTPError as err:
                 account_client_pool.end_request(client, probe, success=False)
                 account.record_result(False, f"连接失败: {err}")
@@ -1513,10 +1516,7 @@ async def _try_account_admitted(req_id, account, body, incoming_headers, port, n
                 waf = bool(challenge) or _is_risk_control(status_code, text)
                 account_client_pool.end_request(client, probe, success=not waf, is_waf_block=waf)
                 if challenge:
-                    try:
-                        captcha_manager.invalidate(region=account.assigned_region, proxy=proxy_url)
-                    except TypeError:
-                        captcha_manager.invalidate()
+                    captcha_manager.invalidate(proxy=proxy_url, identity=operation.identity if operation else None)
                     captcha_retries += 1
                     if captcha_retries >= MAX_CAPTCHA_RETRIES:
                         account.record_result(False, "验证码挑战连续失败")

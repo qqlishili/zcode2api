@@ -151,12 +151,12 @@ class TestClaim:
         assert entry["activation_error"] is None
 
         events = [(h, b) for m, p, h, b in mock.state.calls if p == "/api/v1/event/report"]
-        assert len(events) == 2
+        assert len(events) == 3
         names = [_json.loads(b)["element_name"] for _h, b in events]
-        assert names == ["app_launch", "app_daily_active"]
+        assert names == ["app_launch", "app_daily_active", "app_login_success"]
         _h, body = events[0]
         body = _json.loads(body)
-        # user_id 来自 JWT payload（GOOD_JWT sub="a" 兜底）；无 Authorization 头
+        # 登录态事件复用 JWT 身份和 Authorization；未安装补一次 login_success。
         assert body["user_id"] == "a"
         assert body["app_version"] == constants.BILLING_APP_VERSION
         assert body["device_mid"]
@@ -169,7 +169,7 @@ class TestClaim:
         assert body["device_os_category"] == profile.os_category
         assert body["client_timezone"] == profile.timezone
         assert body["event_region"] == "app" and body["event_type"] == "view"
-        assert events[0][0].get("authorization") is None
+        assert events[0][0].get("authorization") == f"Bearer {GOOD_JWT}"
 
     async def test_billing_headers_aligned_on_preview(self, claim_env):
         """billing 请求头对齐 zcode-switch 实证形态（版本/标题/渠道/追踪头）。"""
@@ -492,9 +492,9 @@ class TestAutoClaimOnPoolEntry:
         assert len(outcomes) == 1
         assert outcomes[0]["ok"] is True
         assert outcomes[0]["plan_id"] == "mock-claim-plan"
-        # 激活 2 条 + preview 1 次 + claim 1 次
+        # 未安装账号：激活 2 条 + 登录 1 条 + preview 1 次 + claim 1 次
         paths = [p for _m, p, _h, _b in mock.state.calls]
-        assert paths.count("/api/v1/event/report") == 2
+        assert paths.count("/api/v1/event/report") == 3
         assert sum(p.endswith("/billing/preview") for p in paths) == 1
         assert sum(p.endswith("/billing/claim") for p in paths) == 1
 
@@ -527,7 +527,7 @@ class TestAutoClaimOnPoolEntry:
 
         monkeypatch.setattr(admin_api, "auto_claim_all_plans", _spy)
         res = await client.post("/admin/api/accounts",
-                                json={"provider": "zai", "tokens": [GOOD_JWT + "-new"]},
+                                json={"provider": "zai", "tokens": ["h1.eyJzdWIiOiJuZXctYWNjb3VudCJ9.sig"]},
                                 headers={"Authorization": "Bearer zcode"})
         assert res.status_code == 200
         await asyncio.sleep(0.05)
@@ -536,7 +536,7 @@ class TestAutoClaimOnPoolEntry:
         # 重复 token（去重后非新增）不再触发
         before = len(called)
         await client.post("/admin/api/accounts",
-                          json={"provider": "zai", "tokens": [GOOD_JWT + "-new"]},
+                          json={"provider": "zai", "tokens": ["h1.eyJzdWIiOiJuZXctYWNjb3VudCJ9.sig"]},
                           headers={"Authorization": "Bearer zcode"})
         await asyncio.sleep(0.05)
         assert len(called) == before
@@ -556,7 +556,7 @@ class TestAutoClaimOnPoolEntry:
         monkeypatch.setattr(admin_api, "auto_claim_all_plans", _spy)
         res = await client.post("/admin/api/import",
                                 json={"providers": {"zai": [
-                                    {"name": "imp", "secret": GOOD_JWT + "-imp"}]}},
+                                    {"name": "imp", "secret": "h1.eyJzdWIiOiJpbXBvcnQtYWNjb3VudCJ9.sig"}]}},
                                 headers={"Authorization": "Bearer zcode"})
         assert res.status_code == 200
         await asyncio.sleep(0.05)
@@ -567,7 +567,7 @@ class TestAutoClaimOnPoolEntry:
         client, _mock, _stub, _acc = claim_env
         res = await client.post("/admin/api/accounts",
                                 json={"provider": "zai",
-                                      "tokens": [GOOD_JWT + "-fp1", GOOD_JWT + "-fp2"],
+                                      "tokens": ["h1.eyJzdWIiOiJmcDEifQ.sig", "h1.eyJzdWIiOiJmcDIifQ.sig"],
                                       "name": "fp"},
                                 headers={"Authorization": "Bearer zcode"})
         assert res.status_code == 200
@@ -655,14 +655,15 @@ class TestAutoClaimOnPoolEntry:
         assert "暂无可领取的活动套餐" in outcome["message"]
         assert stub.solve_count == 0
 
-    async def test_claim_pool_active_plans_shared_experience(self, claim_env, fresh_app):
-        """集群经验共享：当上游 preview 为空时，自动提取池内其他账号持有的有效活动并成功认领。"""
+    async def test_claim_pool_plans_do_not_create_other_account_eligibility(self, claim_env, fresh_app):
+        """上游 preview 为空时，不把其它账号活动传播为本账号资格。"""
         import time
 
         from tests.conftest import seed_account
 
         client, mock, stub, acc_b = claim_env
         mock.state.claim_scenario = "claim_none"  # 上游 preview 返回空 plans: []
+        mock.state.calls.clear()
 
         # 账号 A：已持有未过期的大促活动套餐
         acc_a = seed_account(fresh_app, "h1.eyJzdWIiOiJhY2N0LWEifQ.sig", name="pool-account-a")
@@ -688,25 +689,19 @@ class TestAutoClaimOnPoolEntry:
         ]
         fresh_app.update_account(live_a)
 
-        # 账号 B（未领账号）拉取 preview：即使上游下发空列表，也能从池内经验共享中发现 Trust 活动
+        # 上游没有投放给 B 时，不能传播 A 的资格，也不能消耗验证码去盲领。
         res = await client.get(f"/admin/api/claim/preview?account_id={acc_b.id}",
                                headers={"Authorization": "Bearer zcode"})
         assert res.status_code == 200
-        preview_plans = res.json()["preview"][0]["plans"]
-        assert len(preview_plans) == 1
-        assert preview_plans[0]["plan_id"] == "zcode-v3-start-plan-trust-0929"
-        assert preview_plans[0]["name"] == "ZCode Trust Build"
-
-        # 账号 B 发起 claim：自动选中池内共享的最高优先级活动并成功领取
-        claim_res = await client.post("/admin/api/claim",
-                                      json={"account_ids": [acc_b.id]},
+        assert res.json()["preview"][0]["plans"] == []
+        before = stub.solve_count
+        claim_res = await client.post("/admin/api/claim", json={"account_ids": [acc_b.id]},
                                       headers={"Authorization": "Bearer zcode"})
         assert claim_res.status_code == 200
         outcomes = claim_res.json()["outcomes"]
-        assert len(outcomes) == 1
-        assert outcomes[0]["ok"] is True
-        assert outcomes[0]["plan_id"] == "zcode-v3-start-plan-trust-0929"
-        assert outcomes[0]["plan_name"] == "ZCode Trust Build"
+        assert len(outcomes) == 1 and outcomes[0]["skipped"] is True
+        assert stub.solve_count == before
+        assert not any(path.endswith("/billing/claim") for _, path, _, _ in mock.state.calls)
 
 
 @pytest.mark.integration

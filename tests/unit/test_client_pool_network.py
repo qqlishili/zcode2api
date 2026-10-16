@@ -10,7 +10,7 @@ from app.client_pool import AccountClientPool, RegionOfflineError
 @pytest.fixture
 def pool(tmp_path):
     pool = AccountClientPool(registry_path=tmp_path / "registry.json")
-    pool._circuit_breakers["fixture-egress"] = {"state": "OPEN", "fails": 3,
+    pool._circuit_breakers[pool._breaker_key("fixture-egress")] = {"state": "OPEN", "fails": 3,
         "quarantine_until": 0, "half_open_active": False}
     return pool
 
@@ -24,10 +24,10 @@ def test_only_one_probe_and_neutral_release(pool):
     with pytest.raises(RegionOfflineError):
         pool.begin_request(clients[1])
     pool.end_request(clients[0], probe)
-    assert pool._circuit_breakers["fixture-egress"]["fails"] == 3
+    assert pool._circuit_breakers[pool._breaker_key("fixture-egress")]["fails"] == 3
     assert pool.begin_request(clients[1]) is True
     pool.end_request(clients[1], True, success=True)
-    assert pool._circuit_breakers["fixture-egress"]["state"] == "CLOSED"
+    assert pool._circuit_breakers[pool._breaker_key("fixture-egress")]["state"] == "CLOSED"
 
 
 async def test_cached_client_keeps_actual_egress_and_needs_admission(pool, monkeypatch):
@@ -36,7 +36,7 @@ async def test_cached_client_keeps_actual_egress_and_needs_admission(pool, monke
     monkeypatch.setattr(pool, "resolve_proxy", lambda _: "http://changed.invalid")
     assert await pool.get_client("fixture") is client
     assert pool.client_proxy(client) == "http://fixture.invalid"
-    pool._circuit_breakers[pool.client_proxy(client)] = {"state": "OPEN", "fails": 3,
+    pool._circuit_breakers[pool._breaker_key(pool.client_proxy(client))] = {"state": "OPEN", "fails": 3,
         "quarantine_until": 0, "half_open_active": False}
     assert not pool.is_proxy_quarantined(pool.client_proxy(client))
     probe = pool.begin_request(client)
@@ -76,7 +76,7 @@ async def test_quota_three_requests_settle_one_probe(pool, fresh_app, monkeypatc
         await quota.fetch_quota(account)
         assert len(requests) == 3
         assert settled == [not fail]
-        assert pool._circuit_breakers["fixture-egress"]["state"] == ("OPEN" if fail else "CLOSED")
+        assert pool._circuit_breakers[pool._breaker_key("fixture-egress")]["state"] == ("OPEN" if fail else "CLOSED")
 
 
 @pytest.mark.parametrize("stage", ["factory", "enter", "exit", "cancel_exit"])
@@ -113,7 +113,7 @@ async def test_gateway_local_stream_error_releases_probe(pool, fresh_app, monkey
         await gateway._try_account("fixture-probe", account,
             {"model": "GLM-5.3-Flash", "messages": [{"role": "user", "content": "fixture"}]},
             {}, None, False)
-    state = pool._circuit_breakers["fixture-egress"]
+    state = pool._circuit_breakers[pool._breaker_key("fixture-egress")]
     assert state["half_open_active"] is False
     assert state["fails"] == 3
     assert pool.begin_request(client) is True

@@ -86,7 +86,7 @@ async def run_install_sequence_for_account(account) -> dict:
 
     operation = None
     try:
-        operation = await account_client_pool.acquire_operation(account)
+        operation = await account_client_pool.acquire_operation(account, purpose="claim")
         client = operation.client
         probe = account_client_pool.begin_request(client)
     except Exception as err:

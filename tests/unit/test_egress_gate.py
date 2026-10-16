@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 
-import httpx
 import pytest
 
 from app import egress_probe
@@ -53,7 +52,7 @@ def test_confirmed_is_replaced_not_merged(monkeypatch: pytest.MonkeyPatch) -> No
     calls = {"n": 0}
     # 每轮都让该账号走 :1（模拟 resolve_proxy 的稳定绑定）
     bound = {"cur": "http://127.0.0.1:1"}
-    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a: bound["cur"])
+    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a, **_kw: bound["cur"])
 
     async def fake(_account_arg, proxy):  # noqa: ANN001, ARG001
         calls["n"] += 1
@@ -108,31 +107,27 @@ class _CapturingHost:
 
 def _call_send(monkeypatch: pytest.MonkeyPatch, mode: str, candidate: str | None,
                confirmed: set[tuple[str, str]]) -> list[str | None]:
-    """跑一次 ch.send，返回宿主实际拿到的 proxy 列表。
+    """实际出口由连接池准入；门禁不得重新选路，失败不得调用宿主。"""
+    from app.client_pool import RegionOfflineError, account_client_pool
 
-    confirmed 现在是 **(账号 id, 出口) 组合** 的集合（不再是出口集合）——
-    实测同出口对不同账号结果不同，门禁必须按组合判定。
-    """
     host = _CapturingHost()
-    ch = PluginChannel(host)  # type: ignore[arg-type]
+    ch = PluginChannel(host)
     monkeypatch.setattr(mod.settings, "EGRESS_MODE", mode)
-
-    from app.client_pool import account_client_pool
-
-    monkeypatch.setattr(account_client_pool, "client_proxy", lambda _c: candidate)
     monkeypatch.setattr(egress_probe.egress_probe, "_confirmed", confirmed)
-
-    # payload 是原始请求体字节；base64 编码在 PluginHost.fetch 内部完成
     payload = b'{"model":"GLM-5.3-Flash"}'
-    client = httpx.AsyncClient()
 
     async def run() -> None:
-        try:
-            await ch.send(_account(), "https://x/", {}, payload, client)
-        except RuntimeError:
-            pass
-        finally:
-            await client.aclose()
+        account = _account()
+        account.proxy = candidate
+        async with account_client_pool.operation(account, purpose="chat") as operation:
+            unavailable = operation.proxy and (account.id, operation.proxy) not in confirmed
+            if unavailable:
+                with pytest.raises(RegionOfflineError):
+                    await ch.send(account, "https://unused.invalid", {}, payload, operation.client)
+            else:
+                # 替身宿主用 RuntimeError 中断，不发生网络外呼。
+                with pytest.raises(RuntimeError):
+                    await ch.send(account, "https://unused.invalid", {}, payload, operation.client)
 
     asyncio.run(run())
     return host.seen
@@ -157,20 +152,16 @@ def test_gate_rejects_same_proxy_for_other_account(monkeypatch: pytest.MonkeyPat
     """同出口被**别的账号**确认过，不能给本账号用（组合语义的核心）。"""
     seen = _call_send(monkeypatch, "proxy", "http://127.0.0.1:21200",
                       {("acc-999", "http://127.0.0.1:21200")})
-    assert seen == [None], "别的账号确认过的出口，对本账号不算确认"
+    assert seen == [], "别的账号确认过的出口，对本账号不算确认，不能直连兜底"
 
 
-def test_gate_falls_back_to_direct_when_unconfirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """proxy 模式但该出口未被确认 → 直连兜底，绝不拿未验证端口去撞。
-
-    这是本门禁存在的理由：断路器在进程内为空时信任所有端口，重启后的首批请求
-    会挨个撞上已被拉黑的绑定端口并把账号打成风控禁用。
-    """
-    seen = _call_send(monkeypatch, "proxy", "http://127.0.0.1:21101", {"http://127.0.0.1:21200"})
-    assert seen == [None]
+def test_gate_rejects_unconfirmed_without_direct_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """未确认组合必须拒绝，宿主不能收到一次直连请求。"""
+    seen = _call_send(monkeypatch, "proxy", "http://127.0.0.1:21101", {("acc-1", "http://127.0.0.1:21200")})
+    assert seen == []
 
 
-def test_gate_falls_back_to_direct_when_no_result_yet(monkeypatch: pytest.MonkeyPatch) -> None:
-    """探针还没跑出结果（confirmed 为空）→ 直连兜底。"""
+def test_gate_rejects_until_first_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """探针尚未跑出结果时明确不可用。"""
     seen = _call_send(monkeypatch, "proxy", "http://127.0.0.1:21200", set())
-    assert seen == [None]
+    assert seen == []

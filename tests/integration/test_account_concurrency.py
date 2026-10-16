@@ -159,9 +159,11 @@ class TestAccountConcurrency:
 
         client, mock = gateway_client
         mock.state.slow_all = False
+        from tests.conftest import jwt_for
+
         fresh_app.set_setting("account_concurrency", "1")
         accounts = [
-            _seed(fresh_app, f"h{i}.eyJzdWIiOiJjIn0.sig", f"a-skip-{i}")
+            _seed(fresh_app, jwt_for(f"skip-{i}"), f"a-skip-{i}")
             for i in range(6)
         ]
         for acc in accounts[:5]:

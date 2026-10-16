@@ -127,12 +127,12 @@ async def test_request_memo_reuses_failure_but_cache_can_recover(manager, monkey
 
 def test_health_query_does_not_reserve_half_open(tmp_path):
     pool = AccountClientPool(registry_path=tmp_path / "registry.json")
-    pool._circuit_breakers["http://a.test"] = {"state": "OPEN", "fails": 3,
+    pool._circuit_breakers[pool._breaker_key("http://a.test")] = {"state": "OPEN", "fails": 3,
                                     "quarantine_until": 0, "half_open_active": False}
     assert not pool.is_proxy_quarantined("http://a.test")
     assert not pool.is_proxy_quarantined("http://a.test")
-    assert pool._circuit_breakers["http://a.test"]["state"] == "OPEN"
-    assert not pool._circuit_breakers["http://a.test"]["half_open_active"]
+    assert pool._circuit_breakers[pool._breaker_key("http://a.test")]["state"] == "OPEN"
+    assert not pool._circuit_breakers[pool._breaker_key("http://a.test")]["half_open_active"]
 
 
 async def test_independent_budget_and_no_attempt_after_expiry(manager, monkeypatch):

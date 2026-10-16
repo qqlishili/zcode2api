@@ -68,7 +68,7 @@ def test_circuit_breaker_half_open_probe_success(pool):
     with patch("time.monotonic", return_value=current_mono + 601):
         # 第一次检查：放行单次探针（返回 False 表示暂不隔离该次探针）
         assert pool.is_proxy_quarantined(proxy) is False
-        assert pool._circuit_breakers[proxy]["state"] == "OPEN"
+        assert pool._circuit_breakers[pool._breaker_key(proxy)]["state"] == "OPEN"
         client = object()
         pool._client_proxies[client] = proxy
         probe = pool.begin_request(client)
@@ -77,8 +77,8 @@ def test_circuit_breaker_half_open_probe_success(pool):
         pool.end_request(client, probe, success=True)
 
         # 状态机恢复 CLOSED，清空失败计数
-        assert pool._circuit_breakers[proxy]["state"] == "CLOSED"
-        assert pool._circuit_breakers[proxy]["fails"] == 0
+        assert pool._circuit_breakers[pool._breaker_key(proxy)]["state"] == "CLOSED"
+        assert pool._circuit_breakers[pool._breaker_key(proxy)]["fails"] == 0
         assert not pool.is_proxy_quarantined(proxy)
 
 
@@ -96,13 +96,13 @@ def test_circuit_breaker_half_open_probe_failure(pool):
         client = object()
         pool._client_proxies[client] = proxy
         probe = pool.begin_request(client)
-        assert pool._circuit_breakers[proxy]["state"] == "HALF-OPEN"
+        assert pool._circuit_breakers[pool._breaker_key(proxy)]["state"] == "HALF-OPEN"
 
         # 探针请求失败
         pool.end_request(client, probe, success=False)
 
         # 重新转为 OPEN
-        assert pool._circuit_breakers[proxy]["state"] == "OPEN"
+        assert pool._circuit_breakers[pool._breaker_key(proxy)]["state"] == "OPEN"
         assert pool.is_proxy_quarantined(proxy) is True
 
 

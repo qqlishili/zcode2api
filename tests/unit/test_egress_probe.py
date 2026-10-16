@@ -169,12 +169,12 @@ def test_run_once_feeds_circuit_breaker(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(egress_probe, "_candidate_egresses", lambda: ["http://127.0.0.1:1"])
     # run_once 现在用 resolve_proxy 决定"该账号真正会走的出口"（与生产同一算法）
     monkeypatch.setattr(account_client_pool, "resolve_proxy",
-                        lambda _a: "http://127.0.0.1:1")
+                        lambda _a, **_kw: "http://127.0.0.1:1")
     monkeypatch.setattr(mod, "plugin_host", _FakeHost(200, b'{"type":"message"}'))
 
     calls: list[tuple] = []
     monkeypatch.setattr(account_client_pool, "record_proxy_result",
-                        lambda p, success, is_waf_block=False: calls.append((p, success, is_waf_block)))
+                        lambda p, success, is_waf_block=False, **_kw: calls.append((p, success, is_waf_block)))
     monkeypatch.setattr(egress_probe.EgressProbe, "_persist", lambda self, _r: None)
 
     out = asyncio.run(EgressProbe().run_once())
@@ -189,12 +189,12 @@ def test_run_once_records_failure_when_unreachable(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(egress_probe, "_probe_accounts", lambda: [_account("a1")])
     monkeypatch.setattr(egress_probe, "_candidate_egresses", lambda: ["http://127.0.0.1:1"])
     monkeypatch.setattr(account_client_pool, "resolve_proxy",
-                        lambda _a: "http://127.0.0.1:1")
+                        lambda _a, **_kw: "http://127.0.0.1:1")
     monkeypatch.setattr(mod, "plugin_host", _FakeHost(502, b'{"error":"bad gateway"}'))
 
     calls: list[tuple] = []
     monkeypatch.setattr(account_client_pool, "record_proxy_result",
-                        lambda p, success, is_waf_block=False: calls.append((p, success)))
+                        lambda p, success, is_waf_block=False, **_kw: calls.append((p, success)))
     monkeypatch.setattr(egress_probe.EgressProbe, "_persist", lambda self, _r: None)
 
     asyncio.run(EgressProbe().run_once())
@@ -222,7 +222,7 @@ def test_each_account_probed_on_its_own_bound_egress(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(egress_probe, "_candidate_egresses",
                         lambda: ["http://127.0.0.1:1", "http://127.0.0.1:2"])
     monkeypatch.setattr(account_client_pool, "resolve_proxy",
-                        lambda a: bound[a.id])
+                        lambda a, **_kw: bound[a.id])
     monkeypatch.setattr(mod, "plugin_host", _FakeHost(200, b'{"type":"message"}'))
     monkeypatch.setattr(account_client_pool, "record_proxy_result",
                         lambda *_a, **_k: None)
@@ -264,12 +264,12 @@ def test_run_once_reports_waf_block_for_3012(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(egress_probe, "_probe_accounts", lambda: [_account("a1")])
     monkeypatch.setattr(egress_probe, "_candidate_egresses", lambda: ["http://127.0.0.1:1"])
-    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a: "http://127.0.0.1:1")
+    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a, **_kw: "http://127.0.0.1:1")
     monkeypatch.setattr(mod, "plugin_host", _FakeHost(405, b'{"code":3012,"msg":"risk"}'))
 
     calls: list[tuple] = []
     monkeypatch.setattr(account_client_pool, "record_proxy_result",
-                        lambda p, success, is_waf_block=False: calls.append((p, success, is_waf_block)))
+                        lambda p, success, is_waf_block=False, **_kw: calls.append((p, success, is_waf_block)))
     monkeypatch.setattr(egress_probe.EgressProbe, "_persist", lambda self, _r: None)
 
     asyncio.run(egress_probe.EgressProbe().run_once())
@@ -283,12 +283,12 @@ def test_run_once_reports_non_waf_for_5xx(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(egress_probe, "_probe_accounts", lambda: [_account("a1")])
     monkeypatch.setattr(egress_probe, "_candidate_egresses", lambda: ["http://127.0.0.1:1"])
-    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a: "http://127.0.0.1:1")
+    monkeypatch.setattr(account_client_pool, "resolve_proxy", lambda _a, **_kw: "http://127.0.0.1:1")
     monkeypatch.setattr(mod, "plugin_host", _FakeHost(502, b'{"error":"bad gateway"}'))
 
     calls: list[tuple] = []
     monkeypatch.setattr(account_client_pool, "record_proxy_result",
-                        lambda p, success, is_waf_block=False: calls.append((p, success, is_waf_block)))
+                        lambda p, success, is_waf_block=False, **_kw: calls.append((p, success, is_waf_block)))
     monkeypatch.setattr(egress_probe.EgressProbe, "_persist", lambda self, _r: None)
 
     asyncio.run(egress_probe.EgressProbe().run_once())

@@ -39,8 +39,9 @@ def _clean_state(gateway_client):
 
 
 def _seed(store, count=2):
-    return [store.add_account("zai", f"rotation-{i}", f"hRot{i}.eyJzdWIiOiJmIn0.sig")
-            for i in range(count)]
+    from tests.conftest import jwt_for
+
+    return [store.add_account("zai", f"rotation-{i}", jwt_for(f"rotation-{i}")) for i in range(count)]
 
 
 @pytest.mark.integration

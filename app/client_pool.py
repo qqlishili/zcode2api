@@ -1,14 +1,7 @@
-"""账号专属独立客户端连接池（物理隔离 + 多出口哈希 + 优雅直连降级）。
+"""按账号、用途及实际出口身份隔离的 HTTP 客户端池。
 
-设计原则：
-1. 第一性原理：连接复用与隔离的粒度为账号（account_id）。
-   杜绝多账号交替复用同一条底层 TCP/TLS 链路，消除上游 WAF 针对同一链路多凭证的关联风控判定。
-2. 归一化路由：
-   - 优先级 1: 账号显式绑定代理（account.proxy）
-   - 优先级 2: 全局多出口代理列表（ZCODE_PROXIES）按 account_id 一致性哈希绑定（单账号固定出口 IP）
-   - 优先级 3: 优雅后备降级（未配置代理时自动降级为账号专属独立直连 Client，绝不断网）
-3. 资源回收：
-   空闲缓存按 TTL 回收；实际操作和 producer 引用归零后才关闭 Client。
+用途从启动快照选路；继承代理保持已有稳定绑定，显式代理失败禁止切直连。
+客户端、操作及验证码 producer 共用物理身份引用，排空后才关闭旧连接。
 """
 
 from __future__ import annotations
@@ -25,6 +18,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -37,11 +31,13 @@ from .egress import (
     validate_registry,
     write_private_json,
 )
+from .egress_policy import ClaimBinding, EgressPolicy
 
 if TYPE_CHECKING:
     from .models import Account
 
 _logger = logging.getLogger("zcode.pool")
+_UNRESOLVED = object()
 
 class RegionOfflineError(RuntimeError):
     """账号所属大区离线且无可用健康端口时的熔断异常（严禁降级裸连机房 IP）。"""
@@ -55,6 +51,7 @@ class EgressOperation:
     proxy: str | None
     identity: tuple | None
     generation: str | None
+    purpose: str | None = None
     kind: str = "operation"
     released: bool = False
 
@@ -69,9 +66,13 @@ class AccountClientPool:
         self,
         idle_timeout: float | None = None,
         registry_path: Path | str | None = None,
+        policy: EgressPolicy | None = None,
     ) -> None:
-        # account_id -> (client, last_active_timestamp)
-        self._clients: dict[str, tuple[httpx.AsyncClient, float]] = {}
+        # (account_id, purpose, proxy, identity) -> (client, last_active_timestamp)
+        self._clients: dict[tuple, tuple[httpx.AsyncClient, float]] = {}
+        self._policy = policy
+        self._closed_accounts: set[str] = set()
+        self._client_purposes: dict[httpx.AsyncClient, str | None] = {}
         self._client_proxies: dict[httpx.AsyncClient, str | None] = {}
         self._lock = asyncio.Lock()
         self._idle_timeout = (
@@ -90,14 +91,49 @@ class AccountClientPool:
         self._closed_identities: set[tuple] = set()
         self._coordinator_task: asyncio.Task | None = None
         self._consumer: dict | None = None
-        # 三态断路器状态机：proxy_url -> {"state": "CLOSED"|"OPEN"|"HALF-OPEN", "fails": int, "quarantine_until": float, "half_open_active": bool}
-        self._circuit_breakers: dict[str, dict] = {}
+        # 物理退役共享，业务断路器按用途与节点代次隔离。
+        self._circuit_breakers: dict[tuple, dict] = {}
 
-    def record_proxy_result(self, proxy_url: str, success: bool, is_waf_block: bool = False) -> None:
+    @property
+    def policy(self) -> EgressPolicy:
+        if self._policy is None:
+            from .store import store
+            self._policy = store.active_egress_policy
+        return self._policy
+
+    def effective_mode(self, purpose: str | None = None) -> str:
+        return self.policy.mode(purpose, settings.EGRESS_MODE)
+
+    def _breaker_key(self, proxy, purpose=None, identity=None) -> tuple:
+        return purpose or "chat", proxy, identity if identity is not None else self.proxy_identity(proxy)
+
+    def claim_binding_eligible(self, binding: ClaimBinding) -> bool:
+        self.load_registry()
+        slot = self._registry.get("slots", {}).get(str(binding.port), {})
+        if (slot_identity(binding.proxy, self._registry.get("slots", {})) != binding.identity or
+                slot.get("region") != binding.region or slot.get("admission") == "empty" or
+                binding.identity in self._closed_identities):
+            return False
+        try:
+            lifecycle = json.loads((self._registry_path.parent / "node_lifecycle.json").read_bytes())
+            node = lifecycle["nodes"][binding.node_id]
+            if not (isinstance(node, dict) and node.get("port") == binding.port and
+                    node.get("epoch") == binding.epoch and node.get("region") == binding.region and
+                    isinstance(node.get("sources"), list) and node["sources"] and
+                    not node.get("retiring") and not node.get("reclaimed")):
+                return False
+            # 生命周期与路由文件不是单事务；校验期间路由变化则本次拒绝，不能拼版本。
+            digest = hashlib.sha256(self._registry_path.read_bytes()).hexdigest()
+            return digest == self._registry_digest
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def record_proxy_result(self, proxy_url: str, success: bool, is_waf_block: bool = False, *,
+                            purpose=None, identity=None) -> None:
         """仅记录实际网络结果，驱动三态断路器状态机。"""
         if not proxy_url:
             return
-        st = self._circuit_breakers.setdefault(proxy_url, {
+        st = self._circuit_breakers.setdefault(self._breaker_key(proxy_url, purpose, identity), {
             "state": "CLOSED",
             "fails": 0,
             "quarantine_until": 0.0,
@@ -132,11 +168,11 @@ class AccountClientPool:
                         f"触发熔断隔离 {settings.CAPTCHA_CIRCUIT_BREAKER_COOLDOWN}s"
                     )
 
-    def is_proxy_quarantined(self, proxy_url: str) -> bool:
+    def is_proxy_quarantined(self, proxy_url: str, *, purpose=None, identity=None) -> bool:
         """检查代理端口当前是否处于熔断隔离状态。"""
         if not proxy_url:
             return False
-        st = self._circuit_breakers.get(proxy_url)
+        st = self._circuit_breakers.get(self._breaker_key(proxy_url, purpose, identity))
         if not st or st["state"] == "CLOSED":
             return False
         return (st["state"] == "OPEN" and time.monotonic() < st["quarantine_until"]
@@ -147,13 +183,17 @@ class AccountClientPool:
         return self._client_proxies.get(client)
 
     def begin_request(self, client: httpx.AsyncClient) -> bool:
-        """在实际联网前准入，返回本次是否拥有唯一半开资格。"""
+        """实际联网前按用途及身份取得唯一半开资格。"""
         proxy = self.client_proxy(client)
         if not proxy:
             return False
-        if self.is_proxy_quarantined(proxy):
+        purpose = self._client_purposes.get(client)
+        identity = self._client_identities.get(client)
+        if not self.proxy_eligible(proxy, identity, purpose=purpose):
+            raise RegionOfflineError("出口身份已失效")
+        if self.is_proxy_quarantined(proxy, purpose=purpose, identity=identity):
             raise RegionOfflineError("账号出口暂时不可用")
-        st = self._circuit_breakers.get(proxy)
+        st = self._circuit_breakers.get(self._breaker_key(proxy, purpose, identity))
         if st and st["state"] in ("OPEN", "HALF-OPEN"):
             st["state"] = "HALF-OPEN"
             st["half_open_active"] = True
@@ -169,12 +209,13 @@ class AccountClientPool:
         identity = self._client_identities.get(client)
         if identity and identity != self.proxy_identity(proxy):
             return
-        st = self._circuit_breakers.get(proxy)
+        purpose = self._client_purposes.get(client)
+        st = self._circuit_breakers.get(self._breaker_key(proxy, purpose, identity))
         # 旧 CLOSED 结果不能替另一个探针结算或关闭隔离。
         if st and st["state"] != "CLOSED" and not probe:
             return
         if success is not None:
-            self.record_proxy_result(proxy, success, is_waf_block)
+            self.record_proxy_result(proxy, success, is_waf_block, purpose=purpose, identity=identity)
         elif probe and st and st["state"] == "HALF-OPEN":
             st["half_open_active"] = False
 
@@ -182,9 +223,11 @@ class AccountClientPool:
         """返回所有代理断路器的实时健康与隔离状态（供运维/Admin 诊断观测）。"""
         now = time.monotonic()
         res = {}
-        for p, st in self._circuit_breakers.items():
+        for (purpose, p, identity), st in self._circuit_breakers.items():
             rem = max(0.0, st["quarantine_until"] - now) if st["state"] == "OPEN" else 0.0
-            res[p] = {
+            key = p if purpose == "chat" else f"{purpose}:{p}"
+            res[key] = {
+                "purpose": purpose, "identity": identity,
                 "state": st["state"],
                 "fails": st["fails"],
                 "remaining_quarantine_sec": round(rem, 1),
@@ -200,6 +243,11 @@ class AccountClientPool:
         try:
             content = self._registry_path.read_bytes()
             digest = hashlib.sha256(content).hexdigest()
+            request_path = self._registry_path.parent / "egress_retirement.json"
+            if request_path.is_file():
+                request = json.loads(request_path.read_bytes())
+                for port, slot in request.get("slots", {}).items():
+                    self._closed_identities.add((int(port), slot["node_id"], slot["epoch"]))
             if digest == self._registry_digest:
                 return self._registry_cache
             raw_data = json.loads(content)
@@ -223,7 +271,9 @@ class AccountClientPool:
             for client, identity in self._client_identities.items():
                 if identity and identity != slot_identity(self.client_proxy(client), raw_data.get("slots", {})):
                     self._closed_identities.add(identity)
-                    self._circuit_breakers.pop(self.client_proxy(client), None)
+                    for key in list(self._circuit_breakers):
+                        if key[2] == identity:
+                            self._circuit_breakers.pop(key)
             return cleaned
         except Exception as err:
             _logger.warning("[ClientPool] 读取出口注册表失败: %s", type(err).__name__)
@@ -233,55 +283,55 @@ class AccountClientPool:
         self.load_registry()
         return slot_identity(proxy, self._registry.get("slots", {}))
 
-    def proxy_eligible(self, proxy: str | None, identity: tuple | None = None) -> bool:
+    def proxy_eligible(self, proxy: str | None, identity: tuple | None = None, *, purpose=None) -> bool:
         self.load_registry()
         if self._registry.get("slots") and managed_port(proxy) is not None:
             current = self.proxy_identity(proxy)
             slot = self._registry["slots"].get(str(managed_port(proxy)), {})
-            return bool(current and current not in self._closed_identities and
-                        (identity is None or identity == current) and
-                        slot.get("admission") in {"active", "fallback"})
+            if not (current and current not in self._closed_identities and
+                    (identity is None or identity == current)):
+                return False
+            if purpose == "claim" and self.policy.claim_mode == "proxy":
+                binding = next((b for b in self.policy.claim_bindings if b.identity == current), None)
+                return bool(binding and self.claim_binding_eligible(binding))
+            return slot.get("admission") in {"active", "fallback"}
         return identity is None
 
-    def get_healthy_regions(self) -> set[str] | None:
-        """返回当前拥有至少一个健康出口的大区集合。若无注册表文件则返回 None（全放行）。"""
-        if settings.EGRESS_MODE == "direct":
+    def get_healthy_regions(self, *, purpose="chat") -> set[str] | None:
+        """调度只看所请求用途；直连和共享 chat 端点不受账号大区过滤。"""
+        if self.effective_mode(purpose) == "direct" or (purpose == "chat" and self.policy.chat_mode == "proxy"):
             return None
+        if purpose == "claim" and self.policy.claim_mode == "proxy":
+            return {b.region for b in self.policy.claim_bindings if self.claim_binding_eligible(b) and
+                    not self.is_proxy_quarantined(b.proxy, purpose=purpose, identity=b.identity)}
         if not self._registry_path.is_file():
             return None
         reg = self.load_registry()
-        return {r for r, ports in reg.items() if any(not self.is_proxy_quarantined(p) for p in ports)}
+        return {r for r, ports in reg.items() if any(
+            self.proxy_eligible(p, purpose=purpose) and not self.is_proxy_quarantined(p, purpose=purpose)
+            for p in ports)}
 
-    def is_region_healthy(self, region: str | None) -> bool:
-        """检查特定大区是否拥有活跃出口。未指定大区或无注册表文件则视为健康（走全局/直连）。"""
-        if settings.EGRESS_MODE == "direct":
-            return True
-        if not region:
-            return True
-        if not self._registry_path.is_file():
-            return True
-        reg = self.load_registry()
-        ports = reg.get(region, [])
-        if not ports:
+    def is_region_healthy(self, region: str | None, *, purpose="chat") -> bool:
+        regions = self.get_healthy_regions(purpose=purpose)
+        if purpose == "claim" and self.policy.claim_mode == "proxy" and not region:
             return False
-        return any(not self.is_proxy_quarantined(p) for p in ports)
+        return regions is None or not region or region in regions
 
-    def resolve_proxy(self, account: Account | str | None) -> str | None:
-        """解析指定账号应绑定的代理出口。
-
-        优先级：
-        1. 账号自身显式绑定的专属代理（account.proxy）
-        2. 账号所属永久大区端口段（account.assigned_region）的**稳定绑定**端口，
-           该端口不可用时按注册表顺序环形 failover 到同区其它合格端口
-        3. 回退全局多代理池（ZCODE_PROXIES）按 account_id 一致性哈希
-        4. 优雅降级返回 None（独立直连）
-
-        绑定索引只由「注册表全量端口列表」决定，不用健康集合做哈希分母：
-        否则一个端口熔断就会让账号出口漂移，已预热的 token 全部作废，且上游会
-        看到同一账号在出口间跳动（见 openspec design.md D1）。
-        """
-        if settings.EGRESS_MODE == "direct":
+    def resolve_proxy(self, account: Account | str | None, *, purpose=None) -> str | None:
+        """先应用用途快照，再按账号/同区/全局解析继承代理；不跨区降级。"""
+        if self.effective_mode(purpose) == "direct":
             return None
+        if purpose == "chat" and self.policy.chat_mode == "proxy":
+            return self.policy.chat_proxy_url
+        if purpose == "claim" and self.policy.claim_mode == "proxy":
+            region = getattr(account, "assigned_region", None)
+            binding = self.policy.binding(region)
+            if binding is None:
+                raise RegionOfflineError(f"claim 未配置 {region or '未分配地区'} 领取出口")
+            if (not self.claim_binding_eligible(binding) or
+                    self.is_proxy_quarantined(binding.proxy, purpose=purpose, identity=binding.identity)):
+                raise RegionOfflineError(f"claim {region} 固定领取出口不可用")
+            return binding.proxy
         # 1. 账号自身显式绑定的代理
         if account is not None and not isinstance(account, str):
             if getattr(account, "proxy", None) and str(account.proxy).strip():
@@ -300,7 +350,7 @@ class AccountClientPool:
         if assigned_region:
             reg = self.load_registry()
             region_proxies = reg.get(assigned_region, [])
-            bound = self._bound_port(account_id, region_proxies)
+            bound = self._bound_port(account_id, region_proxies, purpose=purpose)
             if bound:
                 base = self._binding_index(account_id, region_proxies)
                 if bound != region_proxies[base]:
@@ -315,10 +365,12 @@ class AccountClientPool:
 
         # 3. 回退全局 ZCODE_PROXIES
         proxies = [p for p in settings.get_global_proxies()
-                   if self.proxy_eligible(p) and not self.is_proxy_quarantined(p)]
+                   if self.proxy_eligible(p, purpose=purpose) and
+                   not self.is_proxy_quarantined(p, purpose=purpose)]
         if self._registry.get("slots"):
             proxies = list(dict.fromkeys(p for urls in self._registry_cache.values() for p in urls
-                                        if self.proxy_eligible(p) and not self.is_proxy_quarantined(p)))
+                                        if self.proxy_eligible(p, purpose=purpose) and
+                                        not self.is_proxy_quarantined(p, purpose=purpose)))
         if not proxies:
             return None
 
@@ -338,44 +390,39 @@ class AccountClientPool:
             return 0
         return int(hashlib.md5(account_id.encode("utf-8")).hexdigest(), 16) % len(region_proxies)
 
-    def _bound_port(self, account_id: str, region_proxies: list[str]) -> str | None:
+    def _bound_port(self, account_id: str, region_proxies: list[str], *, purpose=None) -> str | None:
         """稳定绑定端口的环形避让求解（无日志，供高频只读路径复用）。"""
         if not region_proxies:
             return None
         base = self._binding_index(account_id, region_proxies)
         for offset in range(len(region_proxies)):
             candidate = region_proxies[(base + offset) % len(region_proxies)]
-            if not self.is_proxy_quarantined(candidate) and self.proxy_eligible(candidate):
+            if (not self.is_proxy_quarantined(candidate, purpose=purpose) and
+                    self.proxy_eligible(candidate, purpose=purpose)):
                 return candidate
         return None
 
     def serviceable_ports(self, accounts) -> list[str | None]:
-        """当前**可服务账号**实际绑定的出口目标集合（去重保序）。
-
-        预热域只能来自这里：给没有可服务账号的大区/端口预热，产出的 token 无人能
-        消费，却会挤占唯一求解槽并把真正要用的端口压到 sdk_failed（2026-10-13 实测
-        21301 被压后 1/3 成功、同区无人压的 21303 为 3/3）。
-        显式 direct 将所有可选 Plan 账号归到 None，与 producer 和缓存键保持一致。
-
-        该路径每 3 秒被补货循环调用，故意不产生 failover/离线日志。
-        """
-        accounts = list(accounts or ())
+        """周期补货只取 selectable Plan 的 chat 实际出口，去重保序。"""
+        accounts = [a for a in accounts or () if a.uses_plan_channel() and a.is_selectable()]
         if not accounts:
             return []
-        if settings.EGRESS_MODE == "direct":
-            return [None] if any(a.uses_plan_channel() and a.is_selectable() for a in accounts) else []
+        if self.effective_mode("chat") == "direct":
+            return [None]
+        if self.policy.chat_mode == "proxy":
+            proxy = self.policy.chat_proxy_url
+            return [proxy] if (self.proxy_eligible(proxy, purpose="chat") and
+                               not self.is_proxy_quarantined(proxy, purpose="chat")) else []
         registry = self.load_registry()
         ports: list[str | None] = []
         for account in accounts:
-            if not (account.uses_plan_channel() and account.is_selectable()):
-                continue
+            cached = next((key[2] for key in self._clients if key[:2] == (account.id, "chat") and
+                           self.proxy_eligible(key[2], key[3], purpose="chat")), None)
             explicit = getattr(account, "proxy", None)
-            if explicit and str(explicit).strip():
-                proxy = str(explicit).strip()
-            else:
-                region = getattr(account, "assigned_region", None)
-                proxy = (self._bound_port(account.id, registry.get(region, []))
-                         if region else self.resolve_proxy(account))
+            region = getattr(account, "assigned_region", None)
+            proxy = cached or (str(explicit).strip() if explicit and str(explicit).strip() else (
+                self._bound_port(account.id, registry.get(region, []), purpose="chat")
+                if region else self.resolve_proxy(account, purpose="chat")))
             if proxy and proxy not in ports:
                 ports.append(proxy)
         return ports
@@ -413,71 +460,91 @@ class AccountClientPool:
     def _account_id(account) -> str:
         return account if isinstance(account, str) else getattr(account, "id", "__anonymous__")
 
-    def _get_client_locked(self, account=None, *, timeout=None, proxy=None) -> httpx.AsyncClient:
+    def _get_client_locked(self, account=None, *, timeout=None, proxy=_UNRESOLVED, purpose=None) -> httpx.AsyncClient:
         self.load_registry()
-        direct = settings.EGRESS_MODE == "direct"
-        if direct:
-            proxy = None
-        account_id = self._account_id(account) if proxy is None else "__proxy__:" + proxy
-        explicit = None if direct else getattr(account, "proxy", None)
-        pair = self._clients.get(account_id)
-        if pair:
-            client, _ = pair
-            actual = self.client_proxy(client)
-            identity = self._client_identities.get(client)
-            region = getattr(account, "assigned_region", None)
-            region_matches = (not region or actual in self._registry_cache.get(region, []))
-            if direct:
-                region_matches = actual is None
-            if (not getattr(client, "is_closed", False) and self.proxy_eligible(actual, identity) and
-                    (not explicit or explicit == actual) and (explicit or region_matches)):
-                self._clients[account_id] = (client, time.time())
-                return client
-            self._clients.pop(account_id)
-            self._retired_clients.add(client)
-        actual = proxy if proxy is not None else self.resolve_proxy(account)
-        # 显式直连不能再被代理大区门禁拦截；proxy 模式仍禁止静默直连降级。
-        if (not self.proxy_eligible(actual) or
+        account_id = self._account_id(account)
+        if account_id in self._closed_accounts:
+            raise RegionOfflineError("账号已关闭，不能取得新客户端")
+        direct = self.effective_mode(purpose) == "direct"
+        inherited = purpose is None or getattr(self.policy, f"{purpose}_mode") == "inherit"
+        if proxy is _UNRESOLVED and inherited:
+            for key, (client, _) in self._clients.items():
+                if key[:2] != (account_id, purpose) or getattr(client, "is_closed", False):
+                    continue
+                actual, identity = key[2:]
+                region = getattr(account, "assigned_region", None)
+                explicit = getattr(account, "proxy", None)
+                matches = actual is None if direct else (
+                    actual == explicit if explicit else not region or actual in self._registry_cache.get(region, []))
+                if matches and self.proxy_eligible(actual, identity, purpose=purpose):
+                    self._clients[key] = (client, time.time())
+                    return client
+        actual = None if direct else ((self.resolve_proxy(account, purpose=purpose) if purpose is not None
+                                       else self.resolve_proxy(account)) if proxy is _UNRESOLVED else proxy)
+        if purpose == "claim" and self.policy.claim_mode == "proxy" and account is not None:
+            expected = self.resolve_proxy(account, purpose=purpose)
+            if proxy is not _UNRESOLVED and proxy != expected:
+                raise RegionOfflineError("claim 不能改变固定领取出口")
+            actual = expected
+        identity = self.proxy_identity(actual)
+        if (not self.proxy_eligible(actual, identity, purpose=purpose) or
                 (not direct and not actual and
                  (getattr(account, "assigned_region", None) or self._registry.get("slots")))):
-            raise RegionOfflineError("账号大区无可用健康出口，禁止直连降级")
+            raise RegionOfflineError(f"{purpose or 'legacy'} 无可用健康出口，禁止直连降级")
+        key = (account_id, purpose, actual, identity)
+        pair = self._clients.get(key)
+        if pair and not getattr(pair[0], "is_closed", False):
+            self._clients[key] = (pair[0], time.time())
+            return pair[0]
+        # 路由/身份变化只淘汰同账号同用途缓存，在途引用继续持有旧客户端。
+        for old_key, (client, _) in list(self._clients.items()):
+            if old_key[:2] == key[:2]:
+                self._clients.pop(old_key)
+                self._retired_clients.add(client)
         req_timeout = timeout if timeout is not None else httpx.Timeout(
             connect=30.0, read=None, write=120.0, pool=30.0)
         client = httpx.AsyncClient(proxy=actual, timeout=req_timeout, trust_env=False,
                                   limits=httpx.Limits(max_keepalive_connections=10,
                                                       max_connections=20, keepalive_expiry=120.0))
-        self._clients[account_id] = (client, time.time())
+        self._clients[key] = (client, time.time())
         self._client_proxies[client] = actual
-        self._client_identities[client] = self.proxy_identity(actual)
+        self._client_identities[client] = identity
+        self._client_purposes[client] = purpose
+        _logger.info("[ClientPool] purpose=%s mode=%s egress=%s port=%s",
+                     purpose or "legacy", self.effective_mode(purpose),
+                     "proxy" if actual else "direct", urlsplit(actual).port if actual else None)
         return client
 
-    async def get_client(self, account=None, *, timeout=None) -> httpx.AsyncClient:
+    async def get_client(self, account=None, *, timeout=None, purpose=None) -> httpx.AsyncClient:
         """兼容只取句柄；真实外呼必须使用 operation 或 acquire_operation。"""
         async with self._lock:
-            return self._get_client_locked(account, timeout=timeout)
+            return self._get_client_locked(account, timeout=timeout, purpose=purpose)
 
-    async def acquire_operation(self, account=None, *, proxy=None, identity=None,
-                                parent=None, kind="operation", timeout=None) -> EgressOperation:
-        """同锁读取版本、取得客户端并计引用；派生只允许有效父操作同身份。"""
+    async def acquire_operation(self, account=None, *, proxy=_UNRESOLVED, identity=None,
+                                parent=None, kind="operation", timeout=None, purpose=None) -> EgressOperation:
+        """同锁读取版本、取得客户端并计引用；producer 只派生父用途和实际出口。"""
         async with self._lock:
             self.load_registry()
             if parent is not None:
                 if parent.pool is not self or parent.released or parent not in self._operations:
                     raise RegionOfflineError("出口父操作已结束")
-                if proxy is not None and proxy != parent.proxy:
-                    raise RegionOfflineError("派生操作不能切换出口")
-                client = parent.client
-                account_id = parent.account_id
-                actual_identity = parent.identity
+                if ((proxy is not _UNRESOLVED and proxy != parent.proxy) or
+                        (identity is not None and identity != parent.identity) or
+                        (purpose is not None and purpose != parent.purpose) or
+                        (account is not None and self._account_id(account) != parent.account_id)):
+                    raise RegionOfflineError("派生操作不能切换账号、用途或出口")
+                client, account_id, actual_identity = parent.client, parent.account_id, parent.identity
+                purpose = parent.purpose
             else:
-                if identity is not None and not self.proxy_eligible(proxy, identity):
+                if identity is not None and not self.proxy_eligible(proxy, identity, purpose=purpose):
                     raise RegionOfflineError("延后任务出口身份已过期")
-                client = self._get_client_locked(account, timeout=timeout, proxy=proxy)
-                account_id = (self._account_id(account) if proxy is None or settings.EGRESS_MODE == "direct"
-                              else "__proxy__:" + proxy)
+                client = self._get_client_locked(account, timeout=timeout, proxy=proxy, purpose=purpose)
+                account_id = self._account_id(account)
                 actual_identity = self._client_identities.get(client)
+                if identity is not None and identity != actual_identity:
+                    raise RegionOfflineError("延后任务实际出口身份不一致")
             operation = EgressOperation(self, client, account_id, self.client_proxy(client),
-                                        actual_identity, self._registry.get("generation"), kind)
+                                        actual_identity, self._registry.get("generation"), purpose, kind)
             self._operations.add(operation)
             return operation
 
@@ -490,15 +557,15 @@ class AccountClientPool:
             await self._close_retired_locked()
 
     @asynccontextmanager
-    async def operation(self, account=None, *, proxy=None, timeout=None):
-        """嵌套的同账号调用透传已准入身份，任务继承的过期上下文不能复活。"""
+    async def operation(self, account=None, *, proxy=_UNRESOLVED, timeout=None, purpose=None):
+        """同账号同用途嵌套透传；异步继承的其它用途不能复用父操作。"""
         parent = _current_operation.get()
         if (parent and parent.pool is self and not parent.released and
-                ((proxy is not None and parent.proxy == proxy) or
-                 (proxy is None and parent.account_id == self._account_id(account)))):
+                parent.account_id == self._account_id(account) and parent.purpose == purpose and
+                (proxy is _UNRESOLVED or parent.proxy == proxy)):
             yield parent
             return
-        operation = await self.acquire_operation(account, proxy=proxy, timeout=timeout)
+        operation = await self.acquire_operation(account, proxy=proxy, timeout=timeout, purpose=purpose)
         token = _current_operation.set(operation)
         try:
             yield operation
@@ -520,6 +587,7 @@ class AccountClientPool:
             self._retired_clients.remove(client)
             self._client_proxies.pop(client, None)
             self._client_identities.pop(client, None)
+            self._client_purposes.pop(client, None)
             closed += 1
         return closed
 
@@ -528,7 +596,8 @@ class AccountClientPool:
             self.load_registry()
             referenced = {op.client for op in self._operations}
             for account_id, (client, last_active) in list(self._clients.items()):
-                if (not self.proxy_eligible(self.client_proxy(client), self._client_identities.get(client)) or
+                if (not self.proxy_eligible(self.client_proxy(client), self._client_identities.get(client),
+                                            purpose=self._client_purposes.get(client)) or
                         (time.time() - last_active > self._idle_timeout and client not in referenced)):
                     self._clients.pop(account_id)
                     self._retired_clients.add(client)
@@ -536,9 +605,11 @@ class AccountClientPool:
 
     async def close_account(self, account_id: str) -> None:
         async with self._lock:
-            pair = self._clients.pop(account_id, None)
-            if pair:
-                self._retired_clients.add(pair[0])
+            self._closed_accounts.add(account_id)
+            for key, (client, _) in list(self._clients.items()):
+                if key[0] == account_id:
+                    self._clients.pop(key)
+                    self._retired_clients.add(client)
             await self._close_retired_locked()
 
     async def aclose(self) -> None:
@@ -555,13 +626,16 @@ class AccountClientPool:
             self.load_registry()
             captcha.retire_egress(self)
             for account_id, (client, _) in list(self._clients.items()):
-                if not self.proxy_eligible(self.client_proxy(client), self._client_identities.get(client)):
+                if not self.proxy_eligible(self.client_proxy(client), self._client_identities.get(client),
+                                            purpose=self._client_purposes.get(client)):
                     self._clients.pop(account_id)
                     self._retired_clients.add(client)
             await self._close_retired_locked()
             directory = self._registry_path.parent / "egress_consumers"
             consumer = dict(self._consumer, generation=self._registry.get("generation"),
-                            fixed_ports=sorted({p for a in accounts if (p := managed_port(a.proxy)) is not None}))
+                            fixed_ports=sorted({p for a in accounts if (p := managed_port(a.proxy)) is not None} |
+                                               {b.port for b in self.policy.claim_bindings
+                                                if self.policy.claim_mode == "proxy"}))
             write_private_json(directory / (consumer["boot_id"] + ".json"), consumer)
             request_path = self._registry_path.parent / "egress_retirement.json"
             if not request_path.is_file():

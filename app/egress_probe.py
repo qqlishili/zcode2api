@@ -86,11 +86,15 @@ def _candidate_egresses() -> list[str]:
     这也就是方案里「只扫活节点白名单」的含义：白名单不是「所有可用节点」，
     而是「账号真正会走到的那些节点」。
 
-    直连（None）不在此列 —— 它不是可探对象（总是在），由 EGRESS_MODE 决定是否使用。
+    直连（None）不属于托管节点探测目标；是否使用由生效 chat 策略决定。
     """
     from .client_pool import account_client_pool
     from .store import store
 
+    if account_client_pool.effective_mode("chat") == "direct":
+        return []
+    if account_client_pool.policy.chat_mode == "proxy":
+        return [account_client_pool.policy.chat_proxy_url]
     regions = {
         a.assigned_region
         for a in store.list_accounts("zai")
@@ -239,7 +243,7 @@ class EgressProbe:
 
     async def run_once(self) -> dict:
         """跑一轮探测。结果写回断路器，明细落 DB meta 供管理页观测。"""
-        from .client_pool import account_client_pool
+        from .client_pool import RegionOfflineError, account_client_pool
 
         accounts = _probe_accounts()
         if not accounts:
@@ -264,24 +268,28 @@ class EgressProbe:
         # 一旦开始就应跑完，否则管理页手动触发与单测都会拿到半截结果。
         for account in accounts:
             try:
-                proxy = account_client_pool.resolve_proxy(account)
+                proxy = account_client_pool.resolve_proxy(account, purpose="chat")
             except Exception as err:  # noqa: BLE001
                 logs.warn("egress", f"账号 {account.name} 取出口失败: {err}")
                 continue
             if not proxy:
                 continue      # 直连账号无出口可探
             if proxy not in candidates:
-                continue      # 不在候选范围（如已被隔离）—— 由门禁直连兜底
-            reachable, detail, extra = await _probe_one(account, proxy)
-            # 3012/405 是"出口被拉黑"的明确信号，按 WAF 封禁上报（阈值 2 次），
-            # 让断路器在**两轮**内隔离坏出口，而不是默认的 3 轮。
-            account_client_pool.record_proxy_result(
-                proxy,
-                success=reachable,
-                is_waf_block=_is_waf_block(
-                    int(extra.get("status") or 0), str(extra.get("code") or "")
-                ),
-            )
+                continue      # 不在候选范围（如已被隔离），不改走直连
+            try:
+                async with account_client_pool.operation(account, proxy=proxy, purpose="chat") as operation:
+                    probe = account_client_pool.begin_request(operation.client)
+                    reachable = None
+                    extra = {}
+                    try:
+                        reachable, detail, extra = await _probe_one(account, operation.proxy)
+                    finally:
+                        account_client_pool.end_request(
+                            operation.client, probe, success=reachable,
+                            is_waf_block=_is_waf_block(
+                                int(extra.get("status") or 0), str(extra.get("code") or "")))
+            except RegionOfflineError:
+                continue
             results[proxy] = {"reachable": reachable, "detail": detail,
                               "account": account.name, "account_id": account.id, **extra}
             if reachable:

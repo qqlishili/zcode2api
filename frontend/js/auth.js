@@ -69,6 +69,6 @@ async function api(method,path,body){
     location.href='/admin/login';
     throw new Error('未授权或会话已失效，请重新登录');
   }
-  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||r.status);}
+  if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail?.message||d.detail||r.status);}
   return r.json();
 }

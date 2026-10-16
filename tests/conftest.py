@@ -190,3 +190,11 @@ async def gateway_client(fresh_app, mock_server, monkeypatch, stub_captcha):
 
 def seed_account(store, secret: str, name: str = "t"):
     return store.add_account("zai", name, secret)
+
+def jwt_for(subject: str) -> str:
+    """生成不同账号身份的假 JWT；仅改变 header/signature 不会绕过身份去重。"""
+    import base64
+    import json
+
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": subject}).encode()).decode().rstrip("=")
+    return f"{subject}.{payload}.sig"

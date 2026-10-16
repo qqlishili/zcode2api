@@ -154,7 +154,7 @@ async def test_cooling_and_model(gateway_client, fresh_app, state, quota, code, 
     account.cooling_until = None if state == "missing_cooling" else time.time() + 60
     account.quota = quota
     client, _ = gateway_client
-    response = await client.post("/v1/messages", json={"messages": []})
+    response = await client.post("/v1/messages", json={"model": "GLM-5.3-Flash", "messages": []})
     error = response.json()["error"]
     assert error["code"] == code and error["retryable"] is retry
     if retry:

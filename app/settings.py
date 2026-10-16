@@ -11,6 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from . import constants
+from .egress_policy import environment_policy
 
 load_dotenv()
 
@@ -133,10 +134,9 @@ REQUEST_CHANNEL = os.getenv("ZCODE_REQUEST_CHANNEL", "native").strip().lower()
 # 默认交给 PATH 解析：bun 的安装位置与家目录无关，写死绝对路径会让换机即失效。
 # 需要指定时用 ZCODE_BUN_PATH（scripts/plugin_preflight.py 的 --bun-path 同源）。
 BUN_PATH = os.getenv("ZCODE_BUN_PATH", "bun")
-# 出口模式：proxy = 用账号绑定的代理；direct = 强制直连。
-# 实测（scripts/diagnostics/probe_dress_effect.mjs）：代理节点已被 ESA 拉黑（3012），
-# 直连可通。方案 §2.6 的出口决策第 2 条即「直连兜底」，白名单为空时生效。
+# 全局兼容模式；用途 override 与数据库生效快照优先，代理失败不能切直连。
 EGRESS_MODE = os.getenv("ZCODE_EGRESS_MODE", "proxy").strip().lower()
+EGRESS_POLICY = environment_policy(os.environ)
 # 出口活性探测间隔（秒）。0 = 关闭。
 # 断路器只被动响应真实请求踩雷；探针把「发现失效」提前到请求之前，
 # 也是被隔离节点恢复的唯一信号来源（见 app/egress_probe.py）。

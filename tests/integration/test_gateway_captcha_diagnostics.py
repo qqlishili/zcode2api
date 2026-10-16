@@ -71,7 +71,7 @@ async def test_same_egress_memo_does_not_exhaust_healthier_candidate(solver, gat
     accounts = [seed_account(fresh_app, f"candidate{i}.fixture.sig", name=f"fixture-{i}") for i in range(7)]
     # TCP 仍直达本地 Mock；只在 Node 边界使用合成出口标签。
     for i, account in enumerate(accounts):
-        client = await pool.get_client(account)
+        client = await pool.get_client(account, purpose="chat")
         pool._client_proxies[client] = "a" if i < 6 else "b"
     calls = []
 

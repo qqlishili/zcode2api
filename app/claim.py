@@ -290,8 +290,10 @@ def parse_plan(raw: dict) -> dict | None:
 async def _billing_request(account: Account, method: str, path: str, **kwargs) -> dict:
     headers = dict(kwargs.pop("headers"))
     client = kwargs.pop("client", None)
+    # 同用途外层操作可能持有长流客户端，billing 超时必须逐请求生效。
+    kwargs.setdefault("timeout", 25.0)
     try:
-        async with account_client_pool.operation(account, timeout=25.0) as operation:
+        async with account_client_pool.operation(account, timeout=25.0, purpose="claim") as operation:
             if client is not None and client is not operation.client:
                 raise ClaimError("领取客户端与已准入出口不一致")
             client = operation.client
@@ -370,7 +372,7 @@ async def report_activation_events(account: Account) -> str | None:
     user_id = jwt_user_id(account)
     if not user_id:
         return "JWT 无 user_id，跳过激活上报"
-    async with account_client_pool.operation(account):
+    async with account_client_pool.operation(account, purpose="claim"):
         try:
             client = account_client_pool.current_operation().client
         except Exception as err:
@@ -534,82 +536,87 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
     if account.is_claim_blocked():
         logs.info("claim", f"账号 {account.name} 处于名额满避让期，跳过自动领取")
         return []
-    outcomes: list[dict] = []
-
     try:
-        err = await report_activation_events(account)
-        if err:
-            logs.warn("claim", f"账号 {account.name} 激活上报失败: {err}")
-    except Exception as err:  # noqa: BLE001 - 激活失败不阻断领取
-        logs.warn("claim", f"账号 {account.name} 激活上报异常: {err}")
+        async with account_client_pool.operation(account, purpose="claim"):
+            outcomes: list[dict] = []
 
-    try:
-        plans = await preview_plans(account)
-    except ClaimError as err:
-        logs.info("claim", f"账号 {account.name} 无可领套餐（{err}）")
-        return outcomes
-    except Exception as err:  # noqa: BLE001
-        logs.warn("claim", f"账号 {account.name} preview 异常: {err}")
-        return outcomes
+            try:
+                err = await report_activation_events(account)
+                if err:
+                    logs.warn("claim", f"账号 {account.name} 激活上报失败: {err}")
+            except Exception as err:  # noqa: BLE001 - 激活失败不阻断领取
+                logs.warn("claim", f"账号 {account.name} 激活上报异常: {err}")
 
-    if not plans:
-        logs.info("claim", f"账号 {account.name} 上游无投放套餐，跳过领取")
-        return outcomes
+            try:
+                plans = await preview_plans(account)
+            except ClaimError as err:
+                logs.info("claim", f"账号 {account.name} 无可领套餐（{err}）")
+                return outcomes
+            except Exception as err:  # noqa: BLE001
+                logs.warn("claim", f"账号 {account.name} preview 异常: {err}")
+                return outcomes
 
-    # 探查完成立即将未持有套餐落库，确保后续即便全部领取失败（如 3012），页面也能显示待领 Icon
-    unclaimed = sync_account_claimable_plans(account, plans)
-    if not unclaimed:
-        logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
-        return outcomes
+            if not plans:
+                logs.info("claim", f"账号 {account.name} 上游无投放套餐，跳过领取")
+                return outcomes
 
-    skip = skip_plan_ids or set()
-    skipped = 0
-    need_refresh = False
-    for plan in unclaimed:
-        if plan["plan_id"] in skip:
-            skipped += 1
-            continue
-        try:
-            result = await claim(account, plan["plan_id"], report_activation=False)
-            outcomes.append({"account_id": account.id, "account_name": account.name,
-                             "ok": True, **result})
-            need_refresh = True
-            logs.ok("claim", f"账号 {account.name} 自动领取成功: "
-                             f"{result.get('plan_name') or plan['plan_id']}")
-        except ClaimError as err:
-            msg = str(err)
-            outcome = {"account_id": account.id, "account_name": account.name,
-                       "ok": False, "plan_id": plan["plan_id"], "message": msg}
-            if err.code != -1:
-                outcome["code"] = err.code
-            if err.next_at:
-                outcome["next_at"] = err.next_at
-            outcomes.append(outcome)
-            if "已经领取过" in msg:
-                need_refresh = True
-            logs.warn("claim", f"账号 {account.name} 自动领取 {plan['plan_id']} 失败: {err}")
-        except Exception as err:  # noqa: BLE001
-            logs.warn("claim", f"账号 {account.name} 自动领取异常: {err}")
-            outcomes.append({"account_id": account.id, "account_name": account.name,
-                             "ok": False, "plan_id": plan["plan_id"], "message": str(err)})
+            # 探查完成立即将未持有套餐落库，确保后续即便全部领取失败（如 3012），页面也能显示待领 Icon
+            unclaimed = sync_account_claimable_plans(account, plans)
+            if not unclaimed:
+                logs.info("claim", f"账号 {account.name} 已持有当前全部活动套餐，跳过自动领取")
+                return outcomes
 
-    if skipped:
-        logs.info("claim", f"账号 {account.name} {skipped} 个套餐名额等待期，本轮跳过领取")
+            skip = skip_plan_ids or set()
+            skipped = 0
+            need_refresh = False
+            for plan in unclaimed:
+                if plan["plan_id"] in skip:
+                    skipped += 1
+                    continue
+                try:
+                    result = await claim(account, plan["plan_id"], report_activation=False)
+                    outcomes.append({"account_id": account.id, "account_name": account.name,
+                                     "ok": True, **result})
+                    need_refresh = True
+                    logs.ok("claim", f"账号 {account.name} 自动领取成功: "
+                                     f"{result.get('plan_name') or plan['plan_id']}")
+                except ClaimError as err:
+                    msg = str(err)
+                    outcome = {"account_id": account.id, "account_name": account.name,
+                               "ok": False, "plan_id": plan["plan_id"], "message": msg}
+                    if err.code != -1:
+                        outcome["code"] = err.code
+                    if err.next_at:
+                        outcome["next_at"] = err.next_at
+                    outcomes.append(outcome)
+                    if "已经领取过" in msg:
+                        need_refresh = True
+                    logs.warn("claim", f"账号 {account.name} 自动领取 {plan['plan_id']} 失败: {err}")
+                except Exception as err:  # noqa: BLE001
+                    logs.warn("claim", f"账号 {account.name} 自动领取异常: {err}")
+                    outcomes.append({"account_id": account.id, "account_name": account.name,
+                                     "ok": False, "plan_id": plan["plan_id"], "message": str(err)})
 
-    if need_refresh:
-        try:
-            from .quota import fetch_quota
-            await fetch_quota(account)
-        except Exception as q_err:  # noqa: BLE001
-            logs.warn("claim", f"账号 {account.name} 自动领取后刷新额度跳过: {q_err}")
+            if skipped:
+                logs.info("claim", f"账号 {account.name} {skipped} 个套餐名额等待期，本轮跳过领取")
 
-    claimed_ok_ids = {
-        _norm_plan_id(o)
-        for o in outcomes
-        if o.get("ok") or "已经领取过" in str(o.get("message") or "")
-    }
-    sync_account_claimable_plans(account, unclaimed, extra_held_ids=claimed_ok_ids)
-    return outcomes
+            if need_refresh:
+                try:
+                    from .quota import fetch_quota
+                    await fetch_quota(account)
+                except Exception as q_err:  # noqa: BLE001
+                    logs.warn("claim", f"账号 {account.name} 自动领取后刷新额度跳过: {q_err}")
+
+            claimed_ok_ids = {
+                _norm_plan_id(o)
+                for o in outcomes
+                if o.get("ok") or "已经领取过" in str(o.get("message") or "")
+            }
+            sync_account_claimable_plans(account, unclaimed, extra_held_ids=claimed_ok_ids)
+            return outcomes
+    except RegionOfflineError as err:
+        logs.warn("claim", f"账号 {account.name} 领取出口不可用: {err}")
+        return []
 
 
 async def preview_plans(account: Account) -> list[dict]:
@@ -798,7 +805,9 @@ async def claim_with_captcha(
 
     plan_id 缺省时先 preview 自动选优先级最高套餐（无需验证码）。
     """
-    async with account_client_pool.operation(account):
+    if account_client_pool.policy.claim_mode != "inherit":
+        raise ClaimError("claim_verification_route_mismatch: 请使用服务端领取")
+    async with account_client_pool.operation(account, purpose="claim"):
         _ensure_claimable_account(account, plan_id=plan_id)
         if not (verify_param or "").strip():
             raise ClaimError("缺少验证码参数，请先完成人机验证")
@@ -816,10 +825,7 @@ async def claim_with_captcha(
                 body = await _post_claim(account, headers, plan_id, client=client)
             except ClaimError as err:
                 if err.code == 3007:
-                    try:
-                        captcha_manager.invalidate(region=getattr(account, "assigned_region", None), proxy=proxy)
-                    except TypeError:
-                        captcha_manager.invalidate()
+                    captcha_manager.invalidate(proxy=proxy, identity=account_client_pool.current_operation().identity)
                 raise
             return _claim_outcome(body, plan_id, plan_name, grants)
 
@@ -830,7 +836,7 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
     返回 {"plan_id", "plan_name", "grants", "starts_at", "ends_at", "server_time"}；
     3007（验证码失败）定向清空代理亲和水库后直接返回失败，不在本次领取中换码连打。
     """
-    async with account_client_pool.operation(account):
+    async with account_client_pool.operation(account, purpose="claim"):
         _ensure_claimable_account(account, plan_id=plan_id)
         plan_id, plan_name, grants = await _auto_pick_plan(account, plan_id)
         if report_activation:
@@ -850,9 +856,6 @@ async def claim(account: Account, plan_id: str | None = None, *, report_activati
             except ClaimError as err:
                 if err.code == 3007:
                     logs.warn("claim", f"账号 {account.name} 验证码被拒，定向清空预解池并停止本次领取")
-                    try:
-                        captcha_manager.invalidate(region=getattr(account, "assigned_region", None), proxy=proxy)
-                    except TypeError:
-                        captcha_manager.invalidate()
+                    captcha_manager.invalidate(proxy=proxy, identity=account_client_pool.current_operation().identity)
                 raise
             return _claim_outcome(body, plan_id, plan_name, grants)

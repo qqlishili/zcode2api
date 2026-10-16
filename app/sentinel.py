@@ -185,7 +185,7 @@ class Sentinel:
         random.shuffle(candidates)
         candidates.sort(
             key=lambda a: (
-                0 if account_client_pool.is_region_healthy(getattr(a, "assigned_region", None)) else 1,
+                0 if account_client_pool.is_region_healthy(getattr(a, "assigned_region", None), purpose="claim") else 1,
                 0 if a.status == Status.ACTIVE else 1,
             )
         )
@@ -231,7 +231,7 @@ class Sentinel:
                 if not pending_pids:
                     continue
                 from .client_pool import account_client_pool
-                if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None)):
+                if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None), purpose="claim"):
                     catchup_reports.append({"name": acc.name, "result": "大区离线避让"})
                     continue
                 try:
@@ -270,7 +270,7 @@ class Sentinel:
                 claim_reports.append({"name": acc.name, "result": "1005避让中"})
                 continue
             from .client_pool import account_client_pool
-            if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None)):
+            if not account_client_pool.is_region_healthy(getattr(acc, "assigned_region", None), purpose="claim"):
                 claim_reports.append({"name": acc.name, "result": "大区离线避让"})
                 continue
             try:

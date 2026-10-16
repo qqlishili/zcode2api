@@ -587,27 +587,16 @@ class PluginChannel:
         if not model:
             raise PluginHostError("请求体缺少 model")
 
-        # 出口门禁（通道无关的公共层给候选，这里决定是否采用）：
-        #   EGRESS_MODE=direct → 强制直连（诊断用）
-        #   EGRESS_MODE=proxy  → 只走「探针已确认可服务」的端口，未确认则直连兜底
-        # 为什么不能直接用绑定端口：断路器只记录「用过之后」的失败，进程内为空时它会
-        # 信任所有端口，于是重启后的首批请求会挨个撞上已被拉黑的绑定端口并把账号打成
-        # 风控禁用（2026-10-15 实测）。直连是安全的（实测 200），代价只是暴露真实 IP，
-        # 故作为「不确定时的兜底」而非默认：有干净代理用代理，没有就直连。
-        proxy = None
-        if settings.EGRESS_MODE != "direct" and client is not None:
-            try:
-                from ..client_pool import account_client_pool
-                from ..egress_probe import egress_probe
+        from ..client_pool import RegionOfflineError, account_client_pool
+        from ..egress_probe import egress_probe
 
-                candidate = account_client_pool.client_proxy(client)
-                # 按 (账号, 出口) 组合判定，不是按出口 —— 实测同出口对不同账号
-                # 结果不同（2026-10-15：21200 对 5735 是 3012，对 9149 是 200）。
-                if egress_probe.is_confirmed(account.id, candidate):
-                    proxy = candidate
-            except Exception:  # noqa: BLE001
-                proxy = None
-
+        if client is None or client not in account_client_pool._client_proxies:
+            raise RegionOfflineError("chat 未取得已准入出口")
+        proxy = account_client_pool.client_proxy(client)
+        # 继承代理保留账号/出口确认门禁；显式本地代理直接尝试，失败不改 IP。
+        if (proxy and account_client_pool.policy.chat_mode == "inherit" and
+                not egress_probe.is_confirmed(account.id, proxy)):
+            raise RegionOfflineError("chat 代理尚未通过账号出口确认")
         return await self.host.fetch(
             account=account, model=model, url=url, method="POST",
             headers=headers, payload=payload, proxy=proxy,

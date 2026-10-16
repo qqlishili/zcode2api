@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from app.client_pool import _UNRESOLVED
 from app.fingerprint import DeviceProfile
 from app.install import _fetch_client_configs, run_install_sequence_for_account
 from app.models import Account
@@ -69,7 +70,7 @@ async def test_run_install_sequence_for_account_passes_pool_client(mock_profile,
          patch("app.store.store.update_account"):
 
         result = await run_install_sequence_for_account(acc)
-        mock_get_client.assert_called_once_with(acc, timeout=None, proxy=None)
+        mock_get_client.assert_called_once_with(acc, timeout=None, proxy=_UNRESOLVED, purpose="claim")
         # client 必须被用来拉取 config 和上报事件
         assert mock_client.get.await_count >= 1
         assert mock_client.post.await_count >= 1

@@ -29,9 +29,12 @@ async def run():
     root=Path(sys.argv[1]);egress.REGION_PORT_TIERS=json.loads((root/'ports.json').read_bytes())
     pool=AccountClientPool(registry_path=root/'registry.json')
     old_port=egress.REGION_PORT_TIERS['HK'][0]
+    if sys.argv[2]=='claim-fixed':
+        from app.egress_policy import ClaimBinding,EgressPolicy
+        pool._policy=EgressPolicy(claim_mode='proxy',claim_bindings=(ClaimBinding('HK',old_port,'a'*64,1),))
     manager=CaptchaManager();account=SimpleNamespace(id='worker',assigned_region='HK',proxy=None)
     store=SimpleNamespace(list_accounts=lambda: [account])
-    held=await pool.acquire_operation(account) if sys.argv[2]=='hold' else None
+    held=await pool.acquire_operation(account,purpose='claim' if sys.argv[2]=='claim-fixed' else None) if sys.argv[2] in ('hold','claim-fixed') else None
     await pool.start_coordinator(manager,store)
     (root/(str(__import__('os').getpid())+'.ready')).touch()
     try:
@@ -145,6 +148,38 @@ async def test_all_current_workers_and_stale_or_fixed_confirmation(consumers, mo
         request = dict(request, request_id="new-request", consumers=current)
         write_private_json(root / "egress_retirement.json", request)
         await wait_ack(root, request)
+        assert (await probe.retirement_ready(request, client))[0]
+
+async def test_claim_fixed_binding_blocks_reclaim_after_operation_drains(consumers):
+    root, start = consumers
+    low, high = probe.REGION_PORT_TIERS["HK"]
+    write_registry(probe.REGISTRY_PATH, [(low, "a" * 64, 1, "draining"), (high, "new", 1, "active")])
+    write_private_json(root / "node_lifecycle.json", {"nodes": {
+        "a" * 64: {"port": low, "epoch": 1, "region": "HK", "sources": ["fixture"]},
+    }})
+    fixed = await start("claim-fixed")
+    await start("idle")
+    current = probe.current_consumers()
+    registry = json.loads(probe.REGISTRY_PATH.read_bytes())
+    request = {"request_id": "claim-fixed", "generation": registry["generation"],
+               "slots": {str(low): registry["slots"][str(low)]}, "consumers": current}
+    write_private_json(root / "egress_retirement.json", request)
+    ack = await wait_ack(root, request)
+    assert sum(a["slots"][str(low)]["fixed"] for a in ack) == 1
+    (root / "release").touch()
+    response = httpx.MockTransport(lambda _: httpx.Response(200, json={"connections": []}))
+    async with httpx.AsyncClient(transport=response, base_url="http://controller") as client:
+        async with asyncio.timeout(5):
+            while any(a["slots"][str(low)]["operations"] for a in await wait_ack(root, request)):
+                await asyncio.sleep(.05)
+        assert await probe.retirement_ready(request, client) == (False, "references_pending")
+        fixed.kill()
+        await fixed.wait()
+        await start("idle")
+        request = dict(request, request_id="claim-removed-after-restart", consumers=probe.current_consumers())
+        write_private_json(root / "egress_retirement.json", request)
+        ack = await wait_ack(root, request)
+        assert all(a["slots"][str(low)]["fixed"] == 0 for a in ack)
         assert (await probe.retirement_ready(request, client))[0]
 
 

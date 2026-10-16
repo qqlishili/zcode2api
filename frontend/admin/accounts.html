@@ -1026,8 +1026,8 @@ async function claimAll(){
   showToast(`一键领取完成：成功 ${okCount}，已跳过 ${skipCount}，失败 ${failCount}`, failCount === 0 ? 'success' : 'error');
 }
 
-/* ── 手动领取：浏览器内过阿里滑块 → verifyParam 提交 hub 转发 ── */
-let claimSdkLoaded=false, claimVerifyParam='', claimCfgRegion='';
+/* ── 手动选套餐：显式领取策略使用服务端验证，inherit 保留浏览器路径 ── */
+let claimSdkLoaded=false, claimVerifyParam='', claimCfgRegion='', claimVerificationMode='browser';
 function claimStatus(msg){document.getElementById('claim-status').textContent=msg||'';}
 function setClaimBusy(b){document.getElementById('claim-submit').disabled=b;
   document.getElementById('claim-submit').textContent=b?'提交中…':'领取';}
@@ -1142,6 +1142,12 @@ async function initClaimCaptcha(){
   box.innerHTML='<span class="dialog-help">验证码加载中…</span>';
   try{
     const cfg=await api('GET','/claim/captcha-config');
+    claimVerificationMode=cfg.verification_mode||'browser';
+    if(claimVerificationMode==='server'){
+      box.textContent='由服务器在当前领取出口完成验证码验证';
+      claimStatus('请选择活动后点击领取，服务器将验证并提交');
+      claimStatusColor(true);return;
+    }
     if(cfg.enabled===false||!cfg.scene_id)throw new Error('验证码未启用');
     claimCfgRegion=cfg.region||'';
     await loadCaptchaSdk();
@@ -1200,13 +1206,15 @@ async function submitManualClaim(){
       return;
     }
   }
-  if(!claimVerifyParam){
+  if(claimVerificationMode!=='server'&&!claimVerifyParam){
     claimStatus('请先完成人机验证');claimStatusColor(false);return;
   }
   claimSubmitting=true;
   setClaimBusy(true);
   try{
-    const d=await api('POST','/claim/manual',{
+    const d=claimVerificationMode==='server'?await api('POST','/claim',{
+      account_ids:[account_id],plan_id:plan_manual||plan_sel||undefined,
+    }):await api('POST','/claim/manual',{
       account_id,
       captcha_verify_param:claimVerifyParam,
       captcha_region:claimCfgRegion||undefined,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
+import sqlite3
 import time
 
 import httpx
@@ -116,10 +118,13 @@ async def add_accounts(payload: dict = Body(...)):
 # ── 删除账号 ─────────────────────────────────────────────────────────────────
 @router.delete("/accounts")
 async def delete_accounts(ids: list[str] = Body(...)):
+    from ..client_pool import account_client_pool
+
     deleted = 0
     for aid in ids:
         acc = store.find_any(aid)
         if acc and store.remove_account(acc.provider, aid):
+            await account_client_pool.close_account(acc.id)
             deleted += 1
     _refresh_derived_auth()
     return {"deleted": deleted}
@@ -618,8 +623,11 @@ async def claim_captcha_config():
     """手动领取用：阿里验证码 SDK 初始化参数（前端浏览器内完成人机验证）。"""
     from ..captcha import captcha_manager
 
+    if store.active_egress_policy.claim_mode != "inherit":
+        return {"verification_mode": "server", "enabled": True}
     config = await captcha_manager.fetch_config()
     return {
+        "verification_mode": "browser",
         "enabled": bool(config.get("enabled", True)),
         "scene_id": config.get("sceneId") or "",
         "region": config.get("region") or "",
@@ -633,6 +641,9 @@ async def claim_manual(payload: dict = Body(...)):
 
     verify_param 必须来自用户浏览器内阿里 SDK 滑块成功回调（无头环境无法求解）。
     """
+    if store.active_egress_policy.claim_mode != "inherit":
+        raise HTTPException(409, {"code": "claim_verification_route_mismatch",
+                                  "message": "当前领取出口使用服务端验证，请改用服务端领取"})
     account_id = (payload.get("account_id") or "").strip()
     verify_param = (payload.get("captcha_verify_param") or "").strip()
     region = (payload.get("captcha_region") or "").strip() or None
@@ -763,6 +774,85 @@ async def update_settings(payload: dict = Body(...)):
         flag = "1" if payload["sentinel_auto_claim"] else "0"
         store.set_setting("sentinel_auto_claim", flag)
     return {"ok": True}
+
+def _egress_nodes() -> list[tuple[dict, object]]:
+    from ..client_pool import RegionOfflineError, account_client_pool
+    from ..egress_policy import ClaimBinding
+
+    try:
+        account_client_pool.load_registry()
+        path = account_client_pool._registry_path.parent / "node_lifecycle.json"
+        lifecycle = json.loads(path.read_bytes()) if path.is_file() else {}
+        nodes = []
+        for port, slot in account_client_pool._registry.get("slots", {}).items():
+            if not slot.get("node_id") or slot.get("admission") == "empty":
+                continue
+            binding = ClaimBinding(slot["region"], int(port), slot["node_id"], slot["epoch"])
+            eligible = account_client_pool.claim_binding_eligible(binding)
+            node = lifecycle.get("nodes", {}).get(binding.node_id, {})
+            selection = binding.selection
+            nodes.append(({
+                "selection": selection, "region": binding.region, "port": binding.port,
+                "name": str(node.get("name") or f"{binding.region} {binding.port}"),
+                "selectable": eligible,
+                "reason": "候选，领取尚需实际验证" if eligible else "来源缺失、身份变化或节点已退役",
+            }, binding))
+        return nodes
+    except (RegionOfflineError, OSError, ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(503, "节点注册表或来源暂不可用，请刷新后重试") from exc
+
+
+@router.get("/settings/egress")
+async def get_egress_settings():
+    return store.egress_settings()
+
+
+@router.get("/settings/egress/nodes")
+async def get_egress_nodes():
+    return {
+        "nodes": [view for view, _ in _egress_nodes()],
+        "required_regions": sorted({a.assigned_region for a in store.list_accounts("zai")
+                                    if a.mode == "jwt" and a.allows_billing() and a.assigned_region}),
+    }
+
+
+@router.put("/settings/egress")
+async def update_egress_settings(payload: object = Body(...)):
+    from ..client_pool import account_client_pool
+    from ..constants import REGION_PORT_TIERS
+    from ..egress_policy import parse_policy
+
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "出口配置必须为完整对象")
+    reset = payload == {"restore_environment": True} and payload.get("restore_environment") is True
+    if not reset and set(payload) != {"chat_mode", "chat_proxy_url", "claim_mode", "claim_bindings"}:
+        raise HTTPException(400, "出口配置包含未知字段或缺少必需字段")
+    async with account_client_pool._lock:
+        try:
+            policy = None
+            if not reset:
+                selected = payload["claim_bindings"]
+                if not isinstance(selected, dict) or any(
+                        region not in REGION_PORT_TIERS or not isinstance(token, str)
+                        for region, token in selected.items()):
+                    raise ValueError("领取绑定必须为地区及节点选择标识")
+                candidates = {view["selection"]: (view, binding) for view, binding in _egress_nodes()}
+                bindings = {}
+                for region, token in selected.items():
+                    candidate = candidates.get(token)
+                    if candidate is None or not candidate[0]["selectable"]:
+                        raise HTTPException(409, "节点选择已失效，请刷新节点后重新选择")
+                    view, binding = candidate
+                    if binding.region != region:
+                        raise ValueError("领取节点必须位于账号对应大区")
+                    bindings[region] = {"port": binding.port, "node_id": binding.node_id, "epoch": binding.epoch}
+                policy = parse_policy(dict(payload, claim_bindings=bindings)).as_dict()
+            return store.save_egress_policy(policy)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except sqlite3.Error as exc:
+            logs.warn("settings", "出口配置写入失败，保留原配置")
+            raise HTTPException(500, "出口配置保存失败，原配置未改变") from exc
 
 
 @router.post("/settings/bark/test")

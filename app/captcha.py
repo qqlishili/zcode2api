@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 _sleep = asyncio.sleep
 
 # 每端口水位：见 settings.py 注释与 openspec/changes/pin-captcha-egress-and-refill-domain design.md D3
+_UNSPECIFIED = object()
 TOKEN_TTL_MS = settings.CAPTCHA_TOKEN_TTL  # 单枚 token 的最大可用时长（ms）
 
 
@@ -461,9 +462,9 @@ class CaptchaManager:
 
         operation = operation or account_client_pool.current_operation()
         expected_proxy = operation.proxy if operation is not None else proxy
-        if expected_proxy is None and account is not None:
-            expected_proxy = account_client_pool.resolve_proxy(account)
-        if account is None and expected_proxy is None and port is not None:
+        if operation is None and expected_proxy is None and account is not None:
+            expected_proxy = account_client_pool.resolve_proxy(account, purpose="chat")
+        if operation is None and account is None and expected_proxy is None and port is not None:
             expected_proxy = f"http://127.0.0.1:{port}"
 
         identity = operation.identity if operation is not None else account_client_pool.proxy_identity(expected_proxy)
@@ -483,7 +484,8 @@ class CaptchaManager:
                 "source": "hit", "port": evidence.port_of(expected_proxy),
                 "stage": "extract", "hit": True, "param_chars": len(token.param or ""),
             })
-            self._schedule_refill(expected_proxy)
+            if operation is None or operation.purpose != "claim":
+                self._schedule_refill(expected_proxy)
             return token.param, token.region
 
         # 2) 水库空仓：通过 Singleflight 现解
@@ -503,7 +505,8 @@ class CaptchaManager:
             raise
         if token is None:
             raise CaptchaSolveError("验证码求解失败")
-        self._schedule_refill(expected_proxy)
+        if operation is None or operation.purpose != "claim":
+            self._schedule_refill(expected_proxy)
         return token.param, token.region
 
     # ── Singleflight 与实际求解 ──────────────────────────────────────────────
@@ -523,7 +526,8 @@ class CaptchaManager:
                     return None
                 # producer 的引用由自身持有，等待者取消不能提前报告排空。
                 admitted = await account_client_pool.acquire_operation(
-                    proxy=proxy, identity=identity, parent=operation, kind="producer")
+                    proxy=proxy, identity=identity, parent=operation, kind="producer",
+                    purpose=operation.purpose if operation is not None else "chat")
                 solve = _Solve(asyncio.get_running_loop().time() + settings.CAPTCHA_SOLVE_TIMEOUT,
                                operation=admitted)
                 self._in_flight_solves[key] = solve
@@ -575,7 +579,7 @@ class CaptchaManager:
                     token.identity = solve.operation.identity
                     succeeded = True
                 if (token is not None and not solve.foreground and solve.refill and
-                        solve.operation.pool.proxy_eligible(proxy, token.identity)):
+                        solve.operation.pool.proxy_eligible(proxy, token.identity, purpose=solve.operation.purpose)):
                     self._put(token)
                 return token
         except TimeoutError:
@@ -713,7 +717,9 @@ class CaptchaManager:
     def retire_egress(self, pool) -> None:
         for proxy, q in self._proxy_pools.items():
             identity = pool.proxy_identity(None if proxy == "__default__" else proxy)
-            eligible = pool.proxy_eligible(None if proxy == "__default__" else proxy, identity)
+            actual = None if proxy == "__default__" else proxy
+            eligible = (pool.proxy_eligible(actual, identity, purpose="chat") or
+                        pool.proxy_eligible(actual, identity, purpose="claim"))
             retained = [t for t in q if eligible and t.identity == identity and not t.expired()]
             q.clear()
             q.extend(retained)
@@ -721,30 +727,25 @@ class CaptchaManager:
     def egress_token_count(self, identity: tuple) -> int:
         return sum(t.identity == identity for q in self._proxy_pools.values() for t in q)
 
-    def invalidate(self, region: str | None = None, proxy: str | None = None) -> None:
-        """靶向清空失效 Token，严禁跨大区株连。"""
-        drained = 0
-        if proxy:
-            q = self._proxy_pools.get(proxy)
-            if q:
-                drained += len(q)
-                q.clear()
+    def invalidate(self, region: str | None = None, proxy=_UNSPECIFIED, *, identity=None) -> None:
+        """显式 proxy=None 只清直连；未传目标的旧维护调用仍支持全池清理。"""
+        if proxy is not _UNSPECIFIED:
+            keys = [proxy or "__default__"]
         elif region:
             from .client_pool import account_client_pool
-            reg_map = account_client_pool.load_registry()
-            ports = reg_map.get(region, [])
-            for port in ports:
-                p_url = f"http://127.0.0.1:{port}"
-                q = self._proxy_pools.get(p_url)
-                if q:
-                    drained += len(q)
-                    q.clear()
+            keys = account_client_pool.load_registry().get(region, [])
         else:
-            for q in self._proxy_pools.values():
-                drained += len(q)
+            keys = list(self._proxy_pools)
+        drained = 0
+        for key in keys:
+            q = self._proxy_pools.get(key)
+            if q:
+                retained = [token for token in q if identity is not None and token.identity != identity]
+                drained += len(q) - len(retained)
                 q.clear()
+                q.extend(retained)
         if drained:
-            logs.warn("captcha", f"验证码失效（region={region}, proxy={proxy}），清空 Token {drained} 枚")
+            logs.warn("captcha", f"验证码目标失效，清空 Token {drained} 枚")
 
 
 captcha_manager = CaptchaManager()

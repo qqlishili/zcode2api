@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>zcode-hub · 设置</title>
+  <title>zcode-hub · 配置管理</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preload" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
   <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/geist@1.0.0/dist/fonts/geist-sans/style.css"></noscript>
@@ -15,11 +15,11 @@
 <main class="admin-main">
   <div class="page-hd">
     <div>
-      <div class="page-title">设置</div>
-      <div class="page-sub">后台鉴权密钥与网关访问控制</div>
+      <div class="page-title">配置管理</div>
+      <div class="page-sub">鉴权、运行设置与出口分流</div>
     </div>
     <div class="page-actions">
-      <button onclick="load()" class="page-action-btn" title="重新从服务端加载设置">
+      <button onclick="load();loadEgress()" class="page-action-btn" title="重新从服务端加载设置">
         <svg width="14" height="14" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><path d="M20 11a8 8 0 0 0-14.6-4.6"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.6 4.6"/><path d="M20 20v-5h-5"/></svg>
         重载
       </button>
@@ -109,6 +109,41 @@
       </div>
     </div>
 
+    <!-- 出口配置独立保存，仅重启生效 -->
+    <div class="settings-card settings-card-wide">
+      <div class="settings-card-hd"><div class="section-title">出口分流</div></div>
+      <div class="hint">保存后需重启网关生效。保存不会切换出口、发起领取或启动 WARP。</div>
+      <div class="settings-row">
+        <label for="egress-chat-mode">对话出口</label>
+        <select class="input" id="egress-chat-mode" onchange="updateEgressFields()">
+          <option value="inherit">继承全局模式</option><option value="direct">直连</option>
+          <option value="warp">WARP（本地 40000）</option><option value="proxy">指定本地 HTTP 代理</option>
+        </select>
+      </div>
+      <div class="settings-row" id="egress-chat-url-row" hidden>
+        <label for="egress-chat-url">本地 HTTP 代理 URL</label>
+        <input class="input" id="egress-chat-url" placeholder="http://127.0.0.1:40000" autocomplete="off">
+      </div>
+      <div class="settings-row">
+        <label for="egress-claim-mode">活动领取出口</label>
+        <select class="input" id="egress-claim-mode" onchange="updateEgressFields()">
+          <option value="inherit">继承全局模式</option><option value="direct">直连</option>
+          <option value="proxy">固定同区代理</option>
+        </select>
+        <div class="hint">显式领取配置使用服务端验证码；节点候选尚需真实领取验证。</div>
+      </div>
+      <div id="egress-bindings"></div>
+      <div class="hint" id="egress-coverage" role="status"></div>
+      <div class="settings-row">
+        <div id="egress-active"></div><div id="egress-saved"></div>
+        <div class="hint" id="egress-pending" role="status" aria-live="polite"></div>
+      </div>
+      <div class="settings-footer-actions">
+        <button class="btn btn-ghost" id="egress-reset" onclick="saveEgress(true)">恢复环境默认</button>
+        <button class="btn btn-primary" id="egress-save" onclick="saveEgress(false)">保存出口配置</button>
+      </div>
+    </div>
+
     <!-- 网关使用指南与端点 -->
     <div class="settings-card settings-card-wide">
       <div class="settings-card-hd">
@@ -144,6 +179,7 @@
   if(!isKeyVerified(key)&&!await verifyKey(ADMIN_API+'/verify',key).catch(()=>false))return location.href='/admin/login';
   document.getElementById('endpoint').textContent=location.origin+'/v1/messages';
   load();
+  loadEgress();
 })();
 
 async function load(){
@@ -234,6 +270,81 @@ async function saveSettings(){
     if(payload.admin_key) await adminKey.set(payload.admin_key);
     showToast('已保存','success');
   }catch(e){showToast('保存失败: '+e.message,'error');}
+}
+
+const egressRegions=['HK','TW','JP','SG','US','KR','EU','OTHER'];
+let egressRequired=[];
+
+function describeEgress(policy){
+  const labels={inherit:'继承全局',direct:'直连',proxy:'代理'};
+  const chat=labels[policy.chat_mode]+(policy.chat_mode==='proxy'?' '+policy.chat_proxy_url:'');
+  const bindings=Object.entries(policy.claim_bindings).map(([r,b])=>r+':'+b.port).join('、');
+  return '对话 '+chat+'；领取 '+labels[policy.claim_mode]+(bindings?'（'+bindings+'）':'');
+}
+
+function showEgressState(state){
+  const source={environment:'环境默认',database:'数据库'};
+  document.getElementById('egress-active').textContent='当前生效 ['+source[state.active_source]+']：'+describeEgress(state.active_policy);
+  document.getElementById('egress-saved').textContent='已保存目标 ['+source[state.saved_source]+']：'+describeEgress(state.saved_policy);
+  document.getElementById('egress-pending').textContent=state.pending_restart?'待重启生效，当前请求继续使用原出口':'已保存目标与当前生效一致';
+}
+
+async function loadEgress(){
+  try{
+    const [state,candidates]=await Promise.all([api('GET','/settings/egress'),api('GET','/settings/egress/nodes')]);
+    const policy=state.saved_policy;
+    egressRequired=candidates.required_regions||[];
+    document.getElementById('egress-chat-mode').value=policy.chat_mode==='proxy'&&policy.chat_proxy_url==='http://127.0.0.1:40000'?'warp':policy.chat_mode;
+    document.getElementById('egress-chat-url').value=policy.chat_proxy_url;
+    document.getElementById('egress-claim-mode').value=policy.claim_mode;
+    const container=document.getElementById('egress-bindings');
+    container.replaceChildren();
+    egressRegions.forEach(region=>{
+      const row=document.createElement('div');row.className='settings-row';
+      const label=document.createElement('label');label.htmlFor='egress-'+region;label.textContent=region+' 领取节点';
+      const select=document.createElement('select');select.className='input';select.id='egress-'+region;
+      select.add(new Option('未配置（该区领取离线）',''));
+      (candidates.nodes||[]).filter(node=>node.region===region).forEach(node=>{
+        const option=new Option(node.name+' · '+node.port+' · '+node.reason,node.selection);
+        option.disabled=!node.selectable;select.add(option);
+      });
+      const saved=(state.saved_selections||{})[region];
+      if(saved&&!Array.from(select.options).some(option=>option.value===saved)){
+        const option=new Option('已保存节点已失效，请重新选择',saved);option.disabled=true;select.add(option);
+      }
+      select.value=saved||'';select.onchange=updateEgressFields;
+      row.append(label,select);container.append(row);
+    });
+    showEgressState(state);updateEgressFields();
+  }catch(e){showToast('出口配置加载失败: '+e.message,'error');}
+}
+
+function updateEgressFields(){
+  document.getElementById('egress-chat-url-row').hidden=document.getElementById('egress-chat-mode').value!=='proxy';
+  const proxy=document.getElementById('egress-claim-mode').value==='proxy';
+  document.getElementById('egress-bindings').hidden=!proxy;
+  const missing=egressRequired.filter(region=>{const select=document.getElementById('egress-'+region);return !select?.value||select.selectedOptions[0]?.disabled;});
+  document.getElementById('egress-coverage').textContent=proxy?'允许查询账号的大区覆盖 '+(egressRequired.length-missing.length)+'/'+egressRequired.length+(missing.length?'；未配置：'+missing.join('、'):''):'领取将使用所选模式';
+}
+
+async function saveEgress(reset){
+  const save=document.getElementById('egress-save'),restore=document.getElementById('egress-reset');
+  const selected=document.getElementById('egress-chat-mode').value;
+  const bindings={};
+  egressRegions.forEach(region=>{const value=document.getElementById('egress-'+region)?.value;if(value)bindings[region]=value;});
+  const payload=reset?{restore_environment:true}:{
+    chat_mode:selected==='warp'?'proxy':selected,
+    chat_proxy_url:selected==='warp'?'http://127.0.0.1:40000':selected==='proxy'?document.getElementById('egress-chat-url').value.trim():'',
+    claim_mode:document.getElementById('egress-claim-mode').value,claim_bindings:bindings,
+  };
+  save.disabled=true;restore.disabled=true;
+  try{
+    const state=await api('PUT','/settings/egress',payload);
+    showEgressState(state);
+    showToast(state.pending_restart?'已保存，需重启网关生效':'已保存，当前生效一致','success');
+    if(reset)await loadEgress();
+  }catch(e){showToast('出口配置保存失败: '+e.message,'error');}
+  finally{save.disabled=false;restore.disabled=false;}
 }
 </script>
 </body>

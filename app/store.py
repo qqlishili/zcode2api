@@ -17,6 +17,7 @@ import uuid
 from contextlib import closing
 
 from . import settings
+from .egress_policy import EgressPolicy, parse_policy
 from .models import PROVIDERS, Account, Status
 
 _TBL = "accounts"
@@ -33,6 +34,9 @@ class Store:
         self._rotation: dict[str, int] = {p: 0 for p in PROVIDERS}
         self._init_db()
         self._load()
+        # CLI 和网关共用 Store 启动顺序，网络任务只能看到完整的生效快照。
+        self._environment_egress_policy = settings.EGRESS_POLICY
+        self.active_egress_policy, self.active_egress_source = self._saved_egress_policy()
 
     # ── SQLite 基础 ──────────────────────────────────────────────────────────
     def _connect(self) -> sqlite3.Connection:
@@ -193,6 +197,44 @@ class Store:
         with self._lock:
             self._settings[key] = str(value)
             self._set_meta(key, str(value))
+
+    def _saved_egress_policy(self) -> tuple[EgressPolicy, str]:
+        raw = self._settings.get("egress_policy")
+        if raw is None:
+            return self._environment_egress_policy, "environment"
+        try:
+            return parse_policy(json.loads(raw)), "database"
+        except (ValueError, TypeError) as exc:
+            raise ValueError("已保存的出口策略损坏，拒绝回退环境默认") from exc
+
+    def egress_settings(self) -> dict:
+        with self._lock:
+            saved, source = self._saved_egress_policy()
+            return {
+                "active_policy": self.active_egress_policy.as_dict(),
+                "active_source": self.active_egress_source,
+                "saved_policy": saved.as_dict(), "saved_source": source,
+                "saved_selections": {b.region: b.selection for b in saved.claim_bindings},
+                "pending_restart": (saved, source) != (self.active_egress_policy, self.active_egress_source),
+            }
+
+    def save_egress_policy(self, value: dict | None) -> dict:
+        policy = parse_policy(value) if value is not None else None
+        raw = json.dumps(policy.as_dict(), ensure_ascii=False, sort_keys=True) if policy else None
+        with self._lock:
+            with closing(self._connect()) as conn:
+                if raw is None:
+                    conn.execute(f"DELETE FROM {_META} WHERE key = ?", ("egress_policy",))
+                else:
+                    conn.execute(f"INSERT OR REPLACE INTO {_META} (key, value) VALUES (?, ?)",
+                                 ("egress_policy", raw))
+                conn.commit()
+            # 写失败不能先污染已保存视图；运行快照只在新进程初始化时加载。
+            if raw is None:
+                self._settings.pop("egress_policy", None)
+            else:
+                self._settings["egress_policy"] = raw
+            return self.egress_settings()
 
     def admin_key(self) -> str:
         return str(self.get_setting("admin_key", settings.DEFAULT_ADMIN_KEY) or "")

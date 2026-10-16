@@ -286,7 +286,8 @@ async def test_full_cycle_and_consumer_fenced_retirement(tmp_path, monkeypatch):
     async with tcp_upstream() as (upstream, started, done):
         async with isolated_production(tmp_path, monkeypatch, upstream) as (config, life, process):
             low = min(probe.config_tcp_listeners(config))
-            account = SimpleNamespace(id='consumer', assigned_region='HK', proxy=None, status='active', enabled=True)
+            account = SimpleNamespace(id='consumer', assigned_region='HK', proxy=None, status='active',
+                                      enabled=True, secret='isolated-probe-fixture')
             store = SimpleNamespace(list_accounts=lambda *args: [account])
             pool = AccountClientPool(registry_path=probe.REGISTRY_PATH, idle_timeout=0)
             manager = CaptchaManager()

@@ -406,7 +406,8 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
             or billing_block_reason(account, action="上游查询")
             or AUTH_EXPIRED_MESSAGE
         }
-    async with account_client_pool.operation(account) as operation:
+    async with account_client_pool.operation(
+            account, purpose="claim" if account.provider == "zai" and account.mode == "jwt" else None) as operation:
         headers = _auth_headers(account)
         base = settings.ZCODE_BILLING_BASE
         result: dict = {}

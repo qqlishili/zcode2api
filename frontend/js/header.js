@@ -8,7 +8,7 @@ function renderAdminHeader(){
   const nav=[
     ['/admin/accounts','账号池'],
     ['/admin/monitoring','请求监控'],
-    ['/admin/settings','设置'],
+    ['/admin/settings','配置管理'],
   ].map(([href,label])=>
     `<a href="${href}" class="admin-nav-link${href===active?' active':''}">${label}</a>`
   ).join('');
