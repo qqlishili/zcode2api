@@ -1,5 +1,7 @@
 # HK / JP 出口恢复核验（2026-10-16）
 
+**21:11 CST 新结论**：HK / JP 对话返回 3012，但同区领取 POST 可返回 1003（已领取），不能把对话拒绝外推为全部 billing 接口拒绝。WARP 普通对话及 SSE 通过；按用途分流尚未实施，线上继续 plugin + direct。真实新活动发额度仍未验收，详见文末对照。
+
 本轮由用户授权恢复线上出口并验证真实请求、SSE。节点对照于 15:59–16:16 CST 完成；用户随后批准临时直连及 Git 发布，约 17:00 CST 公网普通请求与 SSE 验收通过。**HK / JP 节点恢复仍未完成**，没有把直连成功或 TW 成功记作同区恢复。
 
 18:14–18:32 CST 又从 VPS 完成全部配置的独立插件复测，详见[142 个业务节点及 1 条信息项的完整清单](egress_node_inventory_20261016.md)：正常 4 个（普通请求与 SSE 均通过）、405/3012 拒绝 125 个、连续两次请求失败 13 个。赔钱机场正常 1 个，kcyun 导入源正常 3 个；后者按文件名推定对应快冲云，正式来源链接未保存。旧 active 的台湾3、美国 Hacienda Heights S11、埃及 Alexandria A1 本轮未通过，不能沿用旧“7 个可服务”的判断。此次最小插件请求不附验证码头，未完成逐节点真实验证码验收；生产准入和配置未变，前后直连对照通过。
@@ -109,3 +111,47 @@ Windows 外部客户端再次直接请求公网网关 `http://107.174.244.167:18
 17:28 CST 再核对：WARP 为 PID 722852，启动时间 17:06:44，仍是 `WarpProxy on port 40000`、MASQUE、Connected/healthy；此前 PID 2440689 是旧快照，本轮诊断没有操作 WARP 服务。网关 PID 715879、Mihomo PID 2797546 仍 active、NRestarts=0；上游目标路由仍经 eth0、源地址 `107.174.244.167`。
 
 影响：全局 direct 会让业务账号及使用该连接池的后台账号操作共享 VPS 公网 IP；原账号 assigned_region 和各自凭证/设备数据保留，但实际外呼不再按 HK / JP 分流。上游可以观察到相同来源 IP，结合令牌和行为关联账号；本次短时成功不能证明长期多账号同 IP 没有风控风险，也不能预测必然封号。此模式作为已获准的临时业务恢复，HK / JP 独立出口恢复继续开放。
+
+## 活动领取与对话分流对照（19:17 及 21:07–21:10 CST）
+
+用户要求验证领取接口是否也返回 3012，并判断可否“节点只做领取，对话走直连或 WARP”。本轮在 VPS 隔离进程读取生产 SQLite（`mode=ro`），沿用已有账号指纹，显式指定代理、关闭环境代理继承；没有启动生产 store 生命周期、自动领取全池或通知，没有改变生产出口。
+
+源码核对：`app/claim.py` 的 `preview_plans` 使用 `GET /billing/preview`，`_post_claim` 使用 `POST /billing/claim`（JSON `{plan_id}`），均位于 `https://zcode.z.ai/api/v1/zcode-plan`；对话则是 `/anthropic/v1/messages`。`_claim_headers` 复用 `quota._auth_headers`，保留该号设备/平台并附验证码。`_billing_request`、`claim`、`claim_with_captcha` 进入同一 `account_client_pool.operation`；`app/client_pool.py` 的 direct 优先于显式代理，`app/settings.py` 和 `.env.example` 目前没有独立的领取/对话出口开关。领取节流参数 `CLAIM_PROXY_INTERVAL` 只管频率，不选择出口。
+
+19:17 使用同一 HK、JP 两账号，在直连 / HK `21100` / JP `21300` / TW `21200` / WARP 各查 preview、current，共 20 次 GET 全部 `200/code=0`；两账号均已持有 Start Plan、preview 为空。Cloudflare trace 分别确认出口：
+
+| 路径 | 公共 HTTPS 出口 | trace |
+|---|---|---|
+| direct | `107.174.244.167`，US | `warp=off` |
+| HK `21100` | `116.49.103.221`，HK | `warp=off` |
+| JP `21300` | `39.110.230.58`，JP | `warp=off` |
+| TW `21200` | `36.230.59.156`，TW | `warp=off` |
+| WARP `40000` | `2a09:bac1:76a0:450::57b:3e`，US | `warp=on` |
+
+这是 trace 请求的出口观测，不把它当作每个上游连接都固定使用同一地址的证明。21:07–21:10 对同一个已持有套餐 `zcode-v3-start-plan-0817`，提交领取 POST 前在该出口重新读取 current 确认归属，并通过该出口新解验证码：
+
+| 路径 | 真实验证码 / 领取 POST | 同轮官方插件对话 |
+|---|---|---|
+| direct | 280 字符；HTTP 200、code 1003、`target already exists` | 普通 2.15 秒、SSE 2.46 秒，均 200 / `OK` / `end_turn` |
+| HK `21100` | 280 字符；HTTP 200、code 1003 | 普通 HTTP 405、code 3012；未继续 SSE |
+| JP `21300` | 首轮 HK 账号验证码 25 秒预算耗尽、未提交；补测 JP 账号同区新解 280 字符，HTTP 200、code 1003 | 固定 HK 账号普通 HTTP 405、code 3012；未继续 SSE |
+| TW `21200` | 4 次均 `param_too_short`（76 字符），严格校验未通过，未提交 POST | 普通 3.22 秒、SSE 1.61 秒，均 200 / `OK` / `end_turn` |
+| WARP `40000` | 280 字符；HTTP 200、code 1003 | 普通 2.53 秒、SSE 1.58 秒，均 200 / `OK` / `end_turn` |
+
+三路成功 SSE 均有 `message_start`、`message_stop`、文本 `OK`、`end_turn`、流内错误 0；这是 VPS → 官方插件 → 上游对照，不冒充 WARP 下的公网网关完整验收。每个出口新建插件宿主，避免此前 selector 切换后的连接复用问题。这轮对话不附验证码头，领取各使用新解真实验证码，二者不是完全相同的请求形态；此前 HK / JP 对话附真实验证码仍 3012 的独立结果继续保留。
+
+21:10 将 direct preview 扩展到 13 个允许 billing 的账号（active 3、exhausted 10），逐个均 `200/code=0`、plans 为空；其余 3 个 disabled 没有发送请求。未上报新的激活事件来制造活动资格，也未借用其它账号候选套餐。**1003 是“已领取”业务返回，并非新增额度成功；不能据此确认所有未领活动可领、所有 HK / JP 节点可领，或上游在去重返回前确实验证了验证码。**没有当前可领活动，真实新活动 `code=0` 及额度落账验收保持未完成。
+
+分流方案具有接口通路证据：保留 HK / JP 节点给领取链路，对话可使用已验证的 direct 或 WARP。但当前全局出口策略没有用途维度，尚不能通过一项现成配置把领取与对话分开；本轮没有新增生产配置或源码改动。后续最小实现应让手动/自动领取、preview、领取内激活、验证码 producer 继承同一固定代理和操作身份，对话单独选择 direct / WARP；保留领取的同区隔离、20 秒默认物理出口节流、退役引用和代理代次校验。不能把已对话失败的节点直接重新标成“对话健康”，也不能仅修改 claim POST 而让验证码仍走另一出口。
+
+对话使用 WARP 并不会自动为每个账号分配独立出口，也没有消除同 IP 关联风险的证据。当前生产保留此前授权的 plugin + direct；WARP PID 755387，仍 `WarpProxy on port 40000`、Connected；网关/Mihomo PID 715879/2797546，均 active、NRestarts=0。16 个账号仍 active 3 / exhausted 10 / disabled 3，active 的 risk_strikes 均 0；不作长期账号安全保证。五份诊断的 `.env`、生命周期、注册表和 Mihomo 配置哈希断言均未变。
+
+原始报告（目录 0700、报告 0600，临时 auth 副本已清理）：
+
+- VPS `/root/egress-claim-20261016-suqeuvby/report.json`；本地忽略目录 `data/diagnostics/handoff-20261016/egress-claim-query-20261016.json`：20 项 GET 和真实出口。
+- VPS `/root/egress-claim-20261016-kcxxgde3/report.json`；本地 `egress-claim-post-20261016.json`：直连/HK/WARP 的真实验证码与 POST，以及 JP/TW 首轮求解失败。
+- VPS `/root/egress-claim-20261016-c78xlnyr/report.json`；本地 `egress-claim-chat-20261016.json`：五出口普通请求、三路成功 SSE。
+- VPS `/root/egress-claim-20261016-aa8pqjkv/report.json`；本地 `egress-claim-eligibility-20261016.json`：13 个允许 billing 的账号无当前可领活动。
+- VPS `/root/egress-claim-20261016-a67pyubv/report.json`；本地 `egress-claim-jp-post-20261016.json`：JP 同区账号补测 POST 返回 1003。
+
+本轮仅完成接口差异及分流可行性核验，未实施分流、未核销 HK / JP 对话恢复或原 11 项待办。
