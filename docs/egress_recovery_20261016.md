@@ -1,6 +1,6 @@
 # HK / JP 出口恢复核验（2026-10-16）
 
-本轮由用户授权恢复线上出口并验证真实请求、SSE。核验约于 15:59–16:16 CST 完成；**HK / JP 恢复仍未完成**，没有把通用网站连通、直连成功或 TW 成功记作同区恢复。
+本轮由用户授权恢复线上出口并验证真实请求、SSE。节点对照于 15:59–16:16 CST 完成；用户随后批准临时直连及 Git 发布，约 17:00 CST 公网普通请求与 SSE 验收通过。**HK / JP 节点恢复仍未完成**，没有把直连成功或 TW 成功记作同区恢复。
 
 ## 实测结论
 
@@ -14,7 +14,8 @@
 | 同一 HK 账号，经 TW `21200` | 200，文本 `OK`，`end_turn` | 200，文本 `OK`，有 `message_start` / `message_stop` |
 | 同一 HK 账号，经 HK `21100` | 405 / 3012 | 405 / 3012，未建立业务 SSE |
 | 同一 JP 账号，经 JP `21300` | 405 / 3012 | 405 / 3012，未建立业务 SSE |
-| Windows 外部客户端 → 公网网关 `/v1/chat/completions` | 503，`unknown_unavailability` | 503，未建立 SSE |
+| Windows 外部客户端 → 公网网关，修正发布前 | 503，`unknown_unavailability` | 503，未建立 SSE |
+| Windows 外部客户端 → 公网网关，`9ad47f7` 发布后 | 200，文本 `OK`，`finish_reason=stop` | 200，文本 `OK`，`finish_reason=stop`、`[DONE]`，流内错误 0 |
 
 以上 a1–a3 仅为本报告别名，不能和其它诊断中的序号作账号关联。测试模型为 `GLM-5.3-Flash`；上游对照直接调用现有 `PluginHost.fetch` 并显式指定代理，不经过 `PluginChannel` 的未确认代理直连兜底。因此代理成功结果没有混入直连成功。公网请求另从 Windows 实际发送，未用 VPS 本机请求代替。
 
@@ -49,10 +50,11 @@
 - `egress-transport-exact-request.json`：最终外发请求的独立传输重放；其中复用宿主后的 HK 行不采信，独立 httpx / Bun 行有效。
 - `egress-http-socks-comparison.json`：HTTP CONNECT / SOCKS5h 与 TLS 验证结果。
 - `external-gateway-before.json`：Windows 外部客户端实际 503。
+- `external-gateway-direct-after.json`：修正发布后，Windows 公网非空响应及正常 SSE 终态断言均通过；非流式 12.5 秒、SSE 6.5 秒，含客户端到网关及验证码耗时。
 
 对应 VPS 原始报告保留在 `/root/egress-restore-20261016-akuu7qju/report.json`、`/root/egress-sse-20261016-ifsm79lp/report.json`、`/root/egress-wire-20261016-cfcwqk3_/report.json`、`/root/egress-tunnel-20261016-6y9pxird/report.json`。目录权限 0700，报告权限 0600。临时凭据和请求头文件在核验结束后清理，不进入 Git。
 
-## 恢复状态与下一步
+## 临时恢复结果与 HK / JP 剩余事项
 
 用户确认没有其它节点。现有 HK / JP 没有找到可服务出口，不能通过放宽准入、改地区标签或把 3012 标健康来完成恢复。
 
@@ -60,7 +62,11 @@
 
 原因已由源码、实际 503 和新增失败测试共同复现：`PluginChannel` 识别 direct，但 `AccountClientPool.get_healthy_regions`、`is_region_healthy` 仍以代理大区过滤账号，连接池也禁止已绑定账号直连。因此准备最小修正，使显式 direct 配置贯穿调度、解析和客户端获取；proxy 模式的同区隔离及禁止静默降级规则保留。
 
-修正涉及 `app/client_pool.py` 和 `tests/unit/test_egress_operations.py`。新增 3 项回归先失败；修正后相关 9 份测试共 71 项通过，最后一次修改后受影响操作测试 12 项复验通过。Windows Ruff 原生进程因 DLL 初始化失败退出（3221225794），改用 VPS 已有 Ruff 对上传的候选源码和测试运行，检查通过。用户已明确授权本次 Git 提交、推送及原目录快进部署，正在发布；公网恢复以发布后真实验收为准。
+修正涉及 `app/client_pool.py` 和 `tests/unit/test_egress_operations.py`。新增 3 项回归先失败；修正后相关 9 份测试共 71 项通过，最后一次修改后受影响操作测试 12 项复验通过。Windows Ruff 原生进程因 DLL 初始化失败退出（3221225794），改用 VPS 已有 Ruff 对候选源码和测试运行，检查通过。用户已明确授权 Git 提交、推送和部署，发布提交为 `9ad47f7b8331a647fdde385747452a04e958183a`；VPS 原目录已快进，源码/测试 SHA-256 与本地相符。
+
+发布后公网实际请求均通过：非流式文本 `OK`；SSE 有文本 `OK`、正常 stop 和 `[DONE]`、流内错误 0。生产证据库对应成功记录为 `b79c49266cd9fb08`（非流式）和 `effbe7a28843afb6`（SSE），均 `status=200 / ok=1`。此结果只验收 `GLM-5.3-Flash` 的 `/v1/chat/completions`，未扩大为全部模型或全部 API 验收。
+
+最终网关 PID 715879、Bun 子进程 715881，当前 PID 的日志确认官方插件宿主就绪、13 个凭证槽；看到的“读取循环结束/降级 native”警告属于重启前 PID 687842。Mihomo PID 2797546、WARP PID 2440689 均保持原值；三服务 active、NRestarts=0。16 个账号仍为 active 3、exhausted 10、disabled 3，active 账号 HK 2 / JP 1、risk_strikes 均为 0；这不是长期风控安全保证。
 
 回退材料为 VPS `/root/egress-direct-recovery-20261016-0gck0fjw/`，包含权限 0600 的 `env.before`、`client_pool.py.before` 和哈希清单。`external-gateway-direct-config-only.json` 保留仅切配置后的真实 503，`direct-mode-red.xml`、`direct-mode-green.xml`、`direct-mode-final.xml` 保留失败与回归结果。
 
@@ -70,6 +76,7 @@
 
 - `warp-svc` 运行、`warp-cli status` 为 Connected；实际配置是 `WarpProxy on port 40000`、MASQUE，仅监听 `127.0.0.1:40000`，不是系统全局隧道。
 - `zcode2api` 进程没有 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY 环境变量。Cloudflare HTTPS trace 实测 `ip=107.174.244.167`、`loc=US`、`warp=off`、`gateway=off`，ipify 独立确认同一个 IP。
+- 用网关实际进程的环境运行相同 Bun 运行时，再次取得 `ip=107.174.244.167 / loc=US / warp=off`，没有用登录 shell 的代理设置替代应用环境。
 - 当时 `zcode.z.ai` 解析为 `47.246.23.189`，实际路由经 `eth0`、源地址 `107.174.244.167`；没有 `/etc/hosts` 覆盖。已检查 nft/iptables 的地址转换规则，只有既有 Docker 入站 DNAT，未发现把本项目出站转入 WARP 的规则。
 - 因此本次 direct 使用 VPS 原生公网出口，不自动经过现有 WARP 代理，也不因“为 CF 优化”而获得独立账号出口。未改 WARP、系统路由、DNS 或防火墙。
 
