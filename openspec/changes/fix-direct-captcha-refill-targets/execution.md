@@ -16,8 +16,9 @@
 - **真实公网验收**：01:45 Windows 显式不使用本机代理，访问公网 `/v1/chat/completions`，`GLM-5.3-Flash`。普通请求 200 / `OK` / stop，2.890 秒；SSE 200 / `OK` / stop，5.719 秒，收到 `[DONE]`，流内错误 0。临时认证文件在 VPS 下载后立即删除、本机验收结束后删除，报告不含凭证。
 - **生产补货观察**：就绪后观察 140.5 秒，超过 token TTL 75 秒。与重启前同长度窗口比较，refill **22 → 6**，hit **7 → 6**；两个窗口均有 7 次成功业务请求，后窗口另有 2 次 foreground 求解。修复后补货发生于就绪后 4.6 / 10.2 / 24.4 / 55.8 / 68.1 / 94.6 秒，观察末尾 45.9 秒未再补货。结合满水位回归，确认目标错配引发的持续补货已修复；正常消费/过期补货保留，不把旧窗口全部补货判为浪费，也不据此宣称容量或长期命中率已验收。
 - 原 15 份本地文档改动逐文件 SHA-256 与实施前一致，未纳入本修复提交；交接同步本子项完成及主线未完成边界。change 不自动归档，不修改旧 change 的核销状态。
+- **验收后定时更新**：`mihomo-probe-updater.service` 于 01:45:22–01:51:51 自动运行、ExecMainStatus=0，01:51 更新 `.env`、注册表及生命周期，后续哈希因此不同于发布前保全值。01:55 实际网关仍为 `plugin + direct`、PID `1132673`，Mihomo 配置哈希未变；注册表 active 5（新增 TW `21201`）、draining 136、empty 659，HK / JP 准入仍为 0。发布阶段和 140.5 秒验收窗口配置一致的结论保留时间边界；没有回写文件抹掉此次独立更新，新增节点当前普通/SSE 未手动复验。
 
-本地忽略目录 `data/diagnostics/direct-refill-fix-20261017/` 保存 `public-acceptance.json`、`manifest.json`、`observation.json`、`final-status.json` 与隔离测试 JUnit。VPS 回退目录保存对应运行证据。
+本地忽略目录 `data/diagnostics/direct-refill-fix-20261017/` 保存 `public-acceptance.json`、`manifest.json`、`observation.json`、`final-status.json`、`updater-status.json` 与隔离测试 JUnit。VPS 回退目录保存对应运行证据。
 
 ## 剩余限制
 
