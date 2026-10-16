@@ -183,3 +183,37 @@
 - “登记区”来自现有生命周期配置，和节点原名所写的国家可能不同；本轮没有重新核验全部实际地理位置。
 - 前后直连对照成功；生产 `.env`、生命周期、出口注册表及 Mihomo 基础配置哈希均未变。当前生产继续使用 plugin + direct，表内正常节点没有因此自动加入准入。
 - 所有 143 条配置记录均有本轮结果，业务节点清单无遗漏、无重复。逐项原始报告保留为本地 `data/diagnostics/handoff-20261016/egress-full-inventory-20261016.json`；VPS 原件为 `/root/egress-full-inventory-20261016-6rn64y9d/report.json`，权限 0600。报告不包含订阅 token、JWT、代理密码或完整节点连接定义。
+
+## 代理连接能力单独核验（18:50:34–18:52:44 CST）
+
+本节验证 VPS 能否经节点访问公共 HTTPS，不使用 ZCode 凭据，也不发送模型请求。此前全量扫描有 129 个业务节点收到了 ZCode 的 HTTPS 响应（4 个业务成功、125 个拒绝）；这已是代理链路当时建立成功的证据。此次补测其余 13 个请求失败节点，并加入 HK / JP / TW / US 4 个对照。
+
+补测通过独立 Mihomo 监听器，核对控制器实际选中节点，每次创建新的 HTTPX 客户端，显式指定代理、关闭环境代理继承、保留默认 TLS 证书校验。以 Cloudflare HTTPS trace 和必要时的 ipify 取得实际出口 IP；取得上游 HTTPS 响应与仅入口 TCP 连上分别记录。
+
+旧请求失败的 TW `21201`、`21206` 此次公共 HTTPS 成功；其余 10 个入口 TCP 可达但代理 HTTPS 均失败；HK `21103` 的入口域名解析失败。因此分两轮累计 **131 个有完整代理链路成功证据、10 个仅证实入口 TCP 可达、1 个入口 DNS 失败**。这是不同时间、不同目标的证据合并，不能写成 142 个同时复测或 131 个 ZCode 业务成功；上一轮普通 / SSE 业务通过的数量仍是 4。
+
+| 端口 | 节点原名 | Cloudflare HTTPS | ipify HTTPS | 实际出口 IP | 入口 TCP |
+|---:|---|---|---|---|---|
+| 21700 | 🇬🇧 英国-Ipswich B4(x1) \| [原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21100 | 🇭🇰 香港-Hong Kong S4(x2) \| [家宽] [日动] | 200 | 200 | 116.49.103.221 | HTTPS 已证明代理通路 |
+| 21103 | 🇭🇰 香港-Sha Tin 3 流媒体(x1) \| [备] [家宽/住宅] [优] | ConnectError | ConnectError | 未取得 | 域名解析失败 |
+| 21300 | 🇯🇵 日本-Asagaya-minami A8(x2) \| [索尼So-Net] [家宽/住宅] [优] | 200 | ConnectError | 39.110.230.58 | HTTPS 已证明代理通路 |
+| 21302 | 🇯🇵 日本-Tokyo A10(x1) \| [ISP] [原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21808 | 🇳🇿 新西兰-奥克兰 C1(x1) \| [非原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21815 | 🇨🇿 捷克-Prague B1(x1) \| [原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21824 | 🇰🇭 柬埔寨-Phan Nheum B3(x1) \| [原生] [优] | ConnectTimeout | ConnectTimeout | 未取得 | 可达 |
+| 21835 | 🇪🇬 埃及-Alexandria A1(x1) \| [家宽] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 未分配 | 🇷🇺 俄罗斯-莫斯科 B1(x1) \| [原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21402 | 🇸🇬 新加坡-Singapore B3(x1) \| [原生] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21200 | 🇹🇼台湾2 \| 避免晚高峰使用 | 200 | 200 | 36.230.59.156 | HTTPS 已证明代理通路 |
+| 21201 | 🇹🇼台湾3 \| 避免晚高峰使用 | 200 | 未测 | 36.231.104.175 | HTTPS 已证明代理通路 |
+| 21206 | 🇹🇼台湾 \| 避免晚高峰使用 | 200 | 未测 | 114.37.203.198 | HTTPS 已证明代理通路 |
+| 21500 | 🇺🇸 美国-尔湾 A12(x2) \| [ATT] [家宽/住宅] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+| 21506 | 🇺🇸 美国-Philadelphia S23(x2) \| [Verizon] [家宽/住宅] [优] | 200 | 200 | 65.195.39.142 | HTTPS 已证明代理通路 |
+| 21539 | 🇺🇸 美国-Hacienda Heights S11(x2) \| [Frontier] [家宽/住宅] [优] | ConnectError | ConnectError | 未取得 | 可达 |
+
+HK `21103` 的补充 DNS 核对：VPS 系统解析返回 `EAI_NONAME / -2`；Google DNS 与 Cloudflare DNS 的 HTTPS 查询均返回 `NXDOMAIN / Status 3`、无 A 记录。现有配置中的该入口域名当前不存在，不能归为单个 VPS 解析器异常；需要有效的新入口配置，不能凭猜测改地址。
+
+另外 10 个节点的 TCP 可达仅证明能接通机场入口端口，尚未定位代理协议、握手或后续转发失败的具体原因；不能据此称为完整代理可用。
+
+本地证据：`data/diagnostics/handoff-20261016/egress-connectivity-recheck-20261016.json`、`dns-hk21103-20261016.json`；VPS 原件：`/root/egress-connectivity-20261016-wwe9a0yf/report.json`、`dns-hk21103.json`。诊断期间生产配置、生命周期及注册表哈希未变。
