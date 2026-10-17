@@ -1,11 +1,13 @@
 # zcode2api 当前进度与交接
 
-### CPA 实际 Messages 链路漏项修复（2026-10-17，待发布验收）
+### CPA 实际 Messages 链路漏项修复（2026-10-17 17:28 CST，已发布验收）
 
 - 用户报告 CPA 仍提示模型不一致。只读核对本机 CPA `usage-records/usage.db`，17:12:01 记录 `49676` 为 ClaudeExecutor → `POST /v1/messages`，请求 `GLM-5.3-Flash`、响应 `glm-5.3-flash`、HTTP 200；配置指向 VPS `18088`。CPA 的 `claude-opus-5` 等别名先映射为 GLM。此前只修两个 OpenAI 接口，未覆盖 CPA 的 Messages 路径，不能把那轮 16 项验收当成 CPA 已修复。
 - 本轮三协议统一执行同名大小写规则。Messages 在规范化前保存请求原名，普通 JSON 及 SSE `message_start.message.model` 复用现有比较函数；其它模型名、事件、思考/签名/用量和错误处理保持。SSE 仅缓冲到模型首帧，后续原始字节与分块继续透传。此规则取代下节 `/v1/messages` 原样返回模型名的约定。
 - CPA 真实普通/SSE复现均 HTTP 200 / end_turn / OK，但模型字段不符；路由回归先 **8 失败 / 28 通过**，修复后相关 **240 项通过**，包含三协议大小写/不同模型/别名/缺失模型及 Messages 分块、CRLF、中文、长思考块、尾帧、错误与取消。VPS 按项目实际路径校验三份候选文件 Ruff 通过。
-- 证据：`data/diagnostics/cpa-model-red-20261017.xml`、`cpa-model-green-20261017.xml`、`cpa-model-20261017/cpa-before.json` / `live-before.json`；尚待 Git 发布、CPA 新请求/日志及公网三协议验收。CPA 配置、旧日志和原 15 份未提交改动不随本轮修复更改。
+- **业务修复 `410fa4c44e9c6e077d4367b43ed40d96c8bbdec6` 已提交/推送/VPS 快进上线**。等待在途请求归零后，仅重启网关（5.339 秒），PID `1595312` active/running、NRestarts=0；plugin host_alive=true / stale=false。`.env`、注册表、生命周期、Mihomo 配置哈希及 Mihomo/WARP PID 均未变；chat direct / claim proxy、HK21100/JP21303/TW21202、active=saved、pending_restart=false 保持。本机/VPS 三份代码及测试 LF 哈希一致，VPS 工作树干净；回退 `/root/cpa-model-recovery-20261017-yj8napkl`，不核销此前停机超时根因。
+- **真实链路 18 项全部通过**：CPA 的 Flash / GLM-5.3 / `claude-opus-5` 映射各普通/SSE，共 6 项；Windows → 公网 VPS plugin 的 Messages 四种请求写法各普通/SSE共 8 项，Chat Completions / Responses 的 Flash 各普通/SSE共 4 项。均 HTTP 200、模型字段符合预期、正常终态、错误 0；13 项逐字 `OK`，另 5 项为 `OK.`。CPA 从 17:26 起抓取的 9 条新 GLM 日志均请求模型=响应模型，包含实际别名链路；旧错误记录保留，不修改 CPA 配置或日志。
+- 证据：`data/diagnostics/cpa-model-red-20261017.xml`、`cpa-model-green-20261017.xml`、`cpa-model-20261017/cpa-before.json` / `cpa-after.json` / `live-before.json` / `live-after.json` / `ruff.json` / `deploy.json` / `final-runtime.json`；可复跑 `live_check.py before|after`，凭据从现有 CPA 配置在内存读取，不输出或另存。VPS 本次候选目录/压缩包及本机本轮隔离测试临时目录已清理，报告与回退材料保留；原 15 份未提交改动哈希未变。真实不同模型由隔离回归覆盖，名称一致仍不证明底层模型身份；其它独立任务继续开放。
 
 ### 按下游原始大小写回显模型（2026-10-17 16:58 CST，已发布验收）
 
