@@ -622,9 +622,8 @@ async def auto_claim_all_plans(account: Account, *, skip_plan_ids: set[str] | No
 async def preview_plans(account: Account) -> list[dict]:
     """拉取账号当前可领取套餐，按优先级降序，并同步持久化待领状态。
 
-    优先请求上游 /billing/preview；若上游接口返回空（如临时大促未投放 preview
-    或非特定参数下不下发），自动回退池内已知有效活动作为候选，确保池内经验共享。
-    探查完成后立即同步写入当前账号及池内可计费账号的 claimable_plans。
+    只信本号上游 /billing/preview；返回空时不从池内其他账号补齐候选。
+    探查完成后仅同步当前账号的 claimable_plans。
     """
     blocked = billing_block_reason(account, action="上游查询")
     if blocked:

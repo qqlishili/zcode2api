@@ -25,7 +25,7 @@ git 实证：原始 `preview_plans`（`8dfc762` 之前）只信上游 `/billing/
 
 ## Capabilities
 
-### Modified Capabilities
+### New Capabilities
 
 - `claimable-activity`（可领取活动识别）：只信上游 `preview` 结果，不再跨账号共享「池内出现过的活动」。
 
@@ -40,4 +40,5 @@ git 实证：原始 `preview_plans`（`8dfc762` 之前）只信上游 `/billing/
 ## Validation
 
 - 单元测试：`preview` 返回空时，`claimable_plans` 为空，`hasUnclaimedActivity` 为 false。
-- 真实验证：`国际-ok li`（已持有 referral）刷新后，其他未持有账号不再显示「可领取」；哨兵不再对无资格账号发起 referral 领取。
+- 真实验证：逐号比较本号 preview、管理 API、持久化数据和页面；其他账号持有 referral 不能产生本号资格。本号确有其他活动资格时正常显示，不要求所有其他账号一律为空。
+- 采用已授权的无浏览器验收：真实管理 API + 上线页面 JS DOM + VPS 插件完整链路；真实浏览器视觉与兼容性明确未验，不主动领取活动。

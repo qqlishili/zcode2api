@@ -1,5 +1,11 @@
 # zcode2api 当前进度与交接
 
+### 本号活动领取资格（2026-10-17，验收发布中）
+
+- 当前承接 `remove-pool-claimable-sharing`，**16/18**。claim 53、sentinel 12、前端全套 26、VPS 独立候选全量 pytest 1280、Ruff app/tests 与 mypy constants 均通过；新增资格 spec strict 通过。
+- 验收发现领取弹窗旧缓存、切号预填和晚返回响应残留，3 项失败复现后已修复。生产 14 个允许 billing 账号的本号上游 preview 与真实管理 API/SQLite 均为空；3 个停用号跳过上游。现有上线 JS 对 17 号空资格展示通过，新修复上线待最终验证；不主动领取活动、不重复清库。
+- 历史 11 号目前按名称能对应 5 号且为空，另 6 号不再以原名出现；旧提交 `614b8d3` 在两端当前导入后的 Git 历史中无法解析，保留证据缺口，不能重述为本轮确认的历史发布。详见[资格验收记录](../openspec/changes/remove-pool-claimable-sharing/execution.md)。本机其余 9 份原文档保持。
+
 ### 套餐时间与排序（2026-10-17，已发布验收）
 
 - 用户授权执行下一步，承接 `normalize-plan-time-and-status-display` 与 `plan-slot-start-date-display`，已补齐 spec/design/tasks，各 **4/4**，strict 通过，未归档。业务提交 `8b1750269a4b721967fe69d3aa4713fb54a34ff0` 已推送 main / VPS 快进，16 文件 LF 哈希一致，远端干净；回退 `/root/plan-time-recovery-20261017-yp344yvj`。

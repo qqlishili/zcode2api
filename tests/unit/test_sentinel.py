@@ -427,7 +427,7 @@ async def test_sentinel_probe_reports_activation_and_records_fail_cooldown(monke
 
 @pytest.mark.asyncio
 async def test_preview_and_failed_claim_retain_claimable_plans_for_ui(monkeypatch):
-    """验证 preview_plans 探查即同步全池未持有账号的 claimable_plans，且 claim 遇 3012 失败保留待领项、成功或 1003 则剔除。"""
+    """验证 preview 仅同步本号待领项，领取失败保留本号候选、成功或 1003 则剔除。"""
     from app import claim as claim_module
 
     acc_probe = Account.create("zai", "probe_acc", "t1")

@@ -133,6 +133,56 @@ test('领取资格只信本号 preview，已持有活动不会再显示可领取
   assert.equal(window.hasUnclaimedActivity({plans:[{plan_id:'eligible'}],claimable_plans:[{plan_id:'eligible'}]}),false);
 });
 
+async function loadClaimAccounts(accounts,preview){
+  window.api=async(method,path)=>{
+    assert.equal(method,'GET');
+    if(path==='/accounts')return {accounts,stats:{total:accounts.length}};
+    if(path==='/claim/captcha-config')return {verification_mode:'server'};
+    return preview(new URL('http://test'+path).searchParams.get('account_id'));
+  };
+  await window.load();
+}
+
+test('本号 preview 成功返回空时，领取弹窗移除旧候选',async()=>{
+  const account={id:'stale',name:'旧候选',mode:'jwt',plans:[],claimable_plans:[{plan_id:'old'}]};
+  await loadClaimAccounts([account],()=>({preview:[{plans:[],error:null}]}));
+  await window.openClaimModal(account.id,'old');
+  assert.deepEqual([...window.document.querySelectorAll('#claim-plan option')].map(o=>o.value),['','']);
+  assert.equal(window.document.getElementById('claim-plan-id').value,'');
+});
+
+test('领取弹窗切换账号后不保留上一账号活动或手填目标',async()=>{
+  const accounts=[
+    {id:'eligible',name:'本号可领',mode:'jwt',plans:[],claimable_plans:[{plan_id:'own',name:'本号活动'}]},
+    {id:'empty',name:'本号无资格',mode:'jwt',plans:[],claimable_plans:[]},
+  ];
+  await loadClaimAccounts(accounts,id=>({preview:[{plans:accounts.find(a=>a.id===id).claimable_plans,error:null}]}));
+  assert.equal(render(window.claimStripHtml(accounts[0])).querySelectorAll('.claim-strip').length,1);
+  assert.equal(window.claimStripHtml(accounts[1]),'');
+  await window.openClaimModal('eligible','own');
+  const select=window.document.getElementById('claim-account');
+  select.value='empty';
+  await select.onchange();
+  assert.equal(window.document.getElementById('claim-plan-id').value,'');
+  assert.ok(![...window.document.querySelectorAll('#claim-plan option')].some(o=>o.value==='own'));
+});
+
+test('上一账号的 preview 晚返回，不覆盖当前账号的领取候选',async()=>{
+  const accounts=['first','second'].map(id=>({id,name:id,mode:'jwt',plans:[],claimable_plans:[]}));
+  let finish;
+  await loadClaimAccounts(accounts,id=>id==='first'?new Promise(resolve=>{finish=resolve;}):
+    {preview:[{plans:[{plan_id:'second-only'}],error:null}]});
+  const accountSelect=window.document.getElementById('claim-account');
+  accountSelect.innerHTML=accounts.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+  accountSelect.value='first';
+  const pending=window.loadClaimPlans();
+  accountSelect.value='second';
+  await window.loadClaimPlans();
+  finish({preview:[{plans:[{plan_id:'first-only'}],error:null}]});
+  await pending;
+  assert.deepEqual([...window.document.querySelectorAll('#claim-plan option')].map(o=>o.value),['','second-only']);
+});
+
 for(const [name,effectiveAt,label] of [
   ['未来生效',now+3600,'未生效'],
   ['已经生效',now-3600,'待结算'],

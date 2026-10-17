@@ -1056,19 +1056,12 @@ async function openClaimModal(id, targetPlanId){
     }
   }
 
-  sel.onchange=()=>{
+  sel.onchange=async()=>{
     claimVerifyParam='';
-    const accNow = allAccounts.find(a=>a.id===sel.value);
-    if(accNow && !hasUnclaimedActivity(accNow)){
-      claimStatus('「' + accNow.name + '」已持有当前活动套餐，无需重复领取');
-      claimStatusColor(true);
-      const box=document.getElementById('claim-captcha-box');
-      if(box) box.innerHTML='<span class="dialog-help" style="color:var(--mint, #4ade80)">账号已持有该活动套餐，无需验证</span>';
-      return;
-    }
+    document.getElementById('claim-plan-id').value='';
     claimStatus('账号已切换，请完成人机验证');
     initClaimCaptcha();
-    loadClaimPlans(targetPlanId);
+    await loadClaimPlans();
   };
   document.getElementById('claim-plan-id').value=targetPlanId||'';
   claimVerifyParam='';
@@ -1111,9 +1104,19 @@ async function loadClaimPlans(targetPlanId){
 
   try{
     const d=await api('GET','/claim/preview?account_id='+encodeURIComponent(acctId));
+    // 切号后的旧响应不能把上一账号候选写回当前弹窗。
+    if(document.getElementById('claim-account').value!==acctId)return;
     const item=(d.preview||[])[0]||{};
     const serverPlans=item.plans||[];
     if(item.error)claimStatus('套餐提示：'+item.error);
+    else{
+      dedupMap.clear();
+      if(curAcc)curAcc.claimable_plans=serverPlans;
+      if(targetPlanId && !serverPlans.some(p=>String(p.plan_id||p.planId||'').toLowerCase()===String(targetPlanId).toLowerCase())
+          && document.getElementById('claim-plan-id').value===targetPlanId){
+        document.getElementById('claim-plan-id').value='';
+      }
+    }
     serverPlans.forEach(p=>{
       const pid=String(p.plan_id||p.planId||'').trim();
       if(pid && !dedupMap.has(pid.toLowerCase())) dedupMap.set(pid.toLowerCase(), p);
