@@ -1,11 +1,13 @@
 # zcode2api 当前进度与交接
 
-### 模型名大小写与另一模型实测（2026-10-17 16:38 CST）
+### 模型名大小写与另一模型实测（2026-10-17 16:41 CST）
 
 - VPS 真实 plugin 链路已复现：请求 `GLM-5.3-Flash` / `GLM-5.3`，普通响应及原始 Anthropic SSE `message_start` 分别返回小写 `glm-5.3-flash` / `glm-5.3`。当前 Chat SSE 使用请求名，普通响应保留上游名，产生名称大小写不一致；未观察到 Flash 被换成 GLM-5.3。名称字段本身不证明底层模型身份。
 - 两模型的普通/SSE均 HTTP 200、正常结束、无流内错误；GLM-5.3 的严格 `OK` 断言有一轮未通过，原始流补测实际返回 `OK.`，不把逐字输出验证记为全通过。当前 `/v1/models` 仅公布这两个模型，不新增未有套餐证据的模型。
-- 已在两个 OpenAI 兼容层复用 `MODEL_NAME_MAP` 修正普通响应名称；真实返回其它模型及未知名仍保留，未上报才用请求名。`/v1/messages` 维持原样透传小写。新增回归先 6 失败 / 6 通过，修复后相关 122 项通过；候选包在 VPS Ruff 通过。修复尚待提交/上线后的公网三协议核对；VPS 当前仍为下述分流业务版本。
-- 证据：`data/diagnostics/model-name-check-20261017-before.json`、`model-name-red-20261017.xml`、`model-name-green-20261017.xml`，VPS `/root/model-name-check-20261017.json`。本机 Ruff 进程未返回，已仅停止本次进程，候选检查改在 VPS 独立目录完成。
+- 已在两个 OpenAI 兼容层复用 `MODEL_NAME_MAP` 修正普通响应名称；真实返回其它模型及未知名仍保留，未上报才用请求名。`/v1/messages` 维持原样透传小写。新增回归先 6 失败 / 6 通过，修复后相关 122 项通过；VPS 候选及发布文件 Ruff 通过，分流 OpenSpec strict 通过。
+- **修复 `cc35fed975b6b312b7c3c7b0c00c50812b52d157` 已提交/推送/VPS 快进上线**。等待在途请求归零后，仅重启网关（0.266 秒），新 PID `1556299` active/running；本机/VPS 三份源码哈希一致，VPS 工作树干净、plugin host_alive=true / stale=false。`.env`、注册表、生命周期和 Mihomo 配置哈希未变，Mihomo/WARP PID 未变；chat direct / claim proxy、HK21100/JP21303/TW21202及 pending=false 保持。回退材料 `/root/model-name-recovery-20261017-8e_j9j7b`；本次快速重启不补齐前次停机超时根因。
+- **Windows → 公网 → VPS plugin 完整链路共 12 项通过**：两模型 × Chat Completions / Responses / Anthropic Messages × 普通/SSE，均 200、非空预期文本及正常终态，流内错误 0；两个 OpenAI 接口模型字段均为官方大小写，Anthropic 原样小写。9 项逐字 `OK`，另 3 项为 `OK.`，分别保留严格断言，不记作逐字全通过。
+- 证据：`data/diagnostics/model-name-check-20261017-before.json`、`model-name-red-20261017.xml`、`model-name-green-20261017.xml`、`model-names-20261017/public-after.json` / `deploy.json` / `final-runtime.json`；可复跑脚本 `model-names-20261017/public_check.py`。VPS `/root/model-name-check-20261017.json` 等报告保留。本机 Ruff 进程未返回，已仅停止本次进程；两端临时网关认证文件、VPS 本次候选目录与压缩包均已清理，原 15 份改动哈希未变。未接入或声称验证其它未公布模型。
 
 ### 分流实施与验收（2026-10-17 16:34 CST）
 
