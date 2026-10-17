@@ -25,6 +25,90 @@ test('统一北京时间，不使用进程本地时区',()=>{
   assert.equal(window.fmtDate('invalid'),'—');
 });
 
+for(const [period,start,corner] of [
+  ['daily',1792169000,'今日额度到期 10-17 23:59'],
+  ['daily_night',1792249200,'活动截止 10-19 09:00'],
+  ['one_time',1792162800,'活动截止 10-19 09:00'],
+]){
+  test(`${period} 活动有效期与额度右下角各用指定字段`,()=>{
+    const node=render(window.planGroupHtml({pid:'p',name:'ZCode Global Build',starts_at:1791959610,
+      activity_start_ts:start,ends_at:1792371600,items:[{name:'GLM-5.3-Flash',period,
+        total:100000000,used:20000000,remaining:80000000,expires_at_ts:1792252799}]}));
+    const head=node.querySelector('.plan-card-hd');
+    assert.equal(head.querySelector('.plan-card-exp')?.textContent,
+      `活动有效期 ${window.fmtDate(start)} ~ 10-19 09:00`);
+    assert.equal(node.querySelector('.qci-exp').textContent,corner);
+    assert.equal(node.querySelector('.qci-val').textContent,'80 M / 100 M');
+    assert.equal(node.querySelector('.qci-pct').textContent,'80% 剩余');
+  });
+}
+
+test('Global 未到账仍显示授予量和原状态，右下角使用活动截止',()=>{
+  const node=render(window.planGroupHtml({pid:'p',name:'Global',activity_start_ts:1792249200,
+    ends_at:1792285200,pending:[{name:'GLM-5.3-Flash',period:'daily_night',
+      grant_units:100000000,effective_at:1792249200}]}));
+  assert.equal(node.querySelector('.qci-val').textContent,'+100 M');
+  assert.equal(node.querySelector('.qci-pct').textContent,'未生效');
+  assert.equal(node.querySelector('.qci-exp').textContent,'活动截止 10-18 09:00');
+  assert.match(node.querySelector('.qci-name').title,/10-17 23:00 起生效/);
+});
+
+test('新卡片未知开始或活动截止不借用旧字段',()=>{
+  const node=render(window.planGroupHtml({pid:'p',starts_at:now,activity_start_ts:null,
+    items:[{name:'GLM-5.3',period:'one_time',total:3,remaining:3,expires_at_ts:1792252799}]}));
+  assert.equal(node.querySelector('.plan-card-exp').textContent,'活动有效期 — ~ —');
+  assert.equal(node.querySelector('.qci-exp').textContent,'活动截止 —');
+});
+
+test('额度列加宽，活动名称与区间同行且不换行',async()=>{
+  const css=await readFile(new URL('../../frontend/css/app.css',import.meta.url),'utf8');
+  const style=window.document.createElement('style');
+  style.textContent=css;
+  window.document.head.append(style);
+  const node=render(window.planGroupHtml({pid:'p',name:'ZCode Weekend Build',activity_start_ts:now,ends_at:now+86400}));
+  window.document.body.append(node);
+  try{
+    const head=node.querySelector('.plan-card-hd');
+    assert.ok(head.contains(node.querySelector('.plan-card-exp')));
+    assert.equal(window.getComputedStyle(head).flexWrap,'nowrap');
+    assert.equal(window.getComputedStyle(head).whiteSpace,'nowrap');
+    const main=window.document.querySelector('main');
+    const layout=window.getComputedStyle(main);
+    assert.equal(layout.maxWidth,'1280px','账号页保留原居中宽度及两侧留白');
+    assert.equal(layout.marginLeft,'auto');
+    assert.equal(layout.marginRight,'auto');
+    const generic=window.document.createElement('div');generic.className='acct-table';
+    window.document.body.append(generic);
+    assert.equal(window.getComputedStyle(generic).minWidth,'1080px','监控页共用表格宽度不随账号页加宽');
+    main.append(generic);
+    const tableMin=parseFloat(window.getComputedStyle(generic).minWidth);
+    assert.equal(tableMin,1220);
+    generic.remove();
+    const horizontalPadding=parseFloat(layout.paddingLeft)+parseFloat(layout.paddingRight);
+    const row=render(window.rowHtml({id:'layout',name:'账号',mode:'jwt',provider:'zai',
+      status:'active',enabled:true,token_masked:'masked',plan_slots:[]})).firstElementChild;
+    main.append(row);
+    try{
+      assert.equal(row.querySelectorAll(':scope > .cell').length,6);
+      assert.equal(row.querySelectorAll('.acct-actions button').length,5);
+      const rowStyle=window.getComputedStyle(row);
+      const tracks=[...rowStyle.gridTemplateColumns.matchAll(/minmax\((\d+)px,[^)]+\)|(\d+)px/g)]
+        .map(m=>Number(m[1]||m[2]));
+      assert.equal(tracks.length,6);
+      assert.ok(tracks[2]>320,'额度列应在原320px基础上增加');
+      const rowWidth=tracks.reduce((a,b)=>a+b,0)+5*parseFloat(rowStyle.gap)+
+        parseFloat(rowStyle.paddingLeft)+parseFloat(rowStyle.paddingRight)+
+        parseFloat(rowStyle.borderLeftWidth)+parseFloat(rowStyle.borderRightWidth);
+      assert.ok(rowWidth<=tableMin,'六列、间距、内边距和边框必须全部落在表格宽度内');
+      for(const viewport of [1280,1366,1536,1920]){
+        const pageWidth=Math.min(viewport,parseFloat(layout.maxWidth));
+        assert.ok(tableMin<=pageWidth-horizontalPadding,'原页面内容区内完整容纳六列');
+        assert.ok((viewport-pageWidth)/2+parseFloat(layout.paddingLeft)>=28,'两侧保留留白');
+      }
+    }finally{row.remove();}
+  }finally{node.remove();style.remove();}
+});
+
 for(const value of [1792339199,1792339199000,'2026-10-18T15:59:59Z']){
   test(`旧账号状态与余额项的结束时间统一：${value}`,()=>{
     const status=render(window.statusCell({status:'active',plans:[{ends_at:value}]}));

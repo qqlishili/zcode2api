@@ -26,3 +26,14 @@
 Windows → 公网 VPS plugin `/v1/messages`：Flash/GLM-5.3 各普通/SSE共 **4 项通过**，均 HTTP 200、请求原大小写一致、end_turn、错误 0；3 项逐字 `OK`，GLM-5.3 SSE 为 `OK.`，单独保留，未写成逐字全通过。plugin host_alive=true、stale=false。证据 after.json / after-dom.json / final.json / final-dom.json / public-after.json / deploy.json / updater-attribution.json。
 
 此次只跑受影响回归，未重复上轮 1262 项全量；真实浏览器视觉/兼容性、真实无余额账号结算恢复、HK/JP 对话恢复等独立待办继续开放。不归档。
+
+
+## 第五组：活动周期与居中布局（2026-10-18）
+
+按用户确认的period规则展示活动开始、结束和右下角，原业务验证保留：隔离后端85项、前端全套32项两时区、Ruff和strict通过；指定两号纯余额刷新2成功/0失败，4个活动上游/API/上线JS核对通过；公网两模型普通/SSE共4项均HTTP200、模型一致、end_turn、错误0、逐字OK。原有数字、pending、状态与排序保持不变。
+
+用户否决全宽布局，要求Git回退并整理提交。最终账号页保持原1280px居中宽度、左右28px内边距，额度列由320增至400px，列间距由14改为8px；六列加内边距/边框总宽1220px，不超出原1224px内容区。名称与有效期仍同行、不换行；监控页通用表格仍1080px。先复现none不等于1280px，修改后全前端32项UTC、额度相关31项洛杉矶通过，并核对原宽度内的六列预算与1280/1366/1536/1920窗口留白。
+
+VPS实际页面/样式v2.6.11与本机一致，真实页面JS在UTC/洛杉矶使用原上游核对过的三类活动快照通过；当前管理API的状态栏保持原逻辑，六列与5个操作按钮完整，居中/留白/1220px宽度预算通过。无需重启，网关/Mihomo/WARP进程、配置哈希、出口策略不变，plugin健康。
+
+按授权撤去最近三次提交，以e51b0b2为父整理为一个提交，精确force-with-lease同步main，VPS干净工作树reset --keep同步；收尾文档并入同一提交。诊断、提交一致性及发布文件哈希保留于data/diagnostics/compact-layout-20261018/及原period-display-20261017/；离线恢复备份为本机pre-rollback.bundle和VPS /root/compact-layout-20261018/pre-rollback.tar.gz。不改账号库、出口或9份原有文档，不再刷新额度或重跑未改变的对话链路。真实浏览器视觉/兼容性与Weekend历史消费资格仍未验，不归档。

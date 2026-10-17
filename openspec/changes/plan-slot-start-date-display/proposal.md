@@ -9,7 +9,8 @@
 ## What Changes
 
 - 核对并保留后端 `starts_at` 秒值，缺失时不虚构开始时间。
-- 前端卡片统一显示「活动有效期 start ~ end」，两端严格取同一上游活动记录的 `starts_at` / `ends_at`，不以权益 `effective_at` 或余额桶到期时间补齐。缺失一端显示 —；不再展示卡片级「套餐期」/「额度生效期」。时间格式沿用北京时间 `MM-DD HH:MM`，各模型余额到期与待生效权益明细仍独立保留。
+- 按权益 `period` 展示活动有效期：daily 开始取套餐 starts_at；daily_night 先取权益 effective_at，归零后取同 user_plan_id、entitlement_id 的余额桶 period_start；one_time 只取权益 effective_at。结束均为同套餐 ends_at，缺失或无法唯一确定的端点显示 —，不跨实例或权益补值。未识别周期沿用套餐起止。
+- 活动名称与活动有效期置于同一卡片头，扩大额度信息列，禁止换行；账号页保留原1280px居中宽度与两侧留白，额度列400px、间距8px展示全部六列。北京时间格式保持 `MM-DD HH:MM`。Global/Weekend 额度右下角显示活动截止 ends_at，Start 显示今日额度到期 expires_at，不改额度、状态或排序。
 - 未开始（`starts_at > now`）放后；已开始按 `starts_at` 升序，未知开始时间稳定放在已知已开始之后、未来之前；同时间及未来套餐保持原顺序，不改 API 数组。
 
 ## Capabilities

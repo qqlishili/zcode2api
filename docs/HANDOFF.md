@@ -1,6 +1,23 @@
 # zcode2api 当前进度与交接
 
-### 套餐期显示反馈（2026-10-17，活动有效期已发布验收）
+### 活动周期与居中布局（2026-10-18，已回退发布验收）
+
+- 用户要求撤回全宽布局，使用 Git 回退并整理提交，不能追加回滚提交污染日志。保留已确认的 period 时间规则与活动名称/有效期同行；账号页恢复原 max-width:1280px、margin:0 auto、左右28px内边距。六列保留原宽度，额度列由320增至400px、列间距14改为8px，含边框/内边距总宽1220px，落在原1224px内容区内。监控页仍用原1080px表格。
+- daily 活动有效期 starts_at 至 ends_at、右下角桶 expires_at；daily_night 生效前 effective_at，归零后同 user_plan_id/entitlement_id 桶 period_start 至 ends_at、右下角 ends_at；one_time effective_at 至 ends_at、右下角 ends_at。额度数字、授予量、pending、状态与排序不变。
+- 时间逻辑隔离后端85项、初次前端全套32项两时区、Ruff与两方案strict通过；两号真实上游/API的4个活动及上线JS两时区通过，公网plugin两模型普通/SSE共4项均200、模型一致、end_turn、错误0、逐字OK。这些业务证据继续有效，最新布局另行验收。
+- 居中布局先复现max-width:none不符合要求，修复后全前端32项UTC、额度相关31项洛杉矶通过。VPS实际页面/样式v2.6.11与本机一致，真实JS及原三类活动快照在UTC/洛杉矶均通过，当前API状态栏保持原逻辑；六列和5个操作按钮齐全，1220px宽度预算及1280/1366/1536/1920窗口留白断言通过。DOM不代表实际浏览器视觉。
+- Git按用户要求撤去最近三次提交，以e51b0b2为父提交整理为一个活动时间与居中布局提交，使用精确force-with-lease同步main；不追加revert或收尾提交。VPS工作树干净后reset --keep同步，无需重启；网关/Mihomo/WARP PID分别1922638/2797546/755387，配置哈希及出口策略保持，plugin健康。回退备份为本机pre-rollback.bundle和VPS /root/compact-layout-20261018/pre-rollback.tar.gz；最终提交一致性及发布文件哈希由同目录收尾证据记录。
+- 证据本机data/diagnostics/compact-layout-20261018/及之前period-display-20261017/；本机_ssl DLL问题不在本次范围。9份原有文档保持不动，账号库及出口配置不随布局回退。Weekend在10-12的历史消费资格仍缺证据，不关闭；真实浏览器视觉和兼容性未验。
+
+### 套餐期显示反馈（2026-10-17，以下为历史核对过程，最终规则以上文为准）
+
+- 用户规则按权益 period 展示，最终右下角 daily 为 expires_at，daily_night/one_time 均为 ends_at；以下早先取值讨论保留为历史，不覆盖本轮确定规则。
+- 23:08 从 VPS 通过原 HK21100/TW21202 读取两号 current/balance，4次 GET 成功；Global 两号均已有新桶与正余额、实际消耗，balance 的 effective_at 从22:37的23:00变为0；对应桶 period_start=10-17 23:00，period_end=expires_at=套餐 ends_at=10-18 09:00。因此已生效后应从同 user_plan_id、entitlement_id 的桶取得本轮开始，不能仅依赖已归零的 effective_at。国际号剩95,889,624/已用4,110,376，fozweg号剩94,137,344/已用5,862,656；这些是快照，不保证后续余额不变。
+- 已读 VPS `/root/code/ZCode` HEAD `aac4755666d09fdcd70272fcf063c077a639015f` 的客户端映射：`CodingPlanStatusMeta.tsx:203` 将 effective_at=0 定义为立即生效哨兵；`bigmodelUsageQuotaProvider.ts:1291/1395` 分别以 ends_at 表达套餐截止、expires_at 表达额度桶重置边界。Weekend 当时 ends_at/period_end/expires_at 均10-19 09:00，最终用户选择右下角显示 ends_at；10-12是返回的套餐/记账起点，10-16 23:00是明确权益生效值，但没有该账号10-12实际消费的历史证据，不能将两者差异解释成已证实的后台实现。原始生效后数据和源码证据摘要保存在 `data/diagnostics/plan-field-compare-20261017/after-activation.json`。
+- 用户最新明确：“活动有效期”指该活动实际可以使用的开始至结束，不接受只把套餐记录起止改名。此前发布验证了原始字段、管理 API 和页面一致，未证明其业务含义符合该要求；此项重新开放，不能以原两方案各 6/6 宣称最新语义已完成。
+- 当前代码仍使用同套餐 `starts_at / ends_at`，本次仅修正领域定义与字段说明，未改代码、部署或重启。下一步须核实同一权益、同一周期的实际生效与截止；Global Build 的 `effective_at=10-17 23:00` 是本次样本中的一轮生效依据，不能直接认定是整个活动首次生效，也不能在没有对应依据时拼接套餐结束作为该轮额度截止。
+- 2026-10-17 22:37 北京时间，从 VPS 按原固定 HK21100 / TW21202 出口读取指定两号 current/balance，4 次 GET 均业务 code=0。三类套餐字段均为9个、权益字段均为9个且顶层类型一致；Start为daily、2模型，Global为daily_night、1模型，Weekend为one_time、1模型。Global的effective_at在current为0、balance为10-17 23:00，当前没有该活动余额桶；Start两模型桶的period_start=10-17 00:00，早于该号starts_at=00:43:20，expires_at=10-17 23:59:59，套餐ends_at却是10-21 23:59:59；Weekend桶period_start=10-12 20:00，早于权益effective_at=10-16 23:00，桶结束与套餐结束均10-19 09:00。故不论单取starts_at、effective_at或period_start，都不能对三类活动直接声称已得到统一的实际可用起点；须保留同权益、同周期关联。原始data与自动字段结构对照在 `data/diagnostics/plan-field-compare-20261017/upstream-comparison.json`。本次未刷新本地账号快照、未调用preview/claim/日活，未改配置或部署。
+- 以下已发布记录保留为历史证据；其中将用户要求解读为“仅取 starts_at / ends_at”的结论已被上述最新澄清替代。实现前须同步相关 OpenSpec 的取值契约与验收任务。
 
 - 用户反馈 `套餐期 10-14 14:33 ~ 10-18 09:00` 显示不对，已在 VPS 精确定位为“国际-ok li”的 ZCode Global Build。本项重新开放核实，不以此前时间展示验收代替用户反馈的验收。
 - 经该账号固定 HK21100 出口实时读取 `/billing/current` 和 `/billing/balance`，两者均为 `starts_at=1791959610`、`ends_at=1792285200`，北京时间分别是 10-14 14:33 / 10-18 09:00；balance 的 `daily_night` 权益 `effective_at=1792249200`，即 10-17 23:00。另一指定账号也核对，但开始时间不同。

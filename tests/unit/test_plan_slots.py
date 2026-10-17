@@ -115,6 +115,60 @@ class TestPlanTierFromId:
 
 
 class TestBuildPlanSlots:
+    @pytest.mark.parametrize("period,effective,expected", [
+        ("daily", 1792249200, 1792169000),
+        ("daily_night", 1792249200, 1792249200),
+        ("daily_night", 0, 1792249200),
+        ("one_time", 1792162800, 1792162800),
+        ("one_time", 0, None),
+    ])
+    def test_activity_start_by_period_preserves_quota(self, period, effective, expected):
+        plan = {"plan_id": "p", "user_plan_id": "own", "starts_at": 1792169000,
+                "ends_at": 1792371600, "entitlements": [{
+                    "entitlement_id": "ent", "show_name": "GLM-5.3-Flash",
+                    "period": period, "effective_at": effective, "grant_units": 100,
+                }]}
+        balance = {"plan_id": "p", "user_plan_id": "own", "entitlement_id": "ent",
+                   "show_name": "GLM-5.3-Flash", "period_start": 1792249200,
+                   "expires_at": 1792252799, "nextRenewTime": 1792371600,
+                   "total_units": 100, "used_units": 20, "remaining_units": 80}
+        slot = _build_plan_slots({"plans": [plan], "balances": [balance]}, [])[0]
+        assert slot["activity_start_ts"] == expected
+        assert slot["starts_at"] == 1792169000  # 原排序仍使用套餐开始。
+        assert slot["ends_at"] == 1792371600
+        assert slot["pending"] == []
+        item = slot["items"][0]
+        assert item["period"] == period
+        assert (item["total"], item["used"], item["remaining"]) == (100, 20, 80)
+        assert item["expires_at_ts"] == (1792252799 if period == "daily" else 1792371600)
+
+    @pytest.mark.parametrize("mismatch", ["user_plan_id", "entitlement_id", "missing_ids", "missing_effective"])
+    def test_night_start_does_not_borrow_unrelated_balance(self, mismatch):
+        ent = {"entitlement_id": "own-ent", "period": "daily_night", "effective_at": 0,
+               "show_name": "GLM-5.3-Flash", "grant_units": 100}
+        plan = {"plan_id": "p", "user_plan_id": "own", "starts_at": 1792169000, "entitlements": [ent]}
+        balance = {"plan_id": "p", "user_plan_id": "own", "entitlement_id": "own-ent",
+                   "show_name": "GLM-5.3-Flash", "period_start": 1792249200, "remaining_units": 80}
+        if mismatch == "missing_ids":
+            plan.pop("user_plan_id")
+            balance.pop("user_plan_id")
+        elif mismatch == "missing_effective":
+            ent.pop("effective_at")
+        else:
+            balance[mismatch] = "other"
+        slot = _build_plan_slots({"plans": [plan], "balances": [balance]}, [])[0]
+        assert slot["activity_start_ts"] is None
+
+    def test_pending_period_and_conflicting_starts(self):
+        slot = _build_plan_slots({"plans": [{"plan_id": "p", "starts_at": 1792169000,
+            "entitlements": [
+                {"show_name": "GLM-5.3", "grant_units": 3, "period": "daily_night", "effective_at": 1792249200},
+                {"show_name": "GLM-5.3-Flash", "grant_units": 5, "period": "daily_night", "effective_at": 1792249300},
+            ]}]}, [])[0]
+        assert slot["activity_start_ts"] is None
+        assert [e["period"] for e in slot["pending"]] == ["daily_night", "daily_night"]
+        assert [e["grant_units"] for e in slot["pending"]] == [3, 5]
+
     def test_complete_expiry_time_and_earliest_entitlement(self):
         slot = _build_plan_slots({"plans": [{
             "plan_id": "night", "starts_at": "2026-10-17T14:00:00+08:00",

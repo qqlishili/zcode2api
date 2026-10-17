@@ -17,9 +17,9 @@
 
 **保留时间戳作为计算依据，统一北京时间短格式**：
 
-- 后端保留既有 `quota_start` 兼容字段，但不再作为卡片时间区间起点；活动有效期严格使用同一活动的 `starts_at` / `ends_at`，不混用权益或余额时间。
+- 后端保留 starts_at 供原排序、quota_start 供兼容，新增展示开始 activity_start_ts；按 period 取 daily 的 starts_at、daily_night 的 effective_at（归零后同实例同权益桶 period_start）、one_time 的 effective_at。结束统一同套餐 ends_at，依据缺失或冲突保持未知。
 - 后端复用统一的时间解析和 `_fmt_short(ts) -> "MM-DD HH:MM"`，保留 `expire_ts` 供临期计算；秒、毫秒、ISO 时间统一到北京时间，缺失/无效时间保持未知。
-- 前端 `planGroupHtml`：统一只显示 **`活动有效期 starts_at ~ ends_at`**，格式 `MM-DD HH:MM`；各模型到期和待生效权益明细保留，替代此前方案 B 的区间拼接。
+- 前端名称与活动有效期同行、不换行，扩大额度列。daily 额度右下角显示今日额度到期 expires_at，daily_night/one_time 显示活动截止 ends_at；授予量、到账判断、状态及排序保持原逻辑。
 - 前端短时间固定北京时间，不随浏览器时区变化；结束时间基于时间戳判断临期，旧短字符串不猜年份。套餐开始时间的独立展示与排序由 `plan-slot-start-date-display` 承接。
 - 保持已上线状态：未来权益显示未生效，已到/未知显示待结算；按所有真实余额判断账号可选性，不将授予量累加到余额。
 

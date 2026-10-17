@@ -12,7 +12,7 @@
 <body>
 <div id="admin-header" data-active="/admin/accounts" data-version="v{{APP_VERSION}}"></div>
 
-<main class="admin-main">
+<main class="admin-main accounts-main">
   <div class="page-hd">
     <div>
       <div class="page-title">账号池</div>
@@ -473,14 +473,16 @@ function quotaRowColor(rem, remPct) {
   return (rem <= 0 || remPct < 15) ? 'var(--red)' : (remPct < 50 ? 'var(--amber)' : 'var(--mint)');
 }
 
-function balRowHtml(it) {
+function balRowHtml(it, plan={}) {
   const tot = Number(it.total) || 0;
   const rem = Number(it.remaining) || 0;
   const used = Number(it.used) || 0;
   const remPct = tot > 0 ? Math.max(0, Math.min(100, (rem / tot) * 100)) : 0;
   const usedPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
   const color = quotaRowColor(rem, remPct);
-  const exp = expireInfo(it.expires_at, it.expires_at_ts);
+  const activityEnd = ['daily_night', 'one_time'].includes(it.period);
+  const exp = activityEnd ? expireInfo(null, plan.ends_at) : expireInfo(it.expires_at, it.expires_at_ts);
+  const expiryLabel = activityEnd ? '活动截止' : (it.period === 'daily' ? '今日额度到期' : '至');
   const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${Math.round(usedPct)}%已用)`;
   return `<div class="quota-card-item">
     <div class="qci-top">
@@ -492,15 +494,16 @@ function balRowHtml(it) {
     </div>
     <div class="qci-btm" title="${esc(rawTip)}">
       <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
-      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.text)}</span>` : ''}
+      ${exp || activityEnd ? `<span class="qci-exp" title="${activityEnd ? '活动截止时间' : '本额度到期时间'}">${expiryLabel} ${esc(exp ? exp.text : '—')}</span>` : ''}
     </div>
   </div>`;
 }
 
-function pendingRowHtml(e, planName='') {
+function pendingRowHtml(e, planName='', plan={}) {
   const eff = Number(e.effective_at) || 0;
   const notYet = eff > Date.now() / 1000;
   const name = e.name || e.show_name || 'Quota';
+  const activityEnd = ['daily_night', 'one_time'].includes(e.period);
   const tip = esc(`${planName} · ${name} 授予 ${Math.round(e.grant_units).toLocaleString('zh-CN')} tokens，${notYet ? `${fmtDate(eff)} 起生效` : '等待上游结算，不代表可用余额'}`);
   return `<div class="quota-card-item is-pending">
     <div class="qci-top">
@@ -512,29 +515,29 @@ function pendingRowHtml(e, planName='') {
     </div>
     <div class="qci-btm" title="${tip}">
       <span class="qci-val">+${fmtNum(e.grant_units)}</span>
-      <span class="qci-exp">${notYet ? `${fmtDate(eff)} 生效` : '已授予'}</span>
+      <span class="qci-exp">${activityEnd ? `活动截止 ${fmtDate(plan.ends_at)}` : (notYet ? `${fmtDate(eff)} 生效` : '已授予')}</span>
     </div>
   </div>`;
 }
 
 function planGroupHtml(p) {
   const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
-  const startTs = Number(p.starts_at) || 0;
+  const startTs = Number('activity_start_ts' in p ? p.activity_start_ts : p.starts_at) || 0;
   const endTs = Number(p.ends_at) || 0;
   const exp = expireInfo(null, endTs);
   const now = Date.now() / 1000;
-  // 活动有效期只使用活动本身的起止；模型余额和待生效权益各自显示时间。
+  // 展示开始按权益周期归一，排序仍使用套餐 starts_at。
   const activityRange = p.pid === 'default' ? '' : `活动有效期 ${fmtDate(startTs)} ~ ${fmtDate(endTs)}`;
   const items = sortPlanItems(p.items || []);
-  const rows = items.map(balRowHtml).join('');
+  const rows = items.map(it => balRowHtml(it, p)).join('');
   // pending 只表示余额桶未生成；是否待生效须单独比较 effective_at。
-  const pendingRows = (p.pending || []).map(e => pendingRowHtml(e, p.name || '')).join('');
+  const pendingRows = (p.pending || []).map(e => pendingRowHtml(e, p.name || '', p)).join('');
   return `
   <div class="plan-card">
     <div class="plan-card-hd">
       <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
+      ${activityRange ? `<span class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${startTs > now ? ' pending-line' : ''}" title="${esc(activityRange)}">${esc(activityRange)}</span>` : ''}
     </div>
-    ${activityRange ? `<div class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${startTs > now ? ' pending-line' : ''}" title="${esc(activityRange)}">${esc(activityRange)}</div>` : ''}
     <div class="plan-card-body">${rows}${pendingRows}</div>
   </div>`;
 }

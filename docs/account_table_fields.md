@@ -30,16 +30,18 @@
 | 页面字段 | 管理 API 字段 | 原始来源与规则 |
 | --- | --- | --- |
 | 活动名称 | `plan_slots[].name`，缺失回退 tier/pid | 优先 `GET /billing/balance` 的 `data.plans[].name/plan_id`，无 plans 才回退 current；按 plan_id 分配对应余额，未匹配余额放常规额度 |
-| 活动有效期 | `plan_slots[].starts_at` / `ends_at` | 本次用户明确的修正规则：两端严格归一同一活动 `data.plans[]` 的 `starts_at` / `ends_at`。缺失显示 —，不使用 effective_at、续期或余额到期补齐；替代卡片级“套餐期/额度生效期”。常规孤儿余额不虚构活动时间 |
+| 活动有效期 | `plan_slots[].activity_start_ts` / `ends_at` | balance plans 权益 period：daily 开始取套餐 starts_at；daily_night 取权益 effective_at，归零后取同 user_plan_id、entitlement_id 的余额桶 period_start；one_time 只取 effective_at。结束均取同套餐 ends_at。缺失或冲突显示 —，未识别周期沿用套餐起止。名称与时间同行、不换行，额度列加宽至400px、列间距8px，账号页维持原1280px居中宽度与两侧留白容纳六列；starts_at 原值仍用于原排序 |
 | 模型名称 | `plan_slots[].items[].name` | balance `data.balances[].show_name`，兼容 name/model；按套餐匹配后显示 |
 | 剩余 / 总额 | items 的 `remaining` / `total` | balance `remaining_units`（缺失兼容 available_units）/ `total_units`；`used` 来自 used_units。页面以 M 表示百万 token，不把权益 grant_units 加入余额 |
 | 剩余百分比及进度颜色 | items 的 `remaining`、`total` | 前端计算 remaining/total；剩余不大于零或低于 15% 为红色，低于 50% 为琥珀色，否则绿色；无总额时比例为零 |
-| 模型下“至……” | items 的 `expires_at_ts` / `expires_at` | 从对应 balance 桶的结束字段归一，实际样本为 `expires_at`，兼容解析其它旧结束别名；与活动 ends_at 独立 |
-| 未生效 / 待结算、授予量与生效时刻 | `plan_slots[].pending[]` 的 `name`、`grant_units`、`effective_at` | balance plans（缺失时 current）的 `entitlements[]`；该套餐该模型没有已结算桶才列为 pending。未来 effective_at 显示未生效及时间；已到或未知显示待结算/已授予，不作为可用余额 |
+| 模型额度右下角 | items/pending 的 `period`；槽位 `ends_at` 或 items 的 `expires_at_ts` / `expires_at` | period 按同 user_plan_id、entitlement_id 关联原权益。daily 显示对应桶 expires_at（今日额度到期）；daily_night/one_time 的余额与授予行显示同套餐 ends_at（活动截止），缺失显示 —；未知周期保留原模型到期展示。不因当前 ends_at/period_end/expires_at 相等就视为通用同义字段 |
+| 未生效 / 待结算、授予量与生效提示 | `plan_slots[].pending[]` 的 `name`、`grant_units`、`effective_at` | balance plans（缺失时 current）的 entitlements；该套餐该模型没有已结算桶才列为 pending。未来 effective_at 显示未生效，已到或未知显示待结算，授予量不作为可用余额；Global/Weekend 右下角改为活动截止，生效时刻仍保留在提示中 |
 | 待领活动条 | `claimable_plans[]` 的 `plan_id/name/description/grants[]` | 本号 `GET /billing/preview` 的 data.plans，经解析并剔除已持有活动；grants 取 model_usage/token 权益的 show_name、grant_units、period，不合并别号资格。页面 GET accounts 只读取快照 |
 | 旧数据回退 | `quota` 与 `plans[].entitlements[]` | 无可展示槽位时，quota 来源 balance 按模型合并的余额，总额/已用/剩余相加、结束取最晚；权益行按原始单项信息补充。它不提供可靠的单活动区间 |
 
-模型项到期、pending 生效与活动有效期必须保留各自来源。活动开始不保证额度已到账，活动仍有效也不保证尚有余额。
+模型项到期、pending 生效与套餐记录范围保留各自来源，展示按 [领域定义](../CONTEXT.md) 区分活动类型。新展示字段在正常余额刷新后补齐，旧槽位暂按旧字段展示；本次只刷新指定两号。活动生效不保证额度已到账或尚有余额。
+
+2026-10-17 23:08 VPS 实测：指定两号的 Global 均从生效前无桶、effective_at=23:00，变为已有正余额和消耗、effective_at=0；新桶 period_start=10-17 23:00，period_end=expires_at=套餐 ends_at=10-18 09:00。ZCode 客户端源码将 effective_at=0 作为立即生效哨兵值，并分别用 expires_at 表达额度桶重置边界、ends_at 表达套餐截止。Weekend 当前三种结束均为10-19 09:00，但 period_start=10-12 20:00 与权益 effective_at=10-16 23:00 不同；按用户规则展示后者，不能据当前快照证明该账号在10-12实际可消费。证据见 `data/diagnostics/plan-field-compare-20261017/after-activation.json`。
 
 ## 最近请求
 

@@ -12,7 +12,8 @@
 
 - 复用 quota.py 的提取入口，抽取秒/毫秒/ISO 转秒与短格式 helper。starts_at、quota_start_ts 保留，新增可选 expire_ts / 模型项 expires_at_ts；保留 expire / expires_at 短文字。仅有短文字的旧记录不推测年份，保持未知提醒。
 - 时间比较一律用完整秒值。前端用固定 UTC+8 输出已有 MM-DD HH:MM；不新增日期库或配置。拒绝通过给短文字补当前年份恢复提醒，因为跨年会误判。
-- 保留旧额度字段兼容，卡片不再拼接额度生效区间；活动有效期严格取活动 starts_at / ends_at，不用 expire 的余额回填或 effective_at 替代。模型项自己的到期及待生效时间保留，可用状态不变。关联方案承接同一取值契约与排序。
+- 保留旧字段兼容，新增 activity_start_ts 专供活动有效期：daily 为 starts_at；daily_night 优先 effective_at，归零后严格取同 user_plan_id、entitlement_id 桶 period_start；one_time 只取 effective_at。多权益开始不同或依据缺失不虚构统一起点。结束只取 ends_at；daily 右下角为桶 expires_at，daily_night/one_time 为套餐 ends_at。原余额数字、pending 和状态判定不变，未知 period 保留旧展示。
+- 名称与区间放同一卡头且不换行；保留原1280px居中页面与两侧28px内边距。额度列400px、其余列沿用原值、间距8px、账号表格最小1220px，完整容纳于1224px内容区；不影响监控页或排序。
 - 验收依次为后端与 DOM、VPS 真实 API/上线 JS、公网插件完整链路；不重复全量验证不相关模块。
 
 ## Risks / Trade-offs

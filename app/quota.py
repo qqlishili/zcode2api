@@ -213,6 +213,7 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         b_name = str(b.get("show_name") or b.get("name") or b.get("model") or "").strip().lower()
         if b_name:
             settled_models.setdefault(b_pid, set()).add(b_name)
+    periods_by_entitlement: dict[tuple[str, str], str] = {}
     slots: list[dict] = []
 
     # 1. 优先从 active 套餐数组构建槽位
@@ -227,13 +228,15 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         tier, tier_code = _plan_tier_from_id(pid, pname)
         expire_ts = _extract_expire_ts(pl)
         expire = _fmt_short(expire_ts)
-        # 活动起止只取本记录同名字段，不借用权益生效或余额到期时间。
+        # 套餐原始起止保留给排序，活动展示开始另按权益周期计算。
         start = _parse_plan_time(pl.get("starts_at"))
         end = _parse_plan_time(pl.get("ends_at"))
         # 授予额度（entitlements）：仅当该模型尚无 balances 桶时才视为「待生效 / 待结算」，
         # 已结算的额度由 balances 桶展示，避免重复渲染。不虚构剩余。
         pending = []
         ent_effective_ats: list[float] = []
+        activity_starts: list[float | None] = []
+        user_plan_id = str(pl.get("user_plan_id") or "")
         for ent in pl.get("entitlements") or []:
             if not isinstance(ent, dict):
                 continue
@@ -241,6 +244,22 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
                 grant = float(ent.get("grant_units") or 0)
             except (ValueError, TypeError):
                 grant = 0.0
+            period = str(ent.get("period") or "")
+            entitlement_id = str(ent.get("entitlement_id") or "")
+            if user_plan_id and entitlement_id:
+                periods_by_entitlement[(user_plan_id, entitlement_id)] = period
+            effective = _parse_plan_time(ent.get("effective_at"))
+            activity_start = start
+            if period in ("daily_night", "one_time"):
+                activity_start = effective
+                if period == "daily_night" and ent.get("effective_at") in (0, "0") and user_plan_id and entitlement_id:
+                    # effective_at 归零后，只认同实例、同权益桶，冲突时不猜本轮开始。
+                    bucket_starts = {_parse_plan_time(b.get("period_start")) for b in raw_balances
+                                     if isinstance(b, dict) and b.get("user_plan_id") == user_plan_id
+                                     and b.get("entitlement_id") == entitlement_id}
+                    if len(bucket_starts) == 1:
+                        activity_start = bucket_starts.pop()
+            activity_starts.append(activity_start)
             ent_eff = _extract_start(ent) or 0
             if ent_eff > 0:
                 ent_effective_ats.append(ent_eff)
@@ -253,8 +272,12 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
                 "name": ent_name,
                 "grant_units": grant,
                 "effective_at": ent_eff,
+                "period": period,
             })
-        # 保留旧额度生效字段兼容；活动有效期仅使用活动本身的 starts_at / ends_at。
+        # 多权益起点不同不能用最早值冒充统一活动开始；旧额度生效字段保持兼容。
+        activity_start_ts = start if not activity_starts else (
+            activity_starts[0] if len(set(activity_starts)) == 1 else None
+        )
         quota_start_ts = min(ent_effective_ats) if ent_effective_ats else (start or 0)
         quota_start = _fmt_short(quota_start_ts)
         slots.append({
@@ -265,6 +288,7 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
             "expire": expire,
             "expire_ts": expire_ts,
             "starts_at": start,
+            "activity_start_ts": activity_start_ts,
             "ends_at": end,
             "quota_start": quota_start,
             "quota_start_ts": quota_start_ts or 0,
@@ -286,7 +310,9 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         used = _safe_units(bal.get("used_units"))
         rem = _safe_units(bal.get("remaining_units") if bal.get("remaining_units") is not None else bal.get("available_units"))
         model_name = str(bal.get("show_name") or bal.get("name") or bal.get("model") or "Unknown").strip()
-        exp_ts = _extract_expire_ts(bal)
+        period = periods_by_entitlement.get((str(bal.get("user_plan_id") or ""),
+                                            str(bal.get("entitlement_id") or "")), "")
+        exp_ts = _parse_plan_time(bal.get("expires_at")) if period == "daily" else _extract_expire_ts(bal)
         exp_str = _fmt_short(exp_ts)
         pct = round(used / tot * 100.0, 1) if tot > 0 else 0.0
 
@@ -299,6 +325,7 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
             "unit": str(bal.get("unit_type") or "token"),
             "expires_at": exp_str,
             "expires_at_ts": exp_ts,
+            "period": period,
         }
 
         bpid = str(bal.get("plan_id") or bal.get("planId") or "").strip()
