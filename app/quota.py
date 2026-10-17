@@ -539,10 +539,10 @@ async def fetch_quota(account: Account, include_claimable: bool = False) -> dict
                 #   2. 真正无任何有效额度（套餐到期或未开通）——维持「额度已用完」。
                 if _has_granted_entitlements(account.plans):
                     account.status = Status.EXHAUSTED
-                    account.last_error = "额度已授予，等待生效"
-                    # 保留套餐槽位（含 pending 授予额度），供前端展示「待结算」而非「额度未获取」
-                    account.plan_slots = _build_plan_slots(data.get("data") or {}, account.plans)
-                elif account.status == Status.ACTIVE:
+                    pending = [e for slot in account.plan_slots for e in slot.get("pending", [])]
+                    awaiting_settlement = any((e.get("effective_at") or 0) <= now for e in pending)
+                    account.last_error = "额度已授予，等待结算" if awaiting_settlement else "额度已授予，等待生效"
+                elif account.status in (Status.ACTIVE, Status.EXHAUSTED):
                     account.status = Status.EXHAUSTED
                     account.last_error = "额度已用完"
                     account.plan_slots = []

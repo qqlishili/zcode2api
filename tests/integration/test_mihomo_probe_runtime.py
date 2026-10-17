@@ -255,7 +255,8 @@ async def continuous_traffic(port, started, done, operation, pid, old_ports):
             await stream_task
         assert ready in completed, '真实 SSE 未建立'
         await asyncio.sleep(0.15)
-        result = await operation()
+        # 更新器与客户端在生产中独立运行，进程归属扫描不能阻塞测试客户端。
+        result = await asyncio.to_thread(asyncio.run, operation())
         await asyncio.sleep(0.2)
         done.set()
         await stream_task

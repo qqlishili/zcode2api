@@ -51,7 +51,7 @@ class TestChatCompletions:
         assert res.status_code == 200
         data = res.json()
         assert data["object"] == "chat.completion"
-        assert data["model"] == "GLM-5.3-Flash"
+        assert data["model"] == "glm-5.3-flash"
         assert data["choices"][0]["message"]["content"] == "Hello from mock upstream"
         assert data["choices"][0]["finish_reason"] == "stop"
         assert data["usage"]["prompt_tokens"] == 10

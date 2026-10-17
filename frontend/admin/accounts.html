@@ -241,9 +241,9 @@ function planList(a){
 function allEntitlements(a){
   const out=[];
   planList(a).forEach(pl=>{
-    const planEnds=Number((pl||{}).ends_at)||Number((pl||{}).expires_at)||0;
+    if(String(pl.status||'active').toLowerCase()!=='active')return;
     ((pl||{}).entitlements||[]).forEach(e=>{
-      out.push({...e,_planEnds:planEnds,_planName:(pl||{}).name||''});
+      out.push({...e,_planName:(pl||{}).name||''});
     });
   });
   return out;
@@ -336,7 +336,9 @@ function statusCell(a){
   const claimLeft=Math.max(0,Math.round(claimBlocked-Date.now()/1000));
   const claimSub=claimLeft>0?`<div class="cell-sub" title="今日活动名额已满，${fmtDur(claimLeft)}后自动解除避让"><span style="color:var(--amber)">⏳ 领取避让 ${fmtDur(claimLeft)}</span></div>`:'';
   const err=a.last_error?`<div class="cell-sub err-line" title="${esc(a.last_error)}">${esc(a.last_error.length>26?a.last_error.slice(0,26)+'…':a.last_error)}</div>`:'';
-  return `<span class="badge badge-${a.status}">${STATUS_LABEL[a.status]||a.status}</span>${sub}${claimSub}${err}`;
+  const pendingLabel = a.status==='exhausted' && /^额度已授予，等待(生效|结算)$/.test(a.last_error||'')
+    ? (a.last_error.endsWith('生效') ? '待生效' : '待结算') : '';
+  return `<span class="badge badge-${a.status}">${pendingLabel||STATUS_LABEL[a.status]||a.status}</span>${sub}${claimSub}${err}`;
 }
 
 function tickbarHtml(a){
@@ -487,6 +489,26 @@ function balRowHtml(it) {
   </div>`;
 }
 
+function pendingRowHtml(e, planName='') {
+  const eff = Number(e.effective_at) || 0;
+  const notYet = eff > Date.now() / 1000;
+  const name = e.name || e.show_name || 'Quota';
+  const tip = esc(`${planName} · ${name} 授予 ${Math.round(e.grant_units).toLocaleString('zh-CN')} tokens，${notYet ? `${fmtDate(eff)} 起生效` : '等待上游结算，不代表可用余额'}`);
+  return `<div class="quota-card-item is-pending">
+    <div class="qci-top">
+      <span class="qci-name" title="${tip}">${esc(shortModel(name))}</span>
+      <span class="qci-pct" style="color:var(--ink-mute)">${notYet ? '未生效' : '待结算'}</span>
+    </div>
+    <div class="qci-track" title="${tip}">
+      <div class="qci-fill" style="width:100%;background:var(--ink-mute)"></div>
+    </div>
+    <div class="qci-btm" title="${tip}">
+      <span class="qci-val">+${fmtNum(e.grant_units)}</span>
+      <span class="qci-exp">${notYet ? `${fmtDate(eff)} 生效` : '已授予'}</span>
+    </div>
+  </div>`;
+}
+
 function planGroupHtml(p) {
   const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
   const exp = expireInfo(p.expire);
@@ -502,25 +524,8 @@ function planGroupHtml(p) {
     : (exp ? `至 ${exp.text}` : '');
   const items = sortPlanItems(p.items || []);
   const rows = items.map(balRowHtml).join('');
-  // 授予额度（entitlements）但 balances 未结算：额度尚未到 effective_at。
-  // 统一走 quota-card-item.is-pending：灰色系斜纹条 + 「未生效」标签 + 授予 token 量 + 生效时间。
-  const pendingRows = (p.pending || []).map(e => {
-    const eff = Number(e.effective_at) || 0;
-    const tip = `${esc(p.name || '')} · ${esc(e.name)} 授予 ${Math.round(e.grant_units).toLocaleString('zh-CN')} tokens${eff ? `，${fmtDate(eff)} 起生效` : ''}`;
-    return `<div class="quota-card-item is-pending">
-      <div class="qci-top">
-        <span class="qci-name" title="${tip}">${esc(shortModel(e.name))}</span>
-        <span class="qci-pct" style="color:var(--ink-mute)">未生效</span>
-      </div>
-      <div class="qci-track" title="${tip}">
-        <div class="qci-fill" style="width:100%;background:var(--ink-mute)"></div>
-      </div>
-      <div class="qci-btm" title="${tip}">
-        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
-        <span class="qci-exp">${eff ? `${fmtDate(eff)} 生效` : ''}</span>
-      </div>
-    </div>`;
-  }).join('');
+  // pending 只表示余额桶未生成；是否待生效须单独比较 effective_at。
+  const pendingRows = (p.pending || []).map(e => pendingRowHtml(e, p.name || '')).join('');
   return `
   <div class="plan-card">
     <div class="plan-card-hd">
@@ -559,25 +564,12 @@ function fallbackQuotaHtml(a) {
       </div>
     </div>`;
   });
-  // 待生效活动套餐：灰色系斜纹条 + 「未生效」标签
+  // 旧数据只有按模型合并的余额；已有余额的模型不再重复展示已授予量。
   const now = Date.now() / 1000;
   const ents = allEntitlements(a);
-  ents.filter(e => Number(e.effective_at) > now).forEach(e => {
-    const eff = Number(e.effective_at) || 0;
-    const tip = `${esc(e._planName || '')} · ${fmtDate(eff)} 起生效${e._planEnds ? '，套餐 ' + fmtDate(e._planEnds) + ' 结束' : ''}`;
-    rows.push(`<div class="quota-card-item is-pending">
-      <div class="qci-top">
-        <span class="qci-name" title="${tip}">${esc(shortModel(e.show_name || '未生效'))}</span>
-        <span class="qci-pct" style="color:var(--ink-mute)">未生效</span>
-      </div>
-      <div class="qci-track" title="${tip}">
-        <div class="qci-fill" style="width:100%;background:var(--ink-mute)"></div>
-      </div>
-      <div class="qci-btm" title="${tip}">
-        <span class="qci-val">+${fmtNum(e.grant_units)}</span>
-        <span class="qci-exp">${fmtDate(eff)} 生效</span>
-      </div>
-    </div>`);
+  ents.filter(e => Number(e.grant_units) > 0 && (Number(e.effective_at) > now
+    || !keys.some(k => k.toLowerCase() === String(e.show_name || e.name || '').toLowerCase()))).forEach(e => {
+    rows.push(pendingRowHtml(e, e._planName));
   });
   if (!rows.length) {
     if (a.mode !== 'jwt') return '<span class="quota-empty">—</span>';

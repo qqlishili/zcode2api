@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -55,7 +56,7 @@ async def test_refill_loop_never_solves_without_serviceable_port(manager, monkey
     async def stop(_seconds):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(cap.asyncio, "sleep", stop)
+    monkeypatch.setattr(cap, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": stop})))
     with pytest.raises(asyncio.CancelledError):
         await manager._refill_loop()
     assert scheduled == []
@@ -72,7 +73,7 @@ async def test_refill_loop_targets_are_the_returned_ports(manager, monkeypatch):
     async def stop(_seconds):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(cap.asyncio, "sleep", stop)
+    monkeypatch.setattr(cap, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": stop})))
     with pytest.raises(asyncio.CancelledError):
         await manager._refill_loop()
     assert scheduled == [JP, TW]
@@ -132,7 +133,7 @@ async def test_refill_loop_uses_actual_egress_watermark(
     async def stop(_seconds):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(cap.asyncio, "sleep", stop)
+    monkeypatch.setattr(cap, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": stop})))
     with pytest.raises(asyncio.CancelledError):
         await manager._refill_loop()
 

@@ -1,5 +1,13 @@
 # zcode2api 当前进度与交接
 
+### 额度状态与活动展示修复（2026-10-17，实施中）
+
+- 按用户补充，按账号全部真实余额判断可选性：单个活动待生效不影响其他活动余额；余额全空时才区分等待生效/等待结算并保持不可选，后台继续刷新。未到账授予量不计入 remaining，不修改调度状态枚举。
+- 两个指定账号的真实 API 及已上线页面 JS 已核对：Global Build 均有 1 亿未生效授予量，其他活动仍有余额且账号 active；一个有 Weekend Flash 余额，另一个只有 GLM-5.3 有余额，Flash 已用完。不得因此停用整号或宣称 Flash 可消费。
+- 页面固定时间复现 4 失败/2 通过后修复，13 项 DOM 通过；后端额度/模型/冷却第一组 81 项通过，补充多模型后的专用 12 项通过。初轮全量 1258 通过/4 失败，修复旧模型断言、注册表 URL 夹具及全局 sleep 替换干扰后组合 219 项通过；第二轮 1261 通过/1 失败，覆盖率均 82.10%。后者已定位测试更新器的同步进程扫描阻塞同一事件循环，将其独立运行后 9 项 Mihomo 故障场景全部通过，保留原超时及断连断言；Ruff/mypy 已过，最终全量进行中，历史失败不改为通过。
+- 最终全量 **1262 项通过、覆盖率 82.10%**；Ruff/mypy、页面 13 项与两方案 strict 均通过，8 份业务/测试文件与 VPS 隔离候选 LF 哈希一致。两方案已补齐缺失规范并对齐状态要求；`entitlements-fallback-before-balances` 7/9、`fix-global-build-entitlement-display` 3/5，待发布验收。真实同一权益到账后的自动恢复继续开放，不以 monitor 夹具恢复冒充生产结算。
+- 证据：本机 `data/diagnostics/entitlements-20261017/`，VPS `/root/entitlements-verify-20261017-l9kcendz/` 及 `/root/entitlements-live-20261017/`。本次承接原 15 份改动中的额度 tasks/execution 和展示 proposal，保留原复核记录；其余 12 份文档哈希未变，不提交。
+
 ### CPA 实际 Messages 链路漏项修复（2026-10-17 17:28 CST，已发布验收）
 
 - 用户报告 CPA 仍提示模型不一致。只读核对本机 CPA `usage-records/usage.db`，17:12:01 记录 `49676` 为 ClaudeExecutor → `POST /v1/messages`，请求 `GLM-5.3-Flash`、响应 `glm-5.3-flash`、HTTP 200；配置指向 VPS `18088`。CPA 的 `claude-opus-5` 等别名先映射为 GLM。此前只修两个 OpenAI 接口，未覆盖 CPA 的 Messages 路径，不能把那轮 16 项验收当成 CPA 已修复。

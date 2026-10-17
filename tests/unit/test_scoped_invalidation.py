@@ -47,9 +47,9 @@ def test_scoped_invalidation_by_region(captcha_mgr):
     captcha_mgr._put(_Token("jp-t", "JP", proxy=proxy_jp))
 
     registry_mock = {
-        "HK": [21100, 21101],
-        "TW": [21200],
-        "JP": [21300],
+        "HK": [proxy_hk1, proxy_hk2],
+        "TW": [proxy_tw],
+        "JP": [proxy_jp],
     }
 
     with patch("app.client_pool.account_client_pool.load_registry", return_value=registry_mock):
