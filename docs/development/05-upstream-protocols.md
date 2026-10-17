@@ -78,7 +78,7 @@ X-Aliyun-Captcha-Region: {region}
 
 Body：标准 Anthropic Messages（`model/max_tokens/stream/system/messages`）。上游模型名**大小写敏感**（`GLM-5.2`、`GLM-5-Turbo`）。
 
-响应模型名口径（2026-10-17）：OpenAI Chat Completions / Responses 保留下游请求的原始名称，与上游实际返回的名称忽略大小写比较；相同才回显下游原始大小写，不同则完整保留上游名称，不用别名表把不同名称改成一样，未上报才回退请求名。出站请求仍按原 `MODEL_NAME_MAP` 规范化，两种用途独立。SSE 先发不含模型的注释帧，在上游 `message_start.model` 到达后再生成 Chat role 首帧或 Responses created/in_progress，后续帧及终态沿用这个结果，不能提前用请求名覆盖真实差异。`/v1/messages` 保持上游原样透传；名称一致不单独证明底层模型身份。
+响应模型名口径（2026-10-17）：Anthropic Messages / OpenAI Chat Completions / Responses 三协议的普通响应与 SSE 均保留下游请求的原始名称，与上游实际返回的名称忽略大小写比较；相同才回显下游原始大小写，不同则完整保留上游名称，不用别名表把不同名称改成一样，未上报才回退请求名。出站请求仍按原 `MODEL_NAME_MAP` 规范化，两种用途独立。两个 OpenAI 接口的 SSE 先发不含模型的注释帧，在上游 `message_start.model` 到达后再生成 Chat role 首帧或 Responses created/in_progress，后续帧及终态沿用这个结果，不能提前用请求名覆盖真实差异。`/v1/messages` 仅调整普通响应的 `model` 或 SSE 的 `message_start.message.model`，其余事件及内容块继续透传；CPA 的 ClaudeExecutor 实际使用此接口。名称一致不单独证明底层模型身份。
 
 API Key 通道差异：`x-api-key: {apiKey}.{secret?}` 替代 Bearer，无验证码头。
 

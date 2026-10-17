@@ -29,6 +29,9 @@ def error_stream():
             async def aclose(self):
                 closed.append("response")
 
+            async def aread(self):
+                return raw
+
             async def aiter_bytes(self):
                 for i in range(0, len(raw), size):
                     yield raw[i:i + size]
@@ -44,7 +47,7 @@ def error_stream():
         reqlog.begin("error", protocol, "GLM-5.3-Flash", True)
         up = gw._Upstream(Response(), Context(), None, on_close=lambda: closed.append("slot"),
                           on_result=on_result, preloaded_bytes=preloaded_bytes)
-        response = (up.to_streaming("error") if protocol == "messages" else
+        response = (up.to_streaming("error", "GLM-5.3-Flash") if protocol == "messages" else
                     gw._openai_stream_response(up, "GLM-5.3-Flash", "error") if protocol == "chat" else
                     gw._responses_stream_response(up, "GLM-5.3-Flash", "error"))
         return up, response.body_iterator, closed, raw
@@ -102,7 +105,7 @@ async def test_eof_bytes_are_preserved_before_error_frame(error_stream, size, ra
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 @pytest.mark.parametrize("trailing_newline", [False, True])
 async def test_complete_terminal_tail_is_not_eof_failure(error_stream, protocol, newline, trailing_newline):
-    raw = b'data: {"type":"message_start","message":{"content":[]}}' + newline * 2
+    raw = b'data: {"type":"message_start","message":{"model":"GLM-5.3-Flash","content":[]}}' + newline * 2
     raw += b'data: {"type":"message_stop"}' + (newline * 2 if trailing_newline else b"")
     results = []
     up, iterator, closed, _ = error_stream(protocol, size=7, raw=raw,
@@ -143,7 +146,7 @@ async def test_cancel_at_eof_error_preserves_failure(error_stream, protocol, con
 @pytest.mark.parametrize("preloaded", [False, True])
 @pytest.mark.parametrize("protocol", ["messages", "chat", "responses"])
 async def test_non_sse_json_does_not_require_terminal(error_stream, preloaded, protocol):
-    raw = b'{"type":"message","usage":{"input_tokens":2,"output_tokens":1}}'
+    raw = b'{"type":"message","model":"GLM-5.3-Flash","usage":{"input_tokens":2,"output_tokens":1}}'
     up, iterator, closed, _ = error_stream(protocol, raw=raw, content_type="application/json",
                                           preloaded_bytes=raw if preloaded else None)
     chunks = [chunk async for chunk in iterator]

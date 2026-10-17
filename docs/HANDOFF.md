@@ -1,5 +1,12 @@
 # zcode2api 当前进度与交接
 
+### CPA 实际 Messages 链路漏项修复（2026-10-17，待发布验收）
+
+- 用户报告 CPA 仍提示模型不一致。只读核对本机 CPA `usage-records/usage.db`，17:12:01 记录 `49676` 为 ClaudeExecutor → `POST /v1/messages`，请求 `GLM-5.3-Flash`、响应 `glm-5.3-flash`、HTTP 200；配置指向 VPS `18088`。CPA 的 `claude-opus-5` 等别名先映射为 GLM。此前只修两个 OpenAI 接口，未覆盖 CPA 的 Messages 路径，不能把那轮 16 项验收当成 CPA 已修复。
+- 本轮三协议统一执行同名大小写规则。Messages 在规范化前保存请求原名，普通 JSON 及 SSE `message_start.message.model` 复用现有比较函数；其它模型名、事件、思考/签名/用量和错误处理保持。SSE 仅缓冲到模型首帧，后续原始字节与分块继续透传。此规则取代下节 `/v1/messages` 原样返回模型名的约定。
+- CPA 真实普通/SSE复现均 HTTP 200 / end_turn / OK，但模型字段不符；路由回归先 **8 失败 / 28 通过**，修复后相关 **240 项通过**，包含三协议大小写/不同模型/别名/缺失模型及 Messages 分块、CRLF、中文、长思考块、尾帧、错误与取消。VPS 按项目实际路径校验三份候选文件 Ruff 通过。
+- 证据：`data/diagnostics/cpa-model-red-20261017.xml`、`cpa-model-green-20261017.xml`、`cpa-model-20261017/cpa-before.json` / `live-before.json`；尚待 Git 发布、CPA 新请求/日志及公网三协议验收。CPA 配置、旧日志和原 15 份未提交改动不随本轮修复更改。
+
 ### 按下游原始大小写回显模型（2026-10-17 16:58 CST，已发布验收）
 
 - 用户明确规则：请求名与上游返回名忽略大小写相同，才回显下游原始大小写；真实不同保留上游原名。两个 OpenAI 兼容接口的普通/SSE统一执行，未报模型时回退请求名。原始请求名独立于出站规范化保存；`codex-auto-review` 等别名与上游实际名不同，不伪装一致。`/v1/messages` 继续原样透传。本节取代下节 16:41 版本的官方大小写映射。

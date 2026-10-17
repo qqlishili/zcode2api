@@ -28,7 +28,13 @@ from ..captcha import CaptchaSolveError, captcha_manager, safe_diagnostics
 from ..channels import get_channel
 from ..client_pool import RegionOfflineError, account_client_pool
 from ..models import Account, Status
-from ..openai_compat import StreamConverter, _apply_reasoning_params, anthropic_to_openai, openai_to_anthropic
+from ..openai_compat import (
+    StreamConverter,
+    _apply_reasoning_params,
+    _response_model,
+    anthropic_to_openai,
+    openai_to_anthropic,
+)
 from ..quota import fetch_quota
 from ..responses_compat import ResponsesStreamConverter, anthropic_to_responses, responses_to_anthropic
 from ..store import store
@@ -371,6 +377,7 @@ async def messages(request: Request):
             status_code=400,
         )
 
+    model = str(body.get("model") or "")
     err = _apply_reasoning_params(body, body)
     if err:
         return JSONResponse({"error": {"message": err, "type": "invalid_request_error"}}, status_code=400)
@@ -402,7 +409,7 @@ async def messages(request: Request):
     if isinstance(result, _Upstream):
         # dispatch 返回与流式生成器启动之间的取消窗口：兜底关闭释放并发槽位
         try:
-            return result.to_streaming(req_id)
+            return result.to_streaming(req_id, model)
         except asyncio.CancelledError:
             await result.close()
             raise
@@ -1153,6 +1160,50 @@ def _extract_sse_line_event(line_bytes: bytes) -> object:
     return _safe_json(payload)
 
 
+def _message_model_bytes(raw: bytes, model: str) -> bytes:
+    data = _safe_json(raw.decode("utf-8", "ignore"))
+    if not isinstance(data, dict) or data.get("type") != "message":
+        return raw
+    reported = data.get("model")
+    resolved = _response_model(reported, model)
+    if resolved == reported:
+        return raw
+    data["model"] = resolved
+    return json.dumps(data, ensure_ascii=False).encode()
+
+
+async def _message_model_chunks(resp: httpx.Response, model: str):
+    """仅缓冲到 message_start，后续内容块保持原始字节和分块。"""
+    pending = bytearray()
+    resolved = not model
+    async for chunk in resp.aiter_bytes():
+        if resolved:
+            yield chunk
+            continue
+        pending.extend(chunk)
+        while b"\n" in pending:
+            end = pending.index(b"\n") + 1
+            line = bytes(pending[:end])
+            del pending[:end]
+            event = _extract_sse_line_event(line)
+            if isinstance(event, dict) and event.get("type") == "message_start" and isinstance(event.get("message"), dict):
+                message = event["message"]
+                reported = message.get("model")
+                message["model"] = _response_model(reported, model)
+                if message["model"] != reported:
+                    newline = b"\r\n" if line.endswith(b"\r\n") else b"\n"
+                    line = b"data: " + json.dumps(event, ensure_ascii=False).encode() + newline
+                resolved = True
+            yield line
+            if resolved:
+                break
+        if resolved and pending:
+            yield bytes(pending)
+            pending.clear()
+    if pending:
+        yield bytes(pending)
+
+
 class _UpstreamStreamError(RuntimeError):
     """HTTP 200 流内失败，不把上游事件或凭据写入日志。"""
 
@@ -1258,8 +1309,8 @@ class _Upstream:
                         await self.operation.pool.release_operation(self.operation)
 
 
-    def to_streaming(self, req_id: str) -> StreamingResponse:
-        """原样透传（/v1/messages 直通路径），旁路提取原始输入、输出及缓存用量。"""
+    def to_streaming(self, req_id: str, model: str = "") -> StreamingResponse:
+        """Messages 仅对齐同名模型大小写，旁路提取原始输入、输出及缓存用量。"""
         up = self
 
         async def _body_iter():
@@ -1268,12 +1319,13 @@ class _Upstream:
             stream_error = None
             completed = False
             try:
-                if up.preloaded_bytes is not None:
-                    usage = _extract_usage_from_json_bytes(up.preloaded_bytes)
-                    yield up.preloaded_bytes
+                if up.preloaded_bytes is not None or model and "event-stream" not in up.resp.headers.get("content-type", "").lower():
+                    raw = await up.aread()
+                    usage = _extract_usage_from_json_bytes(raw)
+                    yield _message_model_bytes(raw, model) if model else raw
                 else:
                     line_buf = bytearray()
-                    async for chunk in up.resp.aiter_bytes():
+                    async for chunk in _message_model_chunks(up.resp, model):
                         pending_chunk = chunk
                         line_buf.extend(chunk)
                         while b"\n" in line_buf:
