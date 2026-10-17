@@ -16,9 +16,7 @@ import json
 import time
 import uuid
 
-from app.openai_compat import _apply_reasoning_params, _as_int, _image_block
-
-from . import constants
+from app.openai_compat import _apply_reasoning_params, _as_int, _image_block, _response_model
 
 
 def _text_from_response_part(content: object) -> str:
@@ -333,7 +331,6 @@ def _build_usage(usage: dict | None) -> dict:
 
 def anthropic_to_responses(data: dict, model: str, effort: str | None = None) -> dict:
     """Anthropic message 响应 → OpenAI Responses 对象（顶层平铺 output items）。"""
-    response_model = str(data.get("model") or model)
     resp_id = str(data.get("id") or f"resp_{uuid.uuid4().hex[:24]}")
     created_at = int(time.time())
     output: list[dict] = []
@@ -397,7 +394,7 @@ def anthropic_to_responses(data: dict, model: str, effort: str | None = None) ->
         "background": False,
         "error": None,
         "incomplete_details": {"reason": "max_output_tokens"} if is_incomplete else None,
-        "model": constants.MODEL_NAME_MAP.get(response_model.lower(), response_model),
+        "model": _response_model(data.get("model"), model),
         "output": output,
         "output_text": "".join(text_parts),
         "usage": _build_usage(data.get("usage")),
@@ -439,8 +436,8 @@ class ResponsesStreamConverter:
         return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def start(self) -> list[str]:
-        """流式启动握手（幂等）：立即发送 response.created 与 response.in_progress，
-        促使 FastAPI 立即向客户端提交 HTTP 200 Headers，消除首字节静默真空。
+        """流式启动握手（幂等）：解析 message_start 的模型后发送创建与进行中事件。
+        上游模型未知时由网关先发 SSE 注释，避免提前回填请求模型。
         """
         return self._ensure_started()
 
@@ -570,6 +567,7 @@ class ResponsesStreamConverter:
 
         if etype == "message_start":
             msg = evt.get("message") or {}
+            self.model = _response_model(msg.get("model"), self.model)
             if msg.get("id") and not self._started:
                 self.response_id = str(msg["id"])
             u = msg.get("usage") or {}

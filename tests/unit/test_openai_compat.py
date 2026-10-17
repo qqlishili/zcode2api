@@ -187,11 +187,14 @@ class TestThinkingParams:
     ("glm-5.3-flash", "GLM-5.3-Flash", "GLM-5.3-Flash"),
     ("glm-5.3", "GLM-5.3", "GLM-5.3"),
     ("GLM-5.3", "GLM-5.3", "GLM-5.3"),
-    ("glm-5.3", "GLM-5.3-Flash", "GLM-5.3"),
+    ("glm-5.3", "GLM-5.3-Flash", "glm-5.3"),
+    ("glm-5.3-flash", "gLm-5.3-fLaSh", "gLm-5.3-fLaSh"),
+    ("GLM-5.3", "glm-5.3", "glm-5.3"),
+    ("glm-5.3-flash", "codex-auto-review", "glm-5.3-flash"),
     ("upstream-new-model", "GLM-5.3-Flash", "upstream-new-model"),
     (None, "GLM-5.3-Flash", "GLM-5.3-Flash"),
 ])
-def test_response_model_uses_official_name(convert, reported, requested, expected):
+def test_response_model_preserves_request_case_only_when_equal(convert, reported, requested, expected):
     out = convert({"model": reported, "content": [], "stop_reason": "end_turn"}, requested)
     assert out["model"] == expected
 

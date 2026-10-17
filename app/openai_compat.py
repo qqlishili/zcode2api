@@ -15,8 +15,6 @@ import json
 import time
 import uuid
 
-from . import constants
-
 # Anthropic stop_reason → OpenAI finish_reason
 _STOP_REASON_MAP = {
     "end_turn": "stop",
@@ -240,9 +238,14 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
     return body, None
 
 
+def _response_model(reported: object, requested: str) -> str:
+    """仅模型名忽略大小写相同时，沿用下游请求的原始写法。"""
+    reported = str(reported or requested)
+    return requested if reported.lower() == requested.lower() else reported
+
+
 def anthropic_to_openai(data: dict, model: str) -> dict:
     """Anthropic message 响应 → OpenAI chat.completion。"""
-    response_model = str(data.get("model") or model)
     text_parts: list[str] = []
     thinking_parts: list[str] = []
     tool_calls: list[dict] = []
@@ -274,7 +277,7 @@ def anthropic_to_openai(data: dict, model: str) -> dict:
         "id": str(data.get("id") or f"chatcmpl-{uuid.uuid4().hex[:24]}"),
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": constants.MODEL_NAME_MAP.get(response_model.lower(), response_model),
+        "model": _response_model(data.get("model"), model),
         "choices": [{
             "index": 0,
             "message": message,
@@ -287,7 +290,7 @@ def anthropic_to_openai(data: dict, model: str) -> dict:
 class StreamConverter:
     """Anthropic SSE 事件流 → OpenAI chat.completion.chunk 流（有状态转换器）。
 
-    用法：先 start() 产出 role 首 chunk，逐条 feed(event_dict) 收输出行，
+    用法：先 feed(message_start) 取得模型，再 start() 产出 role 首 chunk，逐条 feed(event_dict) 收输出行，
     流结束后追加 done()（"data: [DONE]"）。
     """
 
@@ -314,6 +317,7 @@ class StreamConverter:
         etype = evt.get("type")
         if etype == "message_start":
             msg = evt.get("message") or {}
+            self.model = _response_model(msg.get("model"), self.model)
             if msg.get("id"):
                 self.chunk_id = str(msg["id"])
             u = msg.get("usage") or {}

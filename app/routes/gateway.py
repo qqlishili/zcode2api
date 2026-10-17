@@ -446,7 +446,7 @@ async def chat_completions(request: Request):
     if not isinstance(result, _Upstream):
         return result
 
-    model = str(body.get("model") or "")
+    model = str(payload.get("model") or "")
     if payload.get("stream"):
         try:
             return _openai_stream_response(result, model, req_id)
@@ -483,7 +483,7 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
         usage = reqlog.extract_usage(None)
         completed = False
         try:
-            yield conv.start()
+            yield ": ping\n\n"
             async for line in up.resp.aiter_lines():
                 if not line.startswith("data:"):
                     continue
@@ -495,7 +495,10 @@ def _openai_stream_response(up: _Upstream, model: str, req_id: str) -> Streaming
                     _check_stream_error(evt)
                     completed = completed or evt.get("type") == "message_stop"
                     usage = _extract_event_usage(evt, usage)
-                    for out in conv.feed(evt):
+                    outputs = conv.feed(evt)
+                    if evt.get("type") == "message_start":
+                        yield conv.start()
+                    for out in outputs:
                         yield out
             if not completed and "event-stream" in up.resp.headers.get("content-type", "").lower():
                 raise _UpstreamStreamIncomplete()
@@ -569,7 +572,7 @@ async def responses_endpoint(request: Request):
     if not isinstance(result, _Upstream):
         return result
 
-    model = str(body.get("model") or "")
+    model = str(payload.get("model") or "")
     if payload.get("stream"):
         try:
             return _responses_stream_response(result, model, req_id, effort=effort)
@@ -610,8 +613,7 @@ def _responses_stream_response(
     async def _iter():
         usage = reqlog.extract_usage(None)
         try:
-            for out in conv.start():
-                yield out
+            yield ": ping\n\n"
             async for line in up.resp.aiter_lines():
                 if not line.startswith("data:"):
                     continue
