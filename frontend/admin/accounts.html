@@ -326,7 +326,7 @@ function statusCell(a){
   }
   if(!sub){
     // 套餐有效期（ends_at，unix 秒；expires_at 为旧兼容），统一短格式 MM-DD HH:MM
-    const planEnd=Math.max(0,...planList(a).map(pl=>Number(pl.ends_at)||Number(pl.expires_at)||0));
+    const planEnd=Math.max(0,...planList(a).map(pl=>planTime(pl.ends_at)||planTime(pl.expires_at)));
     if(planEnd){
       const days=Math.ceil((planEnd*1000-Date.now())/86400000);
       sub=`<div class="cell-sub${days<=7?' warn-line':''}" title="当前套餐有效期">有效期 ${fmtDate(planEnd)}</div>`;
@@ -439,15 +439,23 @@ function claimStripHtml(a) {
   }).join('');
 }
 
-function expireInfo(s) {
-  if (!s) return null;
-  const str = String(s).trim();
-  const hasTime = str.length >= 16;
-  const ms = new Date(hasTime ? str.replace(' ', 'T') : str + 'T23:59:59') - Date.now();
-  if (isNaN(ms)) return { text: str, soon: false, warn: false };
-  const soon = ms <= 5 * 86400000;
-  const warn = ms <= 7 * 86400000;
-  return { text: soon && hasTime ? str : str.slice(0, 10), soon, warn };
+function planTime(value) {
+  const n = Number(value);
+  if (n > 0 && Number.isFinite(n)) return n > 1e12 ? n / 1000 : n;
+  const str = String(value || '').trim();
+  // 旧短文字没有年份，只作显示；完整旧日期按北京时间解释。
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    const full = str.length === 10 ? `${str}T23:59:59` : str.replace(' ', 'T');
+    return Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/.test(full) ? full : `${full}+08:00`) / 1000 || 0;
+  }
+  return 0;
+}
+
+function expireInfo(s, ts) {
+  if (!s && !ts) return null;
+  const end = planTime(ts) || planTime(s);
+  const ms = end ? end * 1000 - Date.now() : NaN;
+  return { text: end ? fmtDate(end) : (s || '—'), soon: ms <= 5 * 86400000, warn: ms <= 7 * 86400000 };
 }
 
 function sortPlanItems(items) {
@@ -472,7 +480,7 @@ function balRowHtml(it) {
   const remPct = tot > 0 ? Math.max(0, Math.min(100, (rem / tot) * 100)) : 0;
   const usedPct = tot > 0 ? Math.max(0, Math.min(100, (used / tot) * 100)) : 0;
   const color = quotaRowColor(rem, remPct);
-  const exp = it.expires_at ? String(it.expires_at) : '';
+  const exp = expireInfo(it.expires_at, it.expires_at_ts);
   const rawTip = `${it.name}: 剩余 ${Math.round(rem).toLocaleString('zh-CN')} / 总额 ${Math.round(tot).toLocaleString('zh-CN')} tokens (${Math.round(usedPct)}%已用)`;
   return `<div class="quota-card-item">
     <div class="qci-top">
@@ -484,7 +492,7 @@ function balRowHtml(it) {
     </div>
     <div class="qci-btm" title="${esc(rawTip)}">
       <span class="qci-val">${fmtNum(rem)} / ${fmtNum(tot)}</span>
-      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.length > 11 ? exp.slice(-11) : exp)}</span>` : ''}
+      ${exp ? `<span class="qci-exp" title="本额度到期时间">至 ${esc(exp.text)}</span>` : ''}
     </div>
   </div>`;
 }
@@ -511,17 +519,16 @@ function pendingRowHtml(e, planName='') {
 
 function planGroupHtml(p) {
   const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
-  const exp = expireInfo(p.expire);
+  const exp = expireInfo(p.expire, p.expire_ts);
   const now = Date.now() / 1000;
-  // 额度生效期：起点用后端归一化的 quota_start（entitlements.effective_at，夜间活动晚于套餐开始），
-  // 终点用套餐 expire。统一短格式（MM-DD HH:MM），不再用 starts_at 误导「额度即刻可用」。
+  const startTs = Number(p.starts_at) || 0;
   const qStartTs = Number(p.quota_start_ts) || 0;
-  const qStart = p.quota_start || '';
-  const notYet = qStartTs > 0 && qStartTs > now;   // 额度尚未生效
-  const rangeTip = `额度生效期 ${qStart || '—'} ~ ${exp ? exp.text : '—'}${notYet ? `（${qStart} 起生效）` : ''}`;
-  const rangeLabel = qStart
-    ? `${qStart} ~ ${exp ? exp.text : ''}`
-    : (exp ? `至 ${exp.text}` : '');
+  const qStart = qStartTs ? fmtDate(qStartTs) : (p.quota_start || '');
+  const notYet = qStartTs > now;
+  const end = exp ? exp.text : '—';
+  const planRange = startTs || exp ? `套餐期 ${fmtDate(startTs)} ~ ${end}` : '';
+  // 套餐开始与额度生效不同才分开展示，不用生效时间冒充开始时间。
+  const quotaRange = qStart && (!startTs || qStartTs !== startTs) ? `额度生效期 ${qStart} ~ ${end}` : '';
   const items = sortPlanItems(p.items || []);
   const rows = items.map(balRowHtml).join('');
   // pending 只表示余额桶未生成；是否待生效须单独比较 effective_at。
@@ -530,8 +537,9 @@ function planGroupHtml(p) {
   <div class="plan-card">
     <div class="plan-card-hd">
       <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
-      ${rangeLabel ? `<span class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${notYet ? ' pending-line' : ''}" title="${esc(rangeTip)}">${esc(rangeLabel)}</span>` : ''}
     </div>
+    ${planRange ? `<div class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${startTs > now ? ' pending-line' : ''}" title="${esc(planRange)}">${esc(planRange)}</div>` : ''}
+    ${quotaRange ? `<div class="plan-card-exp${notYet ? ' pending-line' : ''}" title="${esc(quotaRange)}">${esc(quotaRange)}</div>` : ''}
     <div class="plan-card-body">${rows}${pendingRows}</div>
   </div>`;
 }
@@ -587,10 +595,10 @@ function quotaCell(a) {
   const now = Date.now() / 1000;
   const sorted = slots.slice().sort((x, y) => {
     const sx = Number(x.starts_at) || 0, sy = Number(y.starts_at) || 0;
-    const px = sx > 0 && sx > now ? 1 : 0;   // 未开始 → 后置
-    const py = sy > 0 && sy > now ? 1 : 0;
+    const px = sx > now ? 2 : (sx > 0 ? 0 : 1);   // 已开始 → 未知 → 未来
+    const py = sy > now ? 2 : (sy > 0 ? 0 : 1);
     if (px !== py) return px - py;
-    if (px === 0 && sx && sy) return sx - sy;  // 已开始的按开始时间升序
+    if (px === 0) return sx - sy;  // 已开始的按开始时间升序
     return 0;
   });
   let inner = '';
@@ -1262,7 +1270,7 @@ async function onImportFile(ev){
 /* ── Helpers ── */
 function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function fmtDate(d){if(!d)return'—';const dt=new Date(Number(d)*1000);if(isNaN(dt.getTime()))return'—';const M=String(dt.getMonth()+1).padStart(2,'0'),D=String(dt.getDate()).padStart(2,'0'),h=String(dt.getHours()).padStart(2,'0'),m=String(dt.getMinutes()).padStart(2,'0');return `${M}-${D} ${h}:${m}`;}
+function fmtDate(d){if(!d)return'—';const dt=new Date((Number(d)+8*3600)*1000);if(isNaN(dt.getTime()))return'—';const M=String(dt.getUTCMonth()+1).padStart(2,'0'),D=String(dt.getUTCDate()).padStart(2,'0'),h=String(dt.getUTCHours()).padStart(2,'0'),m=String(dt.getUTCMinutes()).padStart(2,'0');return `${M}-${D} ${h}:${m}`;}
 function fmtDateSec(d){if(!d)return'—';const dt=new Date(d*1000);return isNaN(dt)?'—':dt.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 function fmtDur(s){s=Math.max(0,Math.round(s));if(s<60)return s+'秒';const m=Math.floor(s/60);if(m<60)return m+'分';const h=Math.floor(m/60);return h+'小时'+(m%60?(m%60)+'分':'');}
 function openModal(id){document.getElementById(id).classList.add('open');}

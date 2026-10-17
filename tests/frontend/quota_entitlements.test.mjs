@@ -19,6 +19,74 @@ function render(markup){
   return node;
 }
 
+test('统一北京时间，不使用进程本地时区',()=>{
+  assert.equal(window.fmtDate(1792249200),'10-17 23:00');
+  assert.equal(window.fmtDate(0),'—');
+  assert.equal(window.fmtDate('invalid'),'—');
+});
+
+for(const value of [1792339199,1792339199000,'2026-10-18T15:59:59Z']){
+  test(`旧账号状态与余额项的结束时间统一：${value}`,()=>{
+    const status=render(window.statusCell({status:'active',plans:[{ends_at:value}]}));
+    assert.match(status.textContent,/有效期 10-18 23:59/);
+    const row=render(window.balRowHtml({name:'GLM-5.3',total:3,remaining:3,expires_at:value}));
+    assert.match(row.textContent,/至 10-18 23:59/);
+  });
+}
+
+test('套餐期与额度生效期独立，短结束时间临期提醒保持有效',()=>{
+  const node=render(window.planGroupHtml({name:'夜间活动',starts_at:now,quota_start_ts:1792249200,
+    quota_start:'10-17 23:00',expire:'10-18 23:59',expire_ts:1792339199,items:[],pending:[]}));
+  assert.match(node.textContent,/套餐期 10-17 14:00 ~ 10-18 23:59/);
+  assert.match(node.textContent,/额度生效期 10-17 23:00 ~ 10-18 23:59/);
+  assert.ok(node.querySelector('.warn-line'));
+  assert.ok(node.querySelector('.pending-line'));
+});
+
+test('相同区间不重复，缺开始仍保留结束',()=>{
+  const same=render(window.planGroupHtml({starts_at:now,quota_start_ts:now,quota_start:'10-17 14:00',expire:'10-18 23:59'}));
+  assert.match(same.textContent,/套餐期 10-17 14:00 ~ 10-18 23:59/);
+  assert.doesNotMatch(same.textContent,/额度生效期/);
+  const unknown=render(window.planGroupHtml({expire:'10-18 23:59'}));
+  assert.match(unknown.textContent,/套餐期 — ~ 10-18 23:59/);
+});
+
+test('跨年和七天边界按完整时间计算，旧短文字不猜年份',()=>{
+  const before=window.Date.now;
+  window.Date.now=()=>Date.parse('2026-12-30T12:00:00+08:00');
+  try{
+    const expiry=Date.parse('2027-01-02T23:59:00+08:00')/1000;
+    assert.deepEqual({...window.expireInfo('01-02 23:59',expiry)},{text:'01-02 23:59',soon:true,warn:true});
+    const current=window.Date.now()/1000;
+    assert.equal(window.expireInfo('01-06 12:00',current+7*86400).warn,true);
+    assert.equal(window.expireInfo('01-06 12:00',current+7*86400+1).warn,false);
+    assert.deepEqual({...window.expireInfo('01-02 23:59')},{text:'01-02 23:59',soon:false,warn:false});
+    assert.equal(window.expireInfo('2027-01-02 23:59').text,'01-02 23:59');
+  }finally{window.Date.now=before;}
+});
+
+test('已开始升序，未知居中，未来和同时间稳定且不改原数组',()=>{
+  const slots=[
+    {name:'未来远',starts_at:now+7200},{name:'已开始晚',starts_at:now-10},
+    {name:'未知一'},{name:'已开始早',starts_at:now-100},
+    {name:'未来近',starts_at:now+3600},{name:'现在',starts_at:now},
+    {name:'同时间',starts_at:now-10},{name:'未知二'},
+  ];
+  const original=JSON.stringify(slots);
+  const node=render(window.quotaCell({mode:'jwt',plan_slots:slots}));
+  assert.deepEqual([...node.querySelectorAll('.plan-card-name')].map(el=>el.textContent),
+    ['已开始早','已开始晚','同时间','现在','未知一','未知二','未来远','未来近']);
+  assert.equal(JSON.stringify(slots),original);
+});
+
+test('夜间权益未来生效不改变套餐已开始的排序',()=>{
+  const node=render(window.quotaCell({mode:'jwt',plan_slots:[
+    {name:'未来套餐',starts_at:now+100},
+    {name:'夜间活动',starts_at:now-100,quota_start_ts:now+10000,quota_start:'10-17 16:46'},
+  ]}));
+  assert.deepEqual([...node.querySelectorAll('.plan-card-name')].map(el=>el.textContent),['夜间活动','未来套餐']);
+});
+
 test('同模型的其他活动有余额：已结算与待生效分别展示',()=>{
   const account={mode:'jwt',status:'active',last_error:null,plan_slots:[
     {pid:'future',name:'Global Build',items:[],pending:[{name:'GLM-5.3-Flash',grant_units:100000000,effective_at:now+3600}]},

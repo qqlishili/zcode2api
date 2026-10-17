@@ -33,6 +33,10 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 - 凭证随 `data` JSON 明文存储；`Store.export` 输出明文 `{version, exported_at, providers}` JSON。加密落库与领取历史待实现。
 - `public_view()` 的 `token_masked` 对长度超过 16 的凭证使用 `{key[:8]}…{key[-6:]}`，短字符串沿用原值。
 
+套餐槽位时间（`plan_slots[]`）：`starts_at` 为套餐开始秒值，`quota_start_ts` 为最早有效权益生效秒值（缺失则回退套餐开始）；`quota_start` / `expire` 为北京时间 `MM-DD HH:MM`。`expire_ts` 与模型项 `expires_at_ts` 保留完整结束秒值，供前端判断临期，不从无年份文字猜日期。旧槽位无新增字段仍可展示，刷新后补齐；无有效时间为 null/0，不做全库迁移。
+
+页面分别显示套餐期与不同的额度生效期；同区间不重复。按套餐开始时间排列已开始、未知、未来，已开始升序，其他保持原序。授予量与真实余额的现有规则不变。
+
 ## 2. 运行时配置（settings）
 
 下表为 `app/settings.py` 的主要环境变量。网关密钥由 DB meta 管理，不读取 `ZCODE_GATEWAY_KEY`；`config.example.yaml` 未接入。

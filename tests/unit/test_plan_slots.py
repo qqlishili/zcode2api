@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.models import Account
 from app.quota import _build_plan_slots, _extract_expire, _extract_start, _plan_tier_from_id
 
@@ -44,8 +46,20 @@ class TestExtractExpire:
         assert _extract_expire({"ends_at": None}) is None
         assert _extract_expire({"ends_at": ""}) is None
 
+    @pytest.mark.parametrize("value", [0, -1, "nan", "inf", "invalid", 1e100])
+    def test_invalid_expiry_is_unknown(self, value):
+        assert _extract_expire({"ends_at": value}) is None
+
 
 class TestExtractStart:
+    @pytest.mark.parametrize("value", [1792249200, 1792249200000, "2026-10-17T15:00:00Z", "2026-10-17T23:00:00"])
+    def test_same_instant(self, value):
+        assert _extract_start({"starts_at": value}) == 1792249200
+
+    @pytest.mark.parametrize("value", [0, -1, "nan", "inf", "not-a-date", 1e100])
+    def test_invalid_time_is_unknown(self, value):
+        assert _extract_start({"starts_at": value}) is None
+
     def test_seconds_timestamp(self):
         assert _extract_start({"starts_at": 1758900000}) == 1758900000
 
@@ -101,6 +115,31 @@ class TestPlanTierFromId:
 
 
 class TestBuildPlanSlots:
+    def test_complete_expiry_time_and_earliest_entitlement(self):
+        slot = _build_plan_slots({"plans": [{
+            "plan_id": "night", "starts_at": "2026-10-17T14:00:00+08:00",
+            "ends_at": "2026-10-18T15:59:59Z", "entitlements": [
+                {"show_name": "GLM-5.3", "grant_units": 3, "effective_at": 1792252800000},
+                {"show_name": "GLM-5.3-Flash", "grant_units": 5, "effective_at": 1792249200},
+            ],
+        }]}, [])[0]
+        assert slot["starts_at"] == 1792216800
+        assert slot["quota_start_ts"] == 1792249200
+        assert slot["quota_start"] == "10-17 23:00"
+        assert slot["expire_ts"] == 1792339199
+        assert slot["expire"] == "10-18 23:59"
+        assert slot["remaining"] is None
+
+    def test_expiry_falls_back_to_balance_and_orphan_preserves_time(self):
+        balances = [{"plan_id": "p", "show_name": "GLM-5.3", "total_units": 3,
+                     "remaining_units": 3, "expires_at": 1792339199000}]
+        for plans in ([{"plan_id": "p"}], []):
+            slot = _build_plan_slots({"plans": plans, "balances": balances}, [])[0]
+            assert slot["expire_ts"] == 1792339199
+            assert slot["expire"] == "10-18 23:59"
+            assert slot["items"][0]["expires_at_ts"] == 1792339199
+            assert not slot.get("starts_at")
+
     def test_multi_plans_isolation(self):
         """测试类似账号B多套餐（Trust Build 1亿 + Start Plan 500万）完全隔离展示。"""
         raw_balance = {

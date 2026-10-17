@@ -126,64 +126,57 @@ def _safe_units(val) -> int:
         return 0
 
 
-def _extract_expire(obj: dict) -> str | None:
-    """对齐 zcode-switch extract_expire：从对象中提取并格式化过期时间字符串 (MM-DD HH:MM)。
-
-    统一短格式（无年份），与前端 fmtDate 输出一致，避免同一卡片内时间样式混用。
-    """
-    keys = (
-        "nextRenewTime", "expireTime", "expire_time", "endTime", "end_time", "expireAt", "expiredTime",
-        "validEndTime", "expires_at", "expiresAt", "expired_at", "period_end", "ends_at",
-    )
-    for k in keys:
-        v = obj.get(k)
-        if v is None:
-            continue
+def _parse_plan_time(value) -> float | None:
+    """将上游秒、毫秒或 ISO 时间归一为秒；无时区 ISO 按北京时间解释。"""
+    try:
+        ts = float(value)
+        if ts > 1_000_000_000_000:
+            ts /= 1000
+        if ts <= 0:
+            return None
+        datetime.fromtimestamp(ts, tz=_TZ_BEIJING)
+        return ts
+    except (ValueError, TypeError, OverflowError, OSError):
+        pass
+    if isinstance(value, str):
         try:
-            n = float(v)
-            if n > 1_000_000_000_000:
-                n = n / 1000.0
-            if n > 1_000_000_000:
-                dt = datetime.fromtimestamp(n, tz=_TZ_BEIJING)
-                return dt.strftime("%m-%d %H:%M")
-        except (ValueError, TypeError):
+            dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_TZ_BEIJING)
+            return dt.timestamp() if dt.timestamp() > 0 else None
+        except (ValueError, OverflowError, OSError):
             pass
-        if isinstance(v, str):
-            s = v.strip()
-            if not s:
-                continue
-            try:
-                dt_iso = datetime.fromisoformat(s.replace("Z", "+00:00"))
-                if dt_iso.tzinfo is None:
-                    dt_iso = dt_iso.replace(tzinfo=_TZ_BEIJING)
-                return dt_iso.astimezone(_TZ_BEIJING).strftime("%m-%d %H:%M")
-            except (ValueError, TypeError):
-                pass
-            if "T" in s:
-                s = s.replace("T", " ")
-            if len(s) >= 16:
-                return s[5:16]
-            return s
     return None
 
 
-def _extract_start(obj: dict) -> float | None:
-    """从套餐对象提取开始时间（unix 秒），供前端判断「未开始」与排序。
+def _fmt_short(ts: float | None) -> str | None:
+    """短时间只用于展示，临期和排序仍使用完整时间戳。"""
+    return datetime.fromtimestamp(ts, tz=_TZ_BEIJING).strftime("%m-%d %H:%M") if ts else None
 
-    上游 plans[] 用 starts_at（unix 秒）；兼容 startsAt / start_time / effective_at。
-    返回原始秒值（非格式化字符串），前端据此做数值比较。
-    """
-    for k in ("starts_at", "startsAt", "start_time", "startTime", "effective_at", "effectiveAt"):
-        v = obj.get(k)
-        if v is None:
-            continue
-        try:
-            n = float(v)
-            if n > 1_000_000_000_000:
-                n = n / 1000.0
-            return n
-        except (ValueError, TypeError):
-            pass
+
+def _extract_expire_ts(obj: dict) -> float | None:
+    """提取完整结束时间，避免短日期丢失年份后无法可靠判断临期。"""
+    for key in (
+        "nextRenewTime", "expireTime", "expire_time", "endTime", "end_time", "expireAt", "expiredTime",
+        "validEndTime", "expires_at", "expiresAt", "expired_at", "period_end", "ends_at",
+    ):
+        ts = _parse_plan_time(obj.get(key))
+        if ts is not None:
+            return ts
+    return None
+
+
+def _extract_expire(obj: dict) -> str | None:
+    """从套餐或余额桶提取北京时间短格式结束时间（MM-DD HH:MM）。"""
+    return _fmt_short(_extract_expire_ts(obj))
+
+
+def _extract_start(obj: dict) -> float | None:
+    """从套餐对象提取开始秒值，兼容上游别名、毫秒与 ISO 时间。"""
+    for key in ("starts_at", "startsAt", "start_time", "startTime", "effective_at", "effectiveAt"):
+        ts = _parse_plan_time(obj.get(key))
+        if ts is not None:
+            return ts
     return None
 
 
@@ -232,7 +225,8 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         pid = str(pl.get("plan_id") or pl.get("planId") or "").strip()
         pname = str(pl.get("name") or pid).strip()
         tier, tier_code = _plan_tier_from_id(pid, pname)
-        expire = _extract_expire(pl)
+        expire_ts = _extract_expire_ts(pl)
+        expire = _fmt_short(expire_ts)
         start = _extract_start(pl)
         # 授予额度（entitlements）：仅当该模型尚无 balances 桶时才视为「待生效 / 待结算」，
         # 已结算的额度由 balances 桶展示，避免重复渲染。不虚构剩余。
@@ -262,17 +256,14 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         # 的额度 23:00 才生效，晚于套餐 starts_at），无则回退套餐 starts_at。供前端统一展示
         # 「额度生效期」，避免用 starts_at 误导用户以为额度即刻可用。
         quota_start_ts = min(ent_effective_ats) if ent_effective_ats else (start or 0)
-        quota_start = (
-            datetime.fromtimestamp(quota_start_ts, tz=_TZ_BEIJING).strftime("%m-%d %H:%M")
-            if quota_start_ts
-            else None
-        )
+        quota_start = _fmt_short(quota_start_ts)
         slots.append({
             "pid": pid,
             "name": pname or pid or "常规套餐",
             "tier": tier,
             "tier_code": tier_code,
             "expire": expire,
+            "expire_ts": expire_ts,
             "starts_at": start,
             "quota_start": quota_start,
             "quota_start_ts": quota_start_ts or 0,
@@ -294,7 +285,8 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         used = _safe_units(bal.get("used_units"))
         rem = _safe_units(bal.get("remaining_units") if bal.get("remaining_units") is not None else bal.get("available_units"))
         model_name = str(bal.get("show_name") or bal.get("name") or bal.get("model") or "Unknown").strip()
-        exp_str = _extract_expire(bal)
+        exp_ts = _extract_expire_ts(bal)
+        exp_str = _fmt_short(exp_ts)
         pct = round(used / tot * 100.0, 1) if tot > 0 else 0.0
 
         item = {
@@ -304,7 +296,8 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
             "remaining": rem,
             "percent_used": pct,
             "unit": str(bal.get("unit_type") or "token"),
-            "expires_at": exp_str or bal.get("expires_at"),
+            "expires_at": exp_str,
+            "expires_at_ts": exp_ts,
         }
 
         bpid = str(bal.get("plan_id") or bal.get("planId") or "").strip()
@@ -315,19 +308,21 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         if target:
             if not target.get("expire") and exp_str:
                 target["expire"] = exp_str
+                target["expire_ts"] = exp_ts
             target["items"].append(item)
         else:
             loose_items.append(item)
 
     # 3. 孤儿额度桶容错兜底：未匹配到任何套餐的额度，放入默认常规槽位
     if loose_items:
-        max_exp = next((it["expires_at"] for it in loose_items if it.get("expires_at")), None)
+        expiry_item = next((it for it in loose_items if it.get("expires_at")), {})
         slots.append({
             "pid": "default",
             "name": "常规额度",
             "tier": "Standard",
             "tier_code": "free",
-            "expire": max_exp,
+            "expire": expiry_item.get("expires_at"),
+            "expire_ts": expiry_item.get("expires_at_ts"),
             "total": None,
             "used": None,
             "remaining": None,
