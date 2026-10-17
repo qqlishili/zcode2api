@@ -166,7 +166,7 @@
 
 ## 四、核对后的任务与剩余限制
 
-**原确认的 11 项待办仍开放；新增“出口分流（含后台配置管理）”已完成实现和第 4 组验收，当前 22/23，剩规范/交接/提交收尾。**下表继续跟踪这 12 条；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
+**原确认的 11 项待办仍开放；新增“出口分流（含后台配置管理）”已完成实现、验收及规范/交接/提交同步，当前 23/23，尚未归档。**下表继续跟踪这 12 条；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
 
 | # | 任务 | 当前进度与下一步 |
 |---|---|---|
@@ -181,17 +181,17 @@
 | 9 | 指纹一致性调查 | 未完成；跨通道逐字段比较实际外发身份和上游影响 |
 | 10 | 验证码容量与失败排查 | **direct 补货目标/缓存错配子项已修复上线并验收**；冷启动、稳态及同批次命中率仍待验收；TW `21200` 拿不到有效验证码的原因仍待查，不弱化校验 |
 | 11 | 本地标准测试环境 | Windows `.venv` 的 SSL DLL 故障待修；基础 Python 预加载 SSL 的替代执行不算 venv 已修复 |
-| 新增 | 领取 / 对话独立出口配置及管理页 | **22/23，业务已上线验收**：对话 direct、HK/JP/TW 固定代理领取，真实管理页面 JS/API 和公网普通/SSE通过；规范和交接已完成，待提交同步，有新活动再补 code 0/到账 |
+| 新增 | 领取 / 对话独立出口配置及管理页 | **23/23，已上线验收并提交同步，尚未归档**：对话 direct、HK/JP/TW 固定代理领取，真实管理页面 JS/API 和公网普通/SSE通过；有新活动再沿原待办补 code 0/到账 |
 
 独立运维事项保留：vendor host.js 升级评估、磁盘/旧备份清理、3 个重复 change 目录处置。本次整理没有授权自动升级、删除或归档，不算已完成。
 
 ## 五、OpenSpec 方案台账
 
-2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；5 项 in-progress、3 项 complete、7 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。部分旧方案核销修订尚在第八节的 15 份未提交本地文档中。
+2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；4 项 in-progress、4 项 complete、7 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。部分旧方案核销修订尚在第八节的 15 份未提交本地文档中。
 
 | 方案 | 清单进度 | 当前判断 |
 |---|---|---|
-| [split-claim-and-chat-egress](../openspec/changes/split-claim-and-chat-egress/proposal.md) | **22/23** | 业务/配置管理/三地区领取通路/插件公网普通和 SSE 已验收；第 5 组收尾，无新额度到账、真实浏览器视觉或 WARP 公网承诺 |
+| [split-claim-and-chat-egress](../openspec/changes/split-claim-and-chat-egress/proposal.md) | **23/23** | 业务/配置管理/三地区领取通路/插件公网普通和 SSE 已验收；第 5 组提交同步完成，尚未归档，新额度到账、真实浏览器视觉及 WARP 公网仍未验证 |
 | [fix-direct-captcha-refill-targets](../openspec/changes/fix-direct-captcha-refill-targets/execution.md) | **6/6** | 本次修复、回归、上线与真实业务/补货观察已完成；未归档，不关闭验证码容量主线 |
 | [egress-blacklist-investigation](../openspec/changes/egress-blacklist-investigation/proposal.md) | 未拆 tasks | 调查未完；早期“被拉黑/2 个可用”不替代第三节新证据。此 change 只做调查，选路改动应另开 change |
 | [captcha-pool-capacity](../openspec/changes/captcha-pool-capacity/proposal.md) | 未拆 tasks | 容量、冷启动与稳态命中率调查未完成 |
@@ -207,7 +207,7 @@
 | [fix-captcha-failure-diagnostics-and-scheduling](../openspec/changes/fix-captcha-failure-diagnostics-and-scheduling/tasks.md) | **24/24** | 有同名归档副本；不重做，不宣称本轮全部复验 |
 | [isolate-mihomo-probe-from-production](../openspec/changes/isolate-mihomo-probe-from-production/tasks.md) | **30/30** | 有同名归档副本；历史验收不替代当前生产连续性验收 |
 
-原“10 个非重复变更 + 1 个本地环境 = 11 项”口径保留，再加新增分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。5 个进行中目录共 **19 个未勾框**（旧 18 + 分流剩余 1），含 pin 的旧副本项；**不是全项目只剩 41 个子任务**，7 项还没有正式 tasks。
+原“10 个非重复变更 + 1 个本地环境 = 11 项”口径保留，再加已完成的分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。4 个进行中目录共 **18 个未勾框**，含 pin 的旧副本项；**不是全项目只剩 18 个子任务**，7 项还没有正式 tasks。
 
 ## 六、此前误判、失败与核销边界
 
