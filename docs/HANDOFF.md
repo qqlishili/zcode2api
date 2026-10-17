@@ -1,10 +1,13 @@
 # zcode2api 当前进度与交接
 
-### 套餐时间与排序（2026-10-17，执行中）
+### 套餐时间与排序（2026-10-17，已发布验收）
 
-- 用户授权执行下一步，承接 `normalize-plan-time-and-status-display` 与 `plan-slot-start-date-display`，已补齐 spec/design/tasks，strict 通过；未归档。
+- 用户授权执行下一步，承接 `normalize-plan-time-and-status-display` 与 `plan-slot-start-date-display`，已补齐 spec/design/tasks，各 **4/4**，strict 通过，未归档。业务提交 `8b1750269a4b721967fe69d3aa4713fb54a34ff0` 已推送 main / VPS 快进，16 文件 LF 哈希一致，远端干净；回退 `/root/plan-time-recovery-20261017-yp344yvj`。
 - 第一组复现：后端 9 失败/28 通过；真实页面 JS DOM 5 失败/14 通过。结束短文字丢年份导致临期失效，前端本地时区与后端北京时间不一致，未知开始时间导致已开始排序不完整。
-- 第一组已验收：相关后端/集成本机和 VPS 独立候选各 **109 项通过**、Ruff 通过；全部前端最终 **23 项**分别在 UTC / America/Los_Angeles 通过（补充旧状态栏/余额项兼容先 3 失败后通过），两方案 strict 和差分检查通过；各 **2/4**，尚未提交、上线或真实验收。证据 `data/diagnostics/plan-time-20261017/`，其余 11 份未提交文档哈希未变。
+- 第一组已验收：相关后端/集成本机和 VPS 独立候选各 **109 项通过**、Ruff 通过；全部前端最终 **23 项**分别在 UTC / America/Los_Angeles 通过（补充旧状态栏/余额项兼容先 3 失败后通过），两方案 strict 和差分检查通过。其余 11 份未提交文档哈希未变，不提交。
+- 第二组已验收：在途 0 后只重启网关 **0.372 秒**，PID `1713940` active/running、NRestarts=0；指定两号只刷新额度、不领取，2 成功/0 失败、仍 active。真实 API + 上线页面 JS load/rowHtml 在两时区通过，套餐开始与额度生效分开显示，其他活动余额保留。当前无未来/未知 starts_at 的生产样本，后置边界由隔离 DOM 覆盖。
+- 第三组已验收：公网 plugin 两模型各普通/SSE共 **4 项**均 200、模型原大小写一致、end_turn、错误0；3 项逐字 OK，GLM-5.3 SSE 为 OK.。host_alive=true、stale=false。证据 `data/diagnostics/plan-time-20261017/` 的相关回归、after/final DOM、public-after、deploy、updater-attribution 等报告；VPS `/root/plan-time-live-20261017/`。
+- 发布后首次核对配置哈希未变；最终 19:51 定时更新器改写 `.env` / 注册表 / 生命周期，严格“全程未变”断言失败并保留。已核对 env 唯一变化为 ZCODE_PROXIES、文件 mtime 与 19:45:32–19:51:31 updater 对应；Mihomo 配置和 Mihomo/WARP PID、数据库出口策略及固定绑定均未变。chat direct / claim proxy、HK21100/JP21303/TW21202、active=saved、pending=false，未回滚正常更新，不把哈希变化掩盖成通过。
 - 保留真实结算恢复、浏览器视觉/兼容性、HK/JP 对话恢复等独立待办，不借本次展示工作提前关闭。
 
 ### 额度状态与活动展示修复（2026-10-17，已发布验收）
@@ -183,15 +186,15 @@
 
 ## 四、核对后的任务与剩余限制
 
-**原确认的 11 项待办中，“活动授予额度展示”已完成，余 10 项仍开放；新增“出口分流（含后台配置管理）”23/23 已完成，均未归档。**下表保留这 12 条的状态；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
+**原确认的 11 项待办中，“活动授予额度展示”“套餐时间与状态”“套餐开始日期与排序”共 3 项已完成，余 8 项仍开放；新增“出口分流（含后台配置管理）”23/23 已完成，均未归档。**下表保留这 12 条的状态；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
 
 | # | 任务 | 当前进度与下一步 |
 |---|---|---|
 | 1 | HK / JP 对话出口恢复 | **未核销**；直连已验收。最新更新器列 HK 21101/21104 为 active，但未手动补普通/SSE；JP 无准入。分流不冒充地区对话恢复 |
 | 2 | 额度待结算语义 | **8/9**；按账号全部真实余额判定、修复上线及真实页面/插件回归完成；同一权益真实到账后的自动恢复未验 |
 | 3 | 活动授予额度展示 | **5/5，已发布验收**；过去/未知时间正确待结算，13 项 DOM、上线页面/API及公网插件通过；真实浏览器视觉未验 |
-| 4 | 套餐时间与状态 | 部分实现；区分用完、待生效、待结算，统一时间展示 |
-| 5 | 套餐开始日期与排序 | 已有实现和单测；页面日期、排序及未开始后置待验收 |
+| 4 | 套餐时间与状态 | **4/4，已发布验收**；北京时间短格式、完整结束时间判断临期、真实 API/上线 JS 与插件通过，状态沿用全部真实余额规则 |
+| 5 | 套餐开始日期与排序 | **4/4，已发布验收**；套餐期与不同的额度生效期独立，已开始升序、未知居中、未来后置，当前生产无未来样本，边界由隔离 DOM 覆盖 |
 | 6 | 插件热重载与管理面板 | 部分实现；完成重载 API、UI 入口、状态/同步及客户端中断统计分离 |
 | 7 | 移除池内活动领取共享 | 实现已移除共享；专项验证、当前数据和页面待验收，不重复清库 |
 | 8 | 登录成功事件 | 事件及 installed_at 守卫已实现；新账号 OAuth 到奖励完成的真实闭环、bigmodel 实测待验收 |
@@ -204,7 +207,7 @@
 
 ## 五、OpenSpec 方案台账
 
-2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；4 项 in-progress、5 项 complete、6 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。原 15 份未提交文档中有 3 份已承接到本轮提交，另 12 份保留，见第八节。
+2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；4 项 in-progress、7 项 complete、4 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。原 15 份未提交文档中累计 4 份已承接到相关提交，另 11 份保留，见第八节。
 
 | 方案 | 清单进度 | 当前判断 |
 |---|---|---|
@@ -214,8 +217,8 @@
 | [captcha-pool-capacity](../openspec/changes/captcha-pool-capacity/proposal.md) | 未拆 tasks | 容量、冷启动与稳态命中率调查未完成 |
 | [entitlements-fallback-before-balances](../openspec/changes/entitlements-fallback-before-balances/proposal.md) | **8/9** | 状态要求按全部真实余额对齐，1262 项全量与发布验收通过；真实同权益结算恢复仍开放 |
 | [fix-global-build-entitlement-display](../openspec/changes/fix-global-build-entitlement-display/proposal.md) | **5/5** | 规范/任务补齐，页面修复、真实上线 API/JS DOM 及公网插件验收通过；未归档，视觉未验 |
-| [normalize-plan-time-and-status-display](../openspec/changes/normalize-plan-time-and-status-display/proposal.md) | 未拆 tasks | 部分实现、未验收 |
-| [plan-slot-start-date-display](../openspec/changes/plan-slot-start-date-display/proposal.md) | 未拆 tasks | 已有实现与单测，待页面验收 |
+| [normalize-plan-time-and-status-display](../openspec/changes/normalize-plan-time-and-status-display/proposal.md) | **4/4** | 109 项相关回归、双时区 DOM、上线 API/JS 与公网插件通过；已发布，未归档，视觉/兼容性及真实结算恢复独立未验 |
+| [plan-slot-start-date-display](../openspec/changes/plan-slot-start-date-display/proposal.md) | **4/4** | 套餐期与额度期独立、排序边界和真实当前顺序通过；无生产未来样本，隔离覆盖，不归档 |
 | [plugin-hot-reload](../openspec/changes/plugin-hot-reload/proposal.md) | 未拆 tasks | 探针已按账号解析代理，避免重复修 R15；重载与管理入口仍缺 |
 | [remove-pool-claimable-sharing](../openspec/changes/remove-pool-claimable-sharing/proposal.md) | **12/18** | 专项验证、当前数据与页面未验收 |
 | [report-app-login-success-event](../openspec/changes/report-app-login-success-event/proposal.md) | **7/12** | 新账号真实闭环及 bigmodel 未验收 |
@@ -224,7 +227,7 @@
 | [fix-captcha-failure-diagnostics-and-scheduling](../openspec/changes/fix-captcha-failure-diagnostics-and-scheduling/tasks.md) | **24/24** | 有同名归档副本；不重做，不宣称本轮全部复验 |
 | [isolate-mihomo-probe-from-production](../openspec/changes/isolate-mihomo-probe-from-production/tasks.md) | **30/30** | 有同名归档副本；历史验收不替代当前生产连续性验收 |
 
-原“10 个非重复变更 + 1 个本地环境 = 11 项”中已完成展示 1 项，余 10 项，再加已完成的分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。4 个进行中目录共 **13 个未勾框**，含 pin 的旧副本项；不是全项目只剩 13 个子任务，6 项还没有正式 tasks。
+原“10 个非重复变更 + 1 个本地环境 = 11 项”中已完成 3 项，余 8 项，再加已完成的分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。4 个进行中目录共 **13 个未勾框**，含 pin 的旧副本项；不是全项目只剩 13 个子任务，4 项还没有正式 tasks。
 
 ## 六、此前误判、失败与核销边界
 
@@ -258,7 +261,7 @@
 
 ## 八、工作区、发布与运维边界
 
-整理前已存在以下 15 份未提交文档改动，逐文件哈希已保留。本轮承接额度 execution/tasks 与活动展示 proposal 共 3 份到提交 d9379fe，原复核记录保留；其余 12 份哈希未变、保持未提交，不覆盖或顺带发布。本地任务勾选可能与 VPS 已提交版本不同。
+整理前已存在以下 15 份未提交文档改动，逐文件哈希已保留。额度 execution/tasks 与活动展示 proposal 共 3 份进入 d9379fe；本次时间方案再承接 normalize proposal 进入 8b17502，原复核记录保留；其余 11 份哈希未变、保持未提交，不覆盖或顺带发布。本地任务勾选可能与 VPS 已提交版本不同。
 
 ```text
 docs/development/06-dev-guide.md
@@ -278,7 +281,7 @@ openspec/changes/report-app-login-success-event/tasks.md
 openspec/changes/unify-activation-fingerprint/proposal.md
 ```
 
-用户此前已授权线上出口恢复、临时直连、必要真实请求/SSE，以及相关 Git 提交、推送与快进部署；本次默认分支推送曾被自动审批拒绝，用户明确“允许”后正常审批通过，已推送并快进部署，见顶部记录。已有范围内不重复索权。Antigravity 结论仍只指之前分流方案文本。不升级 vendor、不清理旧目录、不归档 change、不修改长期记忆；另 12 份原文档保持未提交。同步继续走 Git，业务服务无需因文档变动重启。
+用户此前已授权线上出口恢复、临时直连、必要真实请求/SSE，以及相关 Git 提交、推送与快进部署；此前默认分支推送曾被自动审批拒绝，用户明确“允许”后正常审批通过，已推送并快进部署，见顶部记录。已有范围内不重复索权。Antigravity 结论仍只指之前分流方案文本。不升级 vendor、不清理旧目录、不归档 change、不修改长期记忆；另 11 份原文档保持未提交。同步继续走 Git，业务服务无需因文档变动重启。
 
 运行数据在 VPS `.env`、`data/accounts.db`、`data/evidence.db`、`data/node_lifecycle.json`、`data/egress_registry.json`、`data/plugin-auth.json`；不入 Git，不向新文档复制凭证、订阅 token 或真实账号标识。`vendor/magpie-plugins` 是真 submodule，本轮 VPS pin `6a3fe9b49e7e638ed79f00d274ad6e1b93a384cd`；`vendor/magpie_host.js` 是人工维护的单文件协议来源，不自动整文件替换。扩大仓库可见范围前另核历史隐私，工作树脱敏不代表历史已脱敏。
 
@@ -290,6 +293,6 @@ openspec/changes/unify-activation-fingerprint/proposal.md
 
 1. 当前额度/展示修复已发布验收，继续等待同一权益真实余额生成后，核验后台自动恢复；两个指定账号 Global Build 于 23:00 生效，现有其他余额不代表该权益已经结算。保持 direct chat / 固定代理 claim；HK 新准入节点需另补普通/SSE，不能将更新器准入当成真实恢复。
 2. 有账号具备新活动资格时，验证领取 code 0、额度到账和本地状态刷新；1003 不核销此项。TW 验证码失败另查原因，保留有效性校验。
-3. 推进套餐时间、开始日期排序及本号活动资格专项验收；标准测试环境、vendor 评估及磁盘事项分别跟踪，不重复修复已通过的授予量页面。
+3. 套餐时间与排序已完成；下一项建议推进 `remove-pool-claimable-sharing` 的本号活动资格专项验收，先核真实 API/页面与已有代码，发现缺口再修，不重复清库。标准测试环境、vendor 评估及磁盘事项分别跟踪。
 
-补货错配、分流和活动授予量展示已发布验收；原 11 项主任务中余 10 项开放。生产重启连接排空超时、诊断输出凭证处理、旧 gateway-unavailability 长 requirement strict 警告均保留。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
+补货错配、分流、活动授予量展示、套餐时间及排序已发布验收；原 11 项主任务中余 **8 项**开放。生产重启连接排空超时、诊断输出凭证处理、旧 gateway-unavailability 长 requirement strict 警告均保留。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
