@@ -1,10 +1,11 @@
 # zcode2api 当前进度与交接
 
-### 本号活动领取资格（2026-10-17，验收发布中）
+### 本号活动领取资格（2026-10-17，已发布验收）
 
-- 当前承接 `remove-pool-claimable-sharing`，**16/18**。claim 53、sentinel 12、前端全套 26、VPS 独立候选全量 pytest 1280、Ruff app/tests 与 mypy constants 均通过；新增资格 spec strict 通过。
-- 验收发现领取弹窗旧缓存、切号预填和晚返回响应残留，3 项失败复现后已修复。生产 14 个允许 billing 账号的本号上游 preview 与真实管理 API/SQLite 均为空；3 个停用号跳过上游。现有上线 JS 对 17 号空资格展示通过，新修复上线待最终验证；不主动领取活动、不重复清库。
+- 当前承接 `remove-pool-claimable-sharing`，**18/18**。claim 53、sentinel 12、前端全套 26、VPS 独立候选全量 pytest 1280、Ruff app/tests 与 mypy constants 均通过；新增资格 spec strict 通过，未归档。
+- 验收发现领取弹窗旧缓存、切号预填和晚返回响应残留，3 项失败复现后已修复。提交 `c06f5af3d0b620e795f5c24655d98f59ea198760` 已推送/VPS 快进，10 文件哈希匹配；运行逻辑仅前端，后端只改注释，无需重启。生产 14 个允许 billing 账号的本号上游 preview 与真实管理 API/SQLite 均为空；3 个停用号跳过上游。实际上线 JS 对 17 号领取条、操作提示和弹窗候选通过，生产无可领正例，正例由隔离测试覆盖；不主动领取活动、不重复清库。
 - 历史 11 号目前按名称能对应 5 号且为空，另 6 号不再以原名出现；旧提交 `614b8d3` 在两端当前导入后的 Git 历史中无法解析，保留证据缺口，不能重述为本轮确认的历史发布。详见[资格验收记录](../openspec/changes/remove-pool-claimable-sharing/execution.md)。本机其余 9 份原文档保持。
+- Windows→公网→VPS plugin 两模型各普通/SSE共 4 项通过：HTTP200、模型名一致、end_turn、流内错误0，2项 `OK` / 2项 `OK.`。配置哈希、用途策略和三个服务进程未变，plugin host_alive=true/stale=false；回退 `/root/claimable-recovery-20261017-wuaf793b`。证据在本机 `data/diagnostics/claimable-acceptance-20261017/` 与 VPS `/root/claimable-live-20261017/`；新活动实际领取/到账、浏览器视觉与兼容性未验。
 
 ### 套餐时间与排序（2026-10-17，已发布验收）
 
@@ -192,7 +193,7 @@
 
 ## 四、核对后的任务与剩余限制
 
-**原确认的 11 项待办中，“活动授予额度展示”“套餐时间与状态”“套餐开始日期与排序”共 3 项已完成，余 8 项仍开放；新增“出口分流（含后台配置管理）”23/23 已完成，均未归档。**下表保留这 12 条的状态；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
+**原确认的 11 项待办中，“活动授予额度展示”“套餐时间与状态”“套餐开始日期与排序”“本号活动领取资格”共 4 项已完成，余 7 项仍开放；新增“出口分流（含后台配置管理）”23/23 已完成，均未归档。**下表保留这 12 条的状态；TW 验证码失败作为第 10 项独立子项，不重复计数。目录数、勾选数、业务待办数使用不同口径，不能把方案齐备当作业务完成。
 
 | # | 任务 | 当前进度与下一步 |
 |---|---|---|
@@ -202,7 +203,7 @@
 | 4 | 套餐时间与状态 | **4/4，已发布验收**；北京时间短格式、完整结束时间判断临期、真实 API/上线 JS 与插件通过，状态沿用全部真实余额规则 |
 | 5 | 套餐开始日期与排序 | **4/4，已发布验收**；套餐期与不同的额度生效期独立，已开始升序、未知居中、未来后置，当前生产无未来样本，边界由隔离 DOM 覆盖 |
 | 6 | 插件热重载与管理面板 | 部分实现；完成重载 API、UI 入口、状态/同步及客户端中断统计分离 |
-| 7 | 移除池内活动领取共享 | 实现已移除共享；专项验证、当前数据和页面待验收，不重复清库 |
+| 7 | 移除池内活动领取共享 | **18/18，已发布验收**；本号资格、页面旧缓存/切号隔离、当前数据及插件回归通过；无生产正例，新活动到账独立开放，不重复清库 |
 | 8 | 登录成功事件 | 事件及 installed_at 守卫已实现；新账号 OAuth 到奖励完成的真实闭环、bigmodel 实测待验收 |
 | 9 | 指纹一致性调查 | 未完成；跨通道逐字段比较实际外发身份和上游影响 |
 | 10 | 验证码容量与失败排查 | **direct 补货目标/缓存错配子项已修复上线并验收**；冷启动、稳态及同批次命中率仍待验收；TW `21200` 拿不到有效验证码的原因仍待查，不弱化校验 |
@@ -213,7 +214,7 @@
 
 ## 五、OpenSpec 方案台账
 
-2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；4 项 in-progress、7 项 complete、4 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。原 15 份未提交文档中累计 4 份已承接到相关提交，另 11 份保留，见第八节。
+2026-10-17 本地 `openspec list --json`：**15 个未归档目录、15 个归档目录**；3 项 in-progress、8 项 complete、4 项 no-tasks。complete 只表示清单全勾，no-tasks 不表示代码全未实现。原 15 份未提交文档中累计 6 份已承接到相关提交，另 9 份保留，见第八节。
 
 | 方案 | 清单进度 | 当前判断 |
 |---|---|---|
@@ -226,14 +227,14 @@
 | [normalize-plan-time-and-status-display](../openspec/changes/normalize-plan-time-and-status-display/proposal.md) | **4/4** | 109 项相关回归、双时区 DOM、上线 API/JS 与公网插件通过；已发布，未归档，视觉/兼容性及真实结算恢复独立未验 |
 | [plan-slot-start-date-display](../openspec/changes/plan-slot-start-date-display/proposal.md) | **4/4** | 套餐期与额度期独立、排序边界和真实当前顺序通过；无生产未来样本，隔离覆盖，不归档 |
 | [plugin-hot-reload](../openspec/changes/plugin-hot-reload/proposal.md) | 未拆 tasks | 探针已按账号解析代理，避免重复修 R15；重载与管理入口仍缺 |
-| [remove-pool-claimable-sharing](../openspec/changes/remove-pool-claimable-sharing/proposal.md) | **12/18** | 专项验证、当前数据与页面未验收 |
+| [remove-pool-claimable-sharing](../openspec/changes/remove-pool-claimable-sharing/proposal.md) | **18/18** | 已发布验收；全量1280、前端26、本号上游/API/SQLite/上线JS与公网plugin普通/SSE通过；无生产正例，历史引用与视觉限制明确保留 |
 | [report-app-login-success-event](../openspec/changes/report-app-login-success-event/proposal.md) | **7/12** | 新账号真实闭环及 bigmodel 未验收 |
 | [unify-activation-fingerprint](../openspec/changes/unify-activation-fingerprint/proposal.md) | 未拆 tasks | 完整指纹调查仍开放，原引用不足不能推出所有路径一致 |
 | [pin-captcha-egress-and-refill-domain](../openspec/changes/pin-captcha-egress-and-refill-domain/tasks.md) | **23/24** | 有同名 2026-10-15 归档副本；8.1 旧未勾与归档低频/高频记录并存，验收缺口归入验证码事项 |
 | [fix-captcha-failure-diagnostics-and-scheduling](../openspec/changes/fix-captcha-failure-diagnostics-and-scheduling/tasks.md) | **24/24** | 有同名归档副本；不重做，不宣称本轮全部复验 |
 | [isolate-mihomo-probe-from-production](../openspec/changes/isolate-mihomo-probe-from-production/tasks.md) | **30/30** | 有同名归档副本；历史验收不替代当前生产连续性验收 |
 
-原“10 个非重复变更 + 1 个本地环境 = 11 项”中已完成 3 项，余 8 项，再加已完成的分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。4 个进行中目录共 **13 个未勾框**，含 pin 的旧副本项；不是全项目只剩 13 个子任务，4 项还没有正式 tasks。
+原“10 个非重复变更 + 1 个本地环境 = 11 项”中已完成 4 项，余 7 项，再加已完成的分流主线。验证码旧副本验收缺口及已完成补货子项并入验证码主线。3 个进行中目录共 **7 个未勾框**，含 pin 的旧副本项；不是全项目只剩 7 个子任务，4 项还没有正式 tasks。
 
 ## 六、此前误判、失败与核销边界
 
@@ -267,7 +268,7 @@
 
 ## 八、工作区、发布与运维边界
 
-整理前已存在以下 15 份未提交文档改动，逐文件哈希已保留。额度 execution/tasks 与活动展示 proposal 共 3 份进入 d9379fe；本次时间方案再承接 normalize proposal 进入 8b17502，原复核记录保留；其余 11 份哈希未变、保持未提交，不覆盖或顺带发布。本地任务勾选可能与 VPS 已提交版本不同。
+整理前已存在以下 15 份未提交文档改动，逐文件哈希已保留。额度 execution/tasks 与活动展示 proposal 共 3 份进入 d9379fe；时间方案承接 normalize proposal 进入 8b17502；本次本号资格再承接 remove-pool 的 execution/tasks 进入 c06f5af，原复核记录保留。其余 9 份哈希未变、保持未提交，不覆盖或顺带发布。本地任务勾选可能与 VPS 已提交版本不同。
 
 ```text
 docs/development/06-dev-guide.md
@@ -299,6 +300,6 @@ openspec/changes/unify-activation-fingerprint/proposal.md
 
 1. 当前额度/展示修复已发布验收，继续等待同一权益真实余额生成后，核验后台自动恢复；两个指定账号 Global Build 于 23:00 生效，现有其他余额不代表该权益已经结算。保持 direct chat / 固定代理 claim；HK 新准入节点需另补普通/SSE，不能将更新器准入当成真实恢复。
 2. 有账号具备新活动资格时，验证领取 code 0、额度到账和本地状态刷新；1003 不核销此项。TW 验证码失败另查原因，保留有效性校验。
-3. 套餐时间与排序已完成；下一项建议推进 `remove-pool-claimable-sharing` 的本号活动资格专项验收，先核真实 API/页面与已有代码，发现缺口再修，不重复清库。标准测试环境、vendor 评估及磁盘事项分别跟踪。
+3. 本号活动资格已完成专项验收；下一项建议推进 `report-app-login-success-event` 的真实新账号登录到奖励闭环，先只读核验可用样本和现有记录，不冒充已验证。标准测试环境、vendor 评估及磁盘事项分别跟踪。
 
-补货错配、分流、活动授予量展示、套餐时间及排序已发布验收；原 11 项主任务中余 **8 项**开放。生产重启连接排空超时、诊断输出凭证处理、旧 gateway-unavailability 长 requirement strict 警告均保留。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
+补货错配、分流、活动授予量展示、套餐时间及排序、本号活动资格已发布验收；原 11 项主任务中余 **7 项**开放。生产重启连接排空超时、诊断输出凭证处理、旧 gateway-unavailability 长 requirement strict 警告均保留。旧交接的迁移流水与早期数字可通过 Git `780d671:docs/HANDOFF.md` 追溯，不作为当前状态使用。
