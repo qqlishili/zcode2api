@@ -1,34 +1,63 @@
 # account-client-pool Specification
 
 ## Purpose
-Provides account-isolated HTTP/TCP connection pool management, consistent hash proxy routing, and graceful direct fallback to prevent upstream WAF correlation.
+
+按账号、用途和实际出口隔离连接状态，提供明确的直连及代理选择、引用排空与空闲回收。代理失败不得静默改道，连接隔离不等同于消除上游风控。
 
 ## Requirements
 
 ### Requirement: Account isolated client instance
-The system SHALL allocate and maintain an independent `httpx.AsyncClient` instance for each account ID, preventing connection and TLS state reuse across accounts.
+The system SHALL maintain independent HTTP clients for each account and request purpose, preventing connection or TLS state reuse across accounts or differently routed purposes. Nested operations SHALL reuse an admitted client only when account, purpose, and effective route match. Account closure SHALL retire all purpose clients while preserving in-flight references until release.
 
 #### Scenario: Separate client instance per account
 - **WHEN** requests are made for two different account IDs
-- **THEN** the system provides distinct `httpx.AsyncClient` instances with separate connection pools
+- **THEN** the system provides distinct client instances with separate connection pools.
+
+#### Scenario: Concurrent purposes for one account
+- **WHEN** one account concurrently sends a direct chat request and a proxied claim
+- **THEN** both retain their selected routes and distinct clients until completion, including SSE and captcha producers.
+
+#### Scenario: Nested quota refresh changes purpose
+- **WHEN** a chat operation schedules a claim-purpose quota refresh for the same account
+- **THEN** the refresh obtains its own purpose client rather than inheriting the chat operation.
+
+#### Scenario: Account deletion during streaming
+- **WHEN** an account is removed while a chat stream or claim producer still references its client
+- **THEN** new acquisitions stop and every purpose client closes after its remaining references release.
 
 ### Requirement: Consistent proxy routing
-The system SHALL bind each account to a stable proxy endpoint via consistent hashing when global proxy list `ZCODE_PROXIES` is configured, unless an explicit `account.proxy` is specified.
+The system SHALL choose the effective purpose policy before account/global proxy resolution. An inherited proxy policy SHALL retain existing explicit-account and stable regional/global routing. Explicit direct SHALL override stored proxies; explicit chat proxy SHALL use its configured local endpoint; explicit claim proxy SHALL use its fixed same-region slot identity. No proxy failure SHALL silently switch to direct or another purpose's route.
+
+#### Scenario: Pending admin save does not change routing
+- **WHEN** an administrator saves a new proxy policy while the process runs with a direct policy snapshot
+- **THEN** all client acquisitions continue using that direct snapshot until restart; no caller reads the saved target as an immediately active override.
 
 #### Scenario: Explicit account proxy takes priority
-- **WHEN** an account has a non-empty `proxy` field configured
-- **THEN** the client instance for this account uses the account-level proxy
+- **WHEN** an account has a non-empty proxy field and its purpose inherits the legacy proxy policy
+- **THEN** the client uses that account proxy, subject to existing admission and retirement checks.
 
 #### Scenario: Consistent hashing over global proxy list
-- **WHEN** global `ZCODE_PROXIES` contains multiple proxy URLs and the account has no explicit proxy
-- **THEN** the system consistently maps the account to the same proxy URL based on hash of account ID
+- **WHEN** the purpose inherits proxy routing, global proxies are configured, and the account has no explicit proxy or assigned region
+- **THEN** the existing stable account mapping selects an eligible proxy.
+
+#### Scenario: Purpose override wins
+- **WHEN** global mode is direct and an account has an explicit claim binding and a direct chat override
+- **THEN** claim uses its binding and chat remains direct regardless of the stored account proxy.
 
 ### Requirement: Graceful fallback without proxy
-The system SHALL gracefully fall back to direct internet connection with an account-isolated client when neither `account.proxy` nor `ZCODE_PROXIES` is configured.
+The system SHALL use an account-isolated direct client for an explicit effective direct policy, or for the existing unmanaged inherited case with no proxy configured. A proxy-required policy with a missing binding, offline region, invalid identity, or unavailable endpoint SHALL fail explicitly and SHALL NOT create an unproxied fallback client.
 
 #### Scenario: Graceful fallback when no proxies configured
-- **WHEN** no proxy is configured in the account or global settings
-- **THEN** the system creates an isolated client without proxy and serves the request without raising errors
+- **WHEN** an unmanaged inherited policy has no account/global proxy and no assigned proxy region
+- **THEN** the existing independent direct connection behavior is retained.
+
+#### Scenario: Explicit direct with offline stored region
+- **WHEN** effective chat mode is direct and the stored HK / JP region has no chat-active proxy
+- **THEN** the account remains eligible for direct chat, subject to its quota and account status.
+
+#### Scenario: Claim proxy missing while chat works
+- **WHEN** the claim policy requires a binding that is absent or invalid
+- **THEN** claim fails before upstream traffic while the account's separately routed chat remains available.
 
 ### Requirement: Idle client cleanup
 The system SHALL track client activity and automatically close and evict client instances that have remained idle beyond the configured TTL (default 300 seconds).

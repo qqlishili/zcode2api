@@ -1,5 +1,9 @@
 # 执行与验收记录
 
+## 规范后续合并（2026-10-17）
+
+`split-claim-and-chat-egress` 实施验收后已同步主规范。本 change 的验证码 requirement 也合并为相同完整块，保留 direct 满/空水位、无可选账号及 proxy 水位场景，并加入 claim 按需且不常驻预热；避免后续归档覆盖已上线用途边界。仅调整规范，历史修复和验收记录不变，两份 change 均未归档。相关主规范及两份 change strict 通过；全仓旧 gateway-unavailability 长文本警告见分流执行记录。
+
 ## 修复及隔离验证（2026-10-17 CST）
 
 - 根因：补货计划按账号代理计算，direct producer 却强制使用 None；已满的直连水库与被检查的代理水库不是同一个。共享目标解析新增 direct 分支，返回单一 None 目标，已有水位和缓存逻辑因此一致。

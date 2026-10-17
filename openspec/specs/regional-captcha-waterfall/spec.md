@@ -1,53 +1,79 @@
 # regional-captcha-waterfall Specification
 
 ## Purpose
-本规范定义基于代理出口物理亲和的多轨预解水库、三态断路器（CLOSED/OPEN/HALF-OPEN）、Singleflight 单飞合并与活动错峰门禁契约，彻底消除热路径求解延迟、跨出口 Token 毒化、3007 全局株连及多账号领额度 IP 连坐风险。
+
+定义按实际出口及托管代次隔离的验证码水库、用途断路器、Singleflight 和领取节流。仅为可选 Plan 对话预热，领取按需求解；限制跨出口污染与故障影响范围，不保证所有节点均可服务。
 
 ## Requirements
 
 ### Requirement: Proxy-Affinity Regional Captcha Pre-solved Reservoir
-The system MUST maintain distinct in-memory pre-solved token queues partitioned by individual egress proxy (`(region, proxy_url)`), continuously refilled by background workers using the exact proxy assigned to that queue, ensuring \(O(1)\) token delivery while strictly guaranteeing that the solving egress IP matches the request outbound IP.
+The system MUST partition pre-solved tokens by actual egress and managed identity, matching solve and consumption routes. Periodic refill MUST target selectable Plan accounts' effective chat egress only, stop at its minimum, and preserve one shared direct reservoir. Claim solves MUST be demand-driven and MUST NOT create periodic or consumption-triggered claim-only refill.
 
 #### Scenario: Sub-millisecond Token Delivery from Matching Proxy Reservoir
-- **WHEN** a request arrives for an account whose assigned proxy is `http://127.0.0.1:21200`
-- **AND** the reservoir for `21200` contains a valid, unexpired token
-- **THEN** the system MUST immediately pop and return that token without spawning Node.js child processes
-- **AND** the system MUST trigger an asynchronous background task to replenish `21200`'s reservoir.
+- **WHEN** a chat operation uses proxy `21200` and that exact identity has a valid token
+- **THEN** the system immediately consumes it without starting Node and requests a bounded refill for that chat target.
 
 #### Scenario: Preventing Cross-Proxy Token Poisoning
-- **WHEN** account `A` is mapped to proxy `21200` and proxy `21201` has 3 pre-solved tokens while `21200` is empty
-- **THEN** the system MUST NOT assign tokens from `21201` to account `A`
-- **AND** the system MUST resolve a fresh token specifically through `21200` to prevent Alibaba WAF Remote IP mismatch rejections.
+- **WHEN** an operation uses `21200` but only `21201` or direct has valid tokens
+- **THEN** it MUST NOT consume those tokens and MUST solve through its admitted `21200` route.
+
+#### Scenario: Direct reservoir reaches its minimum
+- **WHEN** effective chat mode is direct and its reservoir is full
+- **THEN** no refill is scheduled for the stored account proxy, fixed claim proxy, or full direct reservoir.
+
+#### Scenario: Direct reservoir is empty
+- **WHEN** effective chat mode is direct, a selectable Plan account exists, and its reservoir is below minimum
+- **THEN** refill selects exactly one no-proxy target regardless of account regions or claim bindings.
+
+#### Scenario: No selectable Plan account
+- **WHEN** no account can be selected for Plan chat
+- **THEN** periodic chat refill has no targets; a billable exhausted account may still solve on demand for an eligible claim.
+
+#### Scenario: Proxy mode retains its own water level
+- **WHEN** chat proxy `21200` is below minimum and the direct reservoir is full
+- **THEN** refill targets `21200` and does not count direct tokens toward its water level.
+
+#### Scenario: Claim solves without permanent warm-up
+- **WHEN** chat is direct and an operator claims through fixed HK `21100`
+- **THEN** claim solves through `21100` on demand, does not trigger claim-only refill, and does not add `21100` to the periodic chat target set.
 
 ### Requirement: Singleflight Empty-Take Consolidation
-When a burst of concurrent requests targets an empty proxy reservoir, the system MUST consolidate those concurrent requests into a single in-flight solving operation, broadcasting the resulting token to the active requests while banking secondary tokens into the queue.
+Concurrent empty-take requests for the same actual egress and managed identity MUST share one solve. Its producer MUST retain the admitted route and reference until completion or cancellation cleanup; callers on other egresses or identities MUST NOT join it. Foreground broadcast, single-use refill banking, shared solver limits and bounded budgets MUST retain existing behavior.
 
 #### Scenario: Merging Concurrent Solves on Empty Queue
-- **WHEN** 3 concurrent requests arrive simultaneously for proxy `21100` whose reservoir is empty
-- **THEN** the system MUST initiate exactly ONE Node.js solve task for `21100`
-- **AND** all 3 requests MUST await the completion of this single in-flight task without launching redundant solver processes.
+- **WHEN** 3 foreground requests concurrently need a token for the same `21100` identity
+- **THEN** exactly one Node solve is initiated and its successful result is broadcast to those waiters.
+
+#### Scenario: Mixed purposes with different routes
+- **WHEN** the same account concurrently needs a direct chat token and an HK claim token
+- **THEN** the solves retain distinct routes and references; joining or cancellation cannot redirect the other producer.
 
 ### Requirement: Three-State Node Circuit Breaker (CLOSED / OPEN / HALF-OPEN)
-The system MUST implement a three-state circuit breaker per proxy port in `AccountClientPool`. The breaker tracks consecutive failures (distinguishing network timeouts from explicit WAF bans), transitions to `OPEN` (quarantine for 600s), and tests recovery via a single `HALF-OPEN` probe.
+The system MUST retain CLOSED / OPEN / HALF-OPEN breakers, quarantine and bounded recovery admission per purpose and actual proxy identity. Explicit chat WAF refusal MUST affect chat admission without implying claim refusal. Claim errors MUST affect claim only; retirement and identity invalidation still apply to every purpose.
 
 #### Scenario: WAF Ban Rapid Tripping
-- **WHEN** proxy port `21102` receives 2 consecutive Alibaba WAF `F001` or `3012` ban responses
-- **THEN** the breaker MUST immediately transition `21102` to `OPEN` for 600 seconds
-- **AND** `AccountClientPool` MUST bypass `21102` during request routing.
+- **WHEN** chat receives repeated WAF F001 / 3012 at `21102`
+- **THEN** its chat breaker MUST be OPEN for the configured quarantine (default 600s), no later than the legacy two-response limit; a single deterministic rejection may trip earlier.
+- **AND** this alone MUST NOT open that slot's claim breaker or silently send chat direct.
 
 #### Scenario: Half-Open Probe Recovery
-- **WHEN** proxy port `21102` has been in `OPEN` for 600 seconds
-- **THEN** the breaker MUST transition to `HALF-OPEN`, allowing exactly one probe request through
-- **AND** if the probe succeeds, the breaker MUST transition to `CLOSED` and clear all failure counts
-- **AND** if the probe fails, the breaker MUST revert to `OPEN` and reset the 600-second quarantine.
+- **WHEN** a purpose breaker finishes its quarantine
+- **THEN** allow exactly one recovery request for that purpose/identity; success closes it, failure reopens it, and cancellation releases the permit neutrally.
+
+#### Scenario: Claim recovery without claiming rewards
+- **WHEN** a quarantined claim route needs recovery
+- **THEN** a bounded claim-purpose activation/preview or an explicitly requested normal claim may provide evidence; no scheduled recovery probe may POST a reward claim just to test connectivity.
 
 ### Requirement: Target-Scoped Pool Invalidation (Blast Radius Control)
-When an upstream 3007 challenge occurs, the system MUST invalidate tokens exclusively for the affected proxy or region, strictly preventing cross-region or global token purging.
+An upstream 3007 challenge MUST invalidate only the actual failed egress/identity token pool. The account's stored region MUST NOT broaden invalidation to a differently routed purpose, and direct failure MUST NOT mean global purge. Other actual egresses and identities MUST retain their tokens.
 
 #### Scenario: Scoped Invalidation on 3007 Challenge
-- **WHEN** a request on proxy `http://127.0.0.1:21100` (HK) receives an upstream 3007 challenge
-- **THEN** the system MUST invalidate tokens for proxy `21100` or region `HK` only
-- **AND** pre-solved tokens for other regions (`TW`, `JP`, `SG`, `US`) MUST remain untouched and valid in memory.
+- **WHEN** an HK claim through `21100` receives 3007
+- **THEN** invalidate that actual HK target only; direct chat and TW / JP / SG pools remain intact.
+
+#### Scenario: Direct challenge under split routing
+- **WHEN** direct chat receives a challenge while the account has an HK claim binding
+- **THEN** invalidate only the direct reservoir and retain the HK claim tokens.
 
 ### Requirement: Staggered Pacing Gate with Fail-Fast Timeout for Activity Claims
 The system MUST enforce a serialized pacing interval (default 20 seconds) per proxy port during daily plan claiming, and MUST reject queued requests that exceed a maximum wait timeout (default 45 seconds) to prevent client-side HTTP 499 read timeouts.

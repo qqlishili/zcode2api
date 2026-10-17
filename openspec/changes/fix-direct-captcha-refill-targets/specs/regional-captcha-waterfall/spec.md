@@ -1,32 +1,32 @@
 ## MODIFIED Requirements
 
 ### Requirement: Proxy-Affinity Regional Captcha Pre-solved Reservoir
-The system MUST maintain distinct in-memory pre-solved token queues partitioned by actual egress, continuously refilled by background workers using the exact egress assigned to that queue, ensuring O(1) token delivery and matching the solving egress to the request outbound egress. In explicit direct mode, all eligible Plan accounts MUST share one no-proxy reservoir; proxy mode MUST retain per-proxy isolation. Refill decisions MUST use the water level of the actual target reservoir and MUST stop while that reservoir has reached its configured minimum. Accounts that cannot be selected for Plan requests MUST NOT create background refill targets.
+The system MUST partition pre-solved tokens by actual egress and managed identity, matching solve and consumption routes. Periodic refill MUST target selectable Plan accounts' effective chat egress only, stop at its minimum, and preserve one shared direct reservoir. Claim solves MUST be demand-driven and MUST NOT create periodic or consumption-triggered claim-only refill.
 
 #### Scenario: Sub-millisecond Token Delivery from Matching Proxy Reservoir
-- **WHEN** a request arrives for an account whose assigned proxy is `http://127.0.0.1:21200`
-- **AND** the reservoir for `21200` contains a valid, unexpired token
-- **THEN** the system MUST immediately pop and return that token without spawning Node.js child processes
-- **AND** the system MUST trigger an asynchronous background task to replenish `21200`'s reservoir.
+- **WHEN** a chat operation uses proxy `21200` and that exact identity has a valid token
+- **THEN** the system immediately consumes it without starting Node and requests a bounded refill for that chat target.
 
 #### Scenario: Preventing Cross-Proxy Token Poisoning
-- **WHEN** account A is mapped to proxy `21200` and proxy `21201` has 3 pre-solved tokens while `21200` is empty
-- **THEN** the system MUST NOT assign tokens from `21201` to account A
-- **AND** the system MUST resolve a fresh token specifically through `21200`.
+- **WHEN** an operation uses `21200` but only `21201` or direct has valid tokens
+- **THEN** it MUST NOT consume those tokens and MUST solve through its admitted `21200` route.
 
 #### Scenario: Direct reservoir reaches its minimum
-- **WHEN** explicit direct mode is enabled and a selectable Plan account has a stored region or explicit proxy
-- **AND** the no-proxy reservoir has reached the configured minimum with valid tokens
-- **THEN** background refill MUST NOT schedule a solve for that account's stored proxy or for the already-filled no-proxy reservoir.
+- **WHEN** effective chat mode is direct and its reservoir is full
+- **THEN** no refill is scheduled for the stored account proxy, fixed claim proxy, or full direct reservoir.
 
 #### Scenario: Direct reservoir is empty
-- **WHEN** explicit direct mode is enabled, a selectable Plan account exists, and the no-proxy reservoir is below its minimum
-- **THEN** background refill MUST select exactly one no-proxy target regardless of account regions or explicit proxies.
+- **WHEN** effective chat mode is direct, a selectable Plan account exists, and its reservoir is below minimum
+- **THEN** refill selects exactly one no-proxy target regardless of account regions or claim bindings.
 
 #### Scenario: No selectable Plan account
-- **WHEN** no account can be selected for Plan requests
-- **THEN** background refill MUST have no targets in either egress mode.
+- **WHEN** no account can be selected for Plan chat
+- **THEN** periodic chat refill has no targets; a billable exhausted account may still solve on demand for an eligible claim.
 
 #### Scenario: Proxy mode retains its own water level
-- **WHEN** proxy mode is enabled, a selectable account uses proxy `21200`, its reservoir is empty, and the no-proxy reservoir is full
-- **THEN** background refill MUST select `21200` and MUST NOT treat the no-proxy tokens as its water level.
+- **WHEN** chat proxy `21200` is below minimum and the direct reservoir is full
+- **THEN** refill targets `21200` and does not count direct tokens toward its water level.
+
+#### Scenario: Claim solves without permanent warm-up
+- **WHEN** chat is direct and an operator claims through fixed HK `21100`
+- **THEN** claim solves through `21100` on demand, does not trigger claim-only refill, and does not add `21100` to the periodic chat target set.

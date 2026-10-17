@@ -1,6 +1,6 @@
 # 01 — 总体架构
 
-状态：主体为 2.5.18 架构基线；部署方式与求解器依赖已同步，其余模块变化以源码为准。
+状态：主体为 2.5.18 架构基线；2026-10-17 同步用途分流、配置管理与验证码实际出口语义，其余模块变化以源码及专项文档为准。
 
 ## 1. 系统定位
 
@@ -50,7 +50,8 @@ zcode-hub/
 │   ├── models.py          # Account、Status；选号/回退/billing 门在账号对象上
 │   ├── store.py           # SQLite WAL：账号 CRUD、round-robin select、设置 KV
 │   ├── region_assign.py   # 账号大区发牌：入池即时分配 + 存量补配（读注册表避空区）
-│   ├── client_pool.py     # 账号专属独立 AsyncClient 连接池、大区物理路由与三态断路器状态机（CLOSED/OPEN/HALF-OPEN）
+│   ├── egress_policy.py   # 不可变 chat/claim 策略、同区固定身份与完整对象校验
+│   ├── client_pool.py     # 账号/用途/实际出口独立客户端、操作引用、物理退役与用途断路器
 │   ├── routes/gateway.py  # /v1/messages + /v1/chat/completions 调度与错误分类
 │   ├── routes/admin_api.py
 │   ├── routes/pages.py
@@ -61,7 +62,7 @@ zcode-hub/
 │   ├── install.py         # 全局 + 按账号安装序（全程透传账号 Client）
 │   ├── quota.py           # billing/current+balance+usage 刷新
 │   ├── claim.py           # billing/preview + claim 与出网代理物理错峰串行门禁（ClaimPacingGate）
-│   ├── captcha.py         # 出口亲和预解池（按可服务账号绑定端口预热、每端口水位1）、端口级退避、Singleflight 单飞合并、靶向清池与自适应 CPU 保护
+│   ├── captcha.py         # 实际出口/代次亲和池；仅可选 Plan chat 预热，claim 按需求解；退避、单飞和定向清池
 │   ├── evidence.py        # 落盘证据：请求与求解事件（data/evidence.db，白名单字段，保留 ≥7 天）
 │   ├── oauth.py           # zai server-mediated CLI 流
 │   ├── auth_admin.py      # 后台 / 网关鉴权（后台失败节流）
@@ -83,6 +84,8 @@ zcode-hub/
 - `quota.py` / `claim.py` 复用 `captcha.py` 取验证码 token
 - 删号后 `update_account` 拒绝写回，避免后台任务 `INSERT OR REPLACE` 救活已删行
 
+出口配置入口为 `/admin/settings`。数据库完整策略优先于四项用途环境默认；Store 加载后冻结 active，保存/恢复只改变 saved，重启生效。对话/探针走 chat；领取、激活、JWT 额度、账号安装/登录及哨兵走 claim；匿名启动和非 ZCode JWT 链路保留旧全局策略。固定领取身份独立于对话 admission，参与原排空协议；保存删除但未重启不能提前释放引用。接口及配置项见 [出口配置管理](../egress_configuration.md)。
+
 ## 4. 核心流程
 
 ### 4.1 网关请求（含账号池故障转移）
@@ -100,7 +103,7 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
       402/额度关键词      → EXHAUSTED，换号
       429                → 不冷却，原地等 Retry-After 后重试（等待期间放槽）；重试耗尽换下一个账号
       401/403(非验证码)   → INVALID，换号
-      3012/405 风控       → ban_for_risk（DISABLED），换号
+      3012/405 风控拒绝   → 保留账号隔离规则及 chat 出口断路器，换号；不推断永久封禁或 claim 同样拒绝
       403(验证码挑战)     → 刷新验证码原账号重试（≤3 次）
       5xx                → 重试后 COOLING，换号
       其它 4xx           → 原样回传客户端
@@ -142,10 +145,11 @@ client → 鉴权 → [循环: attempt ≤ MAX_ACCOUNT_ATTEMPTS=5]
        ├─ 有可领 → 取验证码 verifyParam → POST billing/claim
        │    ├─ 1005 名额用完 → 标记 claim_blocked_until（优先采用上游 data.plan.ends_at * 1000 + 5~60s Jitter，未返回时回退北京时间次日 00:05 + 0~300s Jitter 离散避让；消除虚假重置承诺，提示时序避让与下线自动跳过）
        │    ├─ 1003 已领取 / 1002 结束 → 记失败文案
-       │    ├─ 3007 验证码失败 → 清空预解池，本次单次止损并保留待领项
+       │    ├─ 3007 验证码失败 → 仅清失败实际出口/代次水库，本次止损并保留待领项
        │    └─ 401 → 标 INVALID
        └─ 领取成功 → 透传 starts_at / ends_at / server_time（秒→毫秒）并刷新额度
 无独立 ClaimScheduler 轮询；纯 API Key 账号跳过领取。
+同次自动领取的激活、preview、验证码与 POST 持有同一 claim 操作；25 秒 billing 超时逐请求生效。显式 claim direct/proxy 下人工选择套餐使用服务端验证码，旧 /claim/manual 返回 409 / claim_verification_route_mismatch；inherit 保留浏览器路径。无活动/已持有继续短路，1003 只证明已领取业务通路，不代表新额度到账。
 前台界面与服务端协同保障（v2.5.18 ~ v2.6.5）：
 - 底层领取与状态同步拆分为单一职责原子原语（`format_claim_blocked_time`、`_norm_plan_id`、`filter_unclaimed_plans`、`sync_account_claimable_plans`、`sync_pool_claimable_plans`、`_ensure_claimable_account`、`_post_claim`）拼装组合；`preview_plans` 探查完成瞬间即调用 `sync_account_claimable_plans` 与 `sync_pool_claimable_plans` 将未持有活动持久化至当前账号及全池可计费账号的 `claimable_plans`；当账号已无未持有活动或活动全部下线时，自动自愈清除陈旧避让戳；已持有套餐优先放行返回 1003 已领而不被 1005 避让误伤；
 - `ClaimError` 结构化携带上游 `code` 与 `next_at`（1005 时提取 `data.plan.ends_at * 1000`），格式化时间精确输出今日/次日/具体日期消除跨天歧义；前端 `claimToast` 自动展示恢复倒计时与客观避让提示；
@@ -189,14 +193,14 @@ Sentinel 后台巡检循环（默认 1800 秒 ± 10% 抖动，具备北京时间
 
 `app/main.py` 的 `_backfill_regions()` 与既有 `_backfill_fingerprints` / `_backfill_install_ids` 并列，在 lifespan 中为「凭证有效但缺大区」的存量账号补发。备份导出携带 `assigned_region`，导入以备份为权威来源覆盖入池发牌结果，保证恢复不改变既有出口归属。
 
-### 4.7 全生命周期账号网络出口归一化（Egress Convergence）
+### 4.7 按用途操作保持网络出口一致（Egress Convergence）
 
-- **第一性原理实体映射**：将「1 个账号」严格锚定为「1 台物理设备 + 1 个固定的物理大区代理出口」。彻底杜绝同账号在业务调用、日活上报、验证码求解时出现跨国 IP 撕裂或机房原生出网。
-- **大区离线熔断栅栏（Fence Principle）**：当账号绑定的大区在代理池中无健康节点时，`account_client_pool.get_client` 显式抛出 `RegionOfflineError`，网关层立即捕获并切换下一个账号，严禁降级为直连出网（宁停勿泄）。
-- **验证码 Token 大区亲和性隔离**：`captcha_manager` 为每枚 Token 记录生成时的出口 `proxy`。消费端（网关/领取）按账号大区代理精确匹配同大区 Token；若未命中同大区有效 Token，立即以该账号大区代理触发 On-Demand 同步现解，杜绝异地 Token 污染。
-- **预解池按可服务账号出口预热（2026-10-13 修订）**：预热域 = 当前可服务账号（可走 Plan 通道且可被选中）**实际绑定**的出口端口集合（`AccountClientPool.serviceable_ports`），**每端口水位 1**。不再按"每大区首个健康端口"铺开：实测求解成功率与耗时是**每端口产率**的函数（同端口被推高后 JP 21301 仅 1/3 成功、14–19s；同大区无人压的 21303 为 3/3、6.9s），而当时 8 个大区里 6 个没有可服务账号，其 token 无人消费却挤占唯一求解槽。
+- **账号身份与用途出口**：保留每账号设备身份和已有大区；客户端按账号、用途、实际代理及托管身份隔离。同次操作固定出口，显式 chat direct / claim 同区代理允许上游看到不同 IP，不承诺消除账号风控。
+- **用途离线门禁**：要求代理的用途遇到来源/身份/退役/断路器异常时明确失败，禁止静默直连或跨区；claim 失败不阻止具有对话资格的 direct chat。显式 direct 是配置选择。
+- **验证码实际出口亲和**：token/Singleflight 按实际代理及代次匹配，producer 继承父操作；已准入 None 明确是 direct，不能重新按账号地区选路。3007 只清失败实际出口/身份，direct 不能清全部池。
+- **仅为可选 Plan chat 预热**：周期与消费补货使用有效 chat 策略，direct 为唯一 None 目标，按该实际水库水位判断并在最低水位已满时停止；claim 按需求解，不加入常驻预热或触发 claim-only 消费回补。每出口水位、CPU 槽和预算保持原约定。
 - **端口级求解退避**：同端口连续 `CAPTCHA_PORT_FAIL_THRESHOLD`（默认 2）次求解失败即退避 `CAPTCHA_PORT_COOLDOWN`（默认 60s × 0.75~1.5 抖动）。退避期内水库命中照常返回，空仓则立即以 `solver_port_backoff` 失败换号，不新建 Node、不占求解槽，也不改写出口断路器（后者只能由真实网络/WAF 证据推进）。
-- **稳定出口绑定**：`resolve_proxy` 的绑定索引分母固定为大区注册表全量端口数，熔断只做同区环形 failover；隔离解除后回到原绑定端口，避免出口漂移导致已预热 token 作废、以及上游看到同一账号在出口间换 IP。
+- **稳定出口绑定**：继承区域代理保留既有稳定映射；显式 claim 固定 `(port,node_id,epoch)`，失败不自动换槽。chat draining 不自动拒绝有效 claim-only 绑定，物理退役关闭所有用途的新准入并等待固定/操作/producer/客户端/token 引用排空。
 - **求解器代理与安全分类**：Node 只使用客户端实际出口注入的 `HTTP_PROXY` / `HTTPS_PROXY`，不继承另一环境出口。默认 stderr 输出有界 `SOLVER_DIAG=` 白名单摘要；Python 不透传原始 stderr 或参数片段。仅有本地求解失败不证明模型通道网络故障。
 - **网关人机校验账号级容灾避让**：单账号因代理瞬时抖动引发人机校验失败时，严格遵守栅栏原则，将故障隔离在账号内部；支持 API Key 回退的账号原地平滑降级，纯 Plan 账号触发 `next_account("captcha_error")` 自动切换下一个健康大区可用账号，绝不向客户端抛出裸 500 熔断。
 
@@ -204,7 +208,7 @@ Sentinel 后台巡检循环（默认 1800 秒 ± 10% 抖动，具备北京时间
 
 每个 producer 自创建起使用 `CAPTCHA_SOLVE_TIMEOUT`（默认25秒，依据实测失败耗时 13–20s 收敛，避免白占唯一求解槽），涵盖配置、排队、执行及退避；删除原10秒排队切片。不同出口与有限挑战重解有独立预算。请求内同出口终态失败仅在有效亲和池为空时复用，不消耗新的实际账号尝试；有效补货、其它出口与 Key 回退仍可服务，不持久化或跨请求缓存失败。模型连接、429退避与 SSE 不受求解预算限制。
 
-客户端池记录每个实例实际出口，验证码、上游和精准失效共用该出口。健康查询与客户端创建不占 HALF-OPEN 资格；gateway、claim billing/activation、quota、install 在实际网络边界配对 `begin_request/end_request`。取消和本地错误中性释放，只有明确网络/WAF证据推进失败。quota 三个并发查询共用一次准入并聚合结算；流式资格由 `_Upstream` 成功/传输失败/关闭回收。账号大区离线禁直连栅栏继续生效，客户端不采用环境隐式代理。
+客户端池记录每个实例实际出口，验证码、上游和精准失效共用该出口。健康查询与客户端创建不占 HALF-OPEN 资格；gateway、claim billing/activation、quota、install 在实际网络边界配对 `begin_request/end_request`。取消和本地错误中性释放，只有明确网络/WAF证据推进对应用途失败；取消半开请求释放恢复资格。quota 三个并发查询共用一次准入并聚合结算；流式资格由 `_Upstream` 成功/传输失败/关闭回收。代理用途的离线禁直连门禁继续生效，客户端不采用环境隐式代理。
 
 ### 4.8 周期出口探测与生产发布
 
