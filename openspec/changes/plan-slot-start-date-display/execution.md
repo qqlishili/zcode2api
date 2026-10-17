@@ -6,6 +6,10 @@
 
 槽位保留活动自己的 ends_at，与可能由余额回填的 expire 分开；开始不借用 effective_at。前端只显示活动有效期，未知端点为 —，孤儿桶不虚构活动；模型到期和待生效权益明细保留。可用状态代码未改，六列的接口、字段与显示规则已整理至 [字段清单](../../../docs/account_table_fields.md)。本组实现完成，发布及真实链路验收继续记录，不以隔离通过提前关闭。
 
+业务提交 `811a96383d41ec72ac15bebb9e5be18425ff7cba` 已推送/VPS 快进。在途 0 后只重启网关 3.184 秒，PID1815403、NRestarts0；Mihomo/WARP 进程不变。指定两号只刷新余额，2 成功/0 失败，4 个活动起止与同轮上游 balance 同活动原始字段匹配；全站 7 个非孤儿槽位均已有 ends_at。上线 JS 在 UTC/洛杉矶均通过，状态栏函数逐字一致，同一真实账号数据发布前后渲染一致，模型到期保留。
+
+Windows→公网→VPS plugin 两模型各普通/SSE共 4 项通过：HTTP200、模型一致、end_turn、错误0、全部逐字 OK。配置哈希、active_policy、Mihomo/WARP PID 未变，plugin host_alive=true/stale=false；17 发布文件哈希核对，9 份原有文档保护未变。回退 `/root/activity-period-recovery-20261017-dzblf7c5`，诊断目录本机 `data/diagnostics/activity-period-20261017/`、VPS `/root/activity-period-live-20261017/`。本次候选源码目录已删除，日志/XML保留；6/6 完成不归档，真实浏览器视觉/兼容性仍未验。
+
 ## 历史实施与验收（2026-10-14，原记录保留）
 
 - 后端 `_build_plan_slots` 增加 `starts_at` 字段，新增 `_extract_start`（unix 秒，兼容 starts_at/startsAt/start_time/effective_at 及毫秒/字符串）。
