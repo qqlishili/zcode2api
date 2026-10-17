@@ -519,16 +519,12 @@ function pendingRowHtml(e, planName='') {
 
 function planGroupHtml(p) {
   const label = p.name || p.tier || (p.pid ? p.pid : '常规套餐');
-  const exp = expireInfo(p.expire, p.expire_ts);
-  const now = Date.now() / 1000;
   const startTs = Number(p.starts_at) || 0;
-  const qStartTs = Number(p.quota_start_ts) || 0;
-  const qStart = qStartTs ? fmtDate(qStartTs) : (p.quota_start || '');
-  const notYet = qStartTs > now;
-  const end = exp ? exp.text : '—';
-  const planRange = startTs || exp ? `套餐期 ${fmtDate(startTs)} ~ ${end}` : '';
-  // 套餐开始与额度生效不同才分开展示，不用生效时间冒充开始时间。
-  const quotaRange = qStart && (!startTs || qStartTs !== startTs) ? `额度生效期 ${qStart} ~ ${end}` : '';
+  const endTs = Number(p.ends_at) || 0;
+  const exp = expireInfo(null, endTs);
+  const now = Date.now() / 1000;
+  // 活动有效期只使用活动本身的起止；模型余额和待生效权益各自显示时间。
+  const activityRange = p.pid === 'default' ? '' : `活动有效期 ${fmtDate(startTs)} ~ ${fmtDate(endTs)}`;
   const items = sortPlanItems(p.items || []);
   const rows = items.map(balRowHtml).join('');
   // pending 只表示余额桶未生成；是否待生效须单独比较 effective_at。
@@ -538,8 +534,7 @@ function planGroupHtml(p) {
     <div class="plan-card-hd">
       <span class="plan-card-name" title="${esc(label)}">${esc(label)}</span>
     </div>
-    ${planRange ? `<div class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${startTs > now ? ' pending-line' : ''}" title="${esc(planRange)}">${esc(planRange)}</div>` : ''}
-    ${quotaRange ? `<div class="plan-card-exp${notYet ? ' pending-line' : ''}" title="${esc(quotaRange)}">${esc(quotaRange)}</div>` : ''}
+    ${activityRange ? `<div class="plan-card-exp${exp && exp.warn ? ' warn-line' : ''}${startTs > now ? ' pending-line' : ''}" title="${esc(activityRange)}">${esc(activityRange)}</div>` : ''}
     <div class="plan-card-body">${rows}${pendingRows}</div>
   </div>`;
 }

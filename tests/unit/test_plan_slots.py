@@ -130,6 +130,34 @@ class TestBuildPlanSlots:
         assert slot["expire"] == "10-18 23:59"
         assert slot["remaining"] is None
 
+    def test_activity_period_uses_only_its_own_boundaries(self):
+        slot = _build_plan_slots({"plans": [{
+            "plan_id": "activity", "starts_at": 1792216800000,
+            "ends_at": "2026-10-18T01:00:00Z", "nextRenewTime": 1792371600,
+            "effective_at": 1792249200, "entitlements": [
+                {"show_name": "GLM-5.3-Flash", "grant_units": 5, "effective_at": 1792249200},
+            ],
+        }], "balances": [{
+            "plan_id": "activity", "show_name": "GLM-5.3", "total_units": 3,
+            "remaining_units": 3, "expires_at": 1792249199,
+        }]}, [])[0]
+        assert slot["starts_at"] == 1792216800
+        assert slot["ends_at"] == 1792285200
+        assert slot["items"][0]["expires_at_ts"] == 1792249199
+        assert slot["pending"][0]["effective_at"] == 1792249200
+
+    def test_missing_activity_times_do_not_borrow_other_times(self):
+        slot = _build_plan_slots({"plans": [{
+            "plan_id": "activity", "effective_at": 1792249200,
+            "nextRenewTime": 1792371600,
+        }], "balances": [{
+            "plan_id": "activity", "show_name": "GLM-5.3", "total_units": 3,
+            "remaining_units": 3, "expires_at": 1792249199,
+        }]}, [])[0]
+        assert slot["starts_at"] is None
+        assert slot["ends_at"] is None
+        assert slot["items"][0]["expires_at_ts"] == 1792249199
+
     def test_expiry_falls_back_to_balance_and_orphan_preserves_time(self):
         balances = [{"plan_id": "p", "show_name": "GLM-5.3", "total_units": 3,
                      "remaining_units": 3, "expires_at": 1792339199000}]

@@ -227,7 +227,9 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
         tier, tier_code = _plan_tier_from_id(pid, pname)
         expire_ts = _extract_expire_ts(pl)
         expire = _fmt_short(expire_ts)
-        start = _extract_start(pl)
+        # 活动起止只取本记录同名字段，不借用权益生效或余额到期时间。
+        start = _parse_plan_time(pl.get("starts_at"))
+        end = _parse_plan_time(pl.get("ends_at"))
         # 授予额度（entitlements）：仅当该模型尚无 balances 桶时才视为「待生效 / 待结算」，
         # 已结算的额度由 balances 桶展示，避免重复渲染。不虚构剩余。
         pending = []
@@ -252,9 +254,7 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
                 "grant_units": grant,
                 "effective_at": ent_eff,
             })
-        # 额度生效期起点：entitlements 的最早 effective_at（夜间活动如 ZCode Global Build
-        # 的额度 23:00 才生效，晚于套餐 starts_at），无则回退套餐 starts_at。供前端统一展示
-        # 「额度生效期」，避免用 starts_at 误导用户以为额度即刻可用。
+        # 保留旧额度生效字段兼容；活动有效期仅使用活动本身的 starts_at / ends_at。
         quota_start_ts = min(ent_effective_ats) if ent_effective_ats else (start or 0)
         quota_start = _fmt_short(quota_start_ts)
         slots.append({
@@ -265,6 +265,7 @@ def _build_plan_slots(balance_data: dict, current_plans: list) -> list[dict]:
             "expire": expire,
             "expire_ts": expire_ts,
             "starts_at": start,
+            "ends_at": end,
             "quota_start": quota_start,
             "quota_start_ts": quota_start_ts or 0,
             "pending": pending,

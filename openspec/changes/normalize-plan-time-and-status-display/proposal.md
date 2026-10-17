@@ -17,9 +17,9 @@
 
 **保留时间戳作为计算依据，统一北京时间短格式**：
 
-- 后端 `_build_plan_slots` 新增 `quota_start` 字段：额度生效时间 = `entitlements[].effective_at`（取最早有效值）否则回退 `starts_at`。作为「额度有效期」的唯一起点。
+- 后端保留既有 `quota_start` 兼容字段，但不再作为卡片时间区间起点；活动有效期严格使用同一活动的 `starts_at` / `ends_at`，不混用权益或余额时间。
 - 后端复用统一的时间解析和 `_fmt_short(ts) -> "MM-DD HH:MM"`，保留 `expire_ts` 供临期计算；秒、毫秒、ISO 时间统一到北京时间，缺失/无效时间保持未知。
-- 前端 `planGroupHtml`：时间标签统一显示 **`quota_start ~ ends_at`**（额度生效期，方案 B），格式统一 `MM-DD HH:MM`。
+- 前端 `planGroupHtml`：统一只显示 **`活动有效期 starts_at ~ ends_at`**，格式 `MM-DD HH:MM`；各模型到期和待生效权益明细保留，替代此前方案 B 的区间拼接。
 - 前端短时间固定北京时间，不随浏览器时区变化；结束时间基于时间戳判断临期，旧短字符串不猜年份。套餐开始时间的独立展示与排序由 `plan-slot-start-date-display` 承接。
 - 保持已上线状态：未来权益显示未生效，已到/未知显示待结算；按所有真实余额判断账号可选性，不将授予量累加到余额。
 
@@ -35,6 +35,8 @@
 - 前端：`frontend/admin/accounts.html` 的时间格式、额度生效期和临期计算，保持原状态语义。
 - 测试：`tests/unit/test_plan_slots.py` 与 `tests/frontend/quota_entitlements.test.mjs`。
 - 无数据库迁移、无新服务、无第三方依赖。
+
+2026-10-17 用户明确修订活动有效期取值；可用状态只列出现行与历史规则，当前不改其显示逻辑。
 
 ## Validation
 

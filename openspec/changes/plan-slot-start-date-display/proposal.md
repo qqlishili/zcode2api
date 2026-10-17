@@ -9,7 +9,7 @@
 ## What Changes
 
 - 核对并保留后端 `starts_at` 秒值，缺失时不虚构开始时间。
-- 前端卡片显示「套餐期」开始至结束；与额度生效时间不同才另列「额度生效期」，避免重复和概念混淆。时间格式沿用 `normalize-plan-time-and-status-display` 的北京时间 `MM-DD HH:MM`。
+- 前端卡片统一显示「活动有效期 start ~ end」，两端严格取同一上游活动记录的 `starts_at` / `ends_at`，不以权益 `effective_at` 或余额桶到期时间补齐。缺失一端显示 —；不再展示卡片级「套餐期」/「额度生效期」。时间格式沿用北京时间 `MM-DD HH:MM`，各模型余额到期与待生效权益明细仍独立保留。
 - 未开始（`starts_at > now`）放后；已开始按 `starts_at` 升序，未知开始时间稳定放在已知已开始之后、未来之前；同时间及未来套餐保持原顺序，不改 API 数组。
 
 ## Capabilities
@@ -24,6 +24,8 @@
 - 前端：`frontend/admin/accounts.html`（`planGroupHtml` 展示 + `quotaCell` 排序）。
 - 测试：后端已有 `starts_at` 断言；扩展现有 Node test runner + happy-dom 的真实页面 JS DOM 验收，无新增依赖。
 - 无数据库迁移、无新服务、无第三方依赖。
+
+2026-10-17 用户明确修订：以本次活动有效期规则替代此前两行区间展示；可用状态仅核查并列出规则，等待用户另行调整，不随本次修改。
 
 ## Validation
 

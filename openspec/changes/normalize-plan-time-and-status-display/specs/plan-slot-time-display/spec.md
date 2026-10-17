@@ -1,6 +1,6 @@
 ## Purpose
 
-让管理者以统一的北京时间识别套餐与额度的生效区间，并依据完整时间判断到期提醒，避免领取时间、额度生效时间、浏览器时区和无年份字符串混用造成错误判断。
+让管理者以统一北京时间区分活动有效期、模型额度到期与权益生效时刻，并依据对应完整时间判断提醒，避免不同层级时间混用。
 
 ## ADDED Requirements
 
@@ -11,16 +11,16 @@
 - **WHEN** 上游分别提供秒、毫秒或 ISO 时间，且浏览器位于不同的本地时区
 - **THEN** 页面显示相同北京时间，格式一致，不出现 Invalid Date
 
-### Requirement: Quota effective time is distinct from plan start
-额度生效期 SHALL 以权益最早有效的 effective_at 为起点，无有效值才回退套餐开始时间，以套餐结束时间为终点。未知起点 MUST NOT 被猜测为当前时间；额度授予与真实余额状态继续遵守已上线规则。
+### Requirement: Activity period uses activity boundaries
+卡片 SHALL 统一显示「活动有效期」，严格使用同一活动的 starts_at / ends_at，并以 — 表达缺失端点；MUST NOT 用权益 effective_at、余额到期或续期时间补齐。模型余额与权益行 SHALL 保留各自到期或生效时间；额度授予与真实余额状态继续遵守已上线规则。
 
 #### Scenario: Night activity
 - **WHEN** 套餐下午开始而额度在当日 23:00 生效
-- **THEN** 额度生效期显示 23:00，未到账授予量不计入真实余额，其他活动余额保持可见
+- **THEN** 活动有效期显示活动下午开始的时间，权益明细仍显示 23:00 生效；未到账授予量不计入余额，其他活动余额保持可见
 
 #### Scenario: No entitlement effective time
 - **WHEN** 权益无有效生效时间而套餐开始时间已知
-- **THEN** 额度生效期回退套餐开始时间
+- **THEN** 活动有效期仍直接使用活动起止，不生成卡片级额度生效期
 
 ### Requirement: Expiry warnings use complete timestamps
 套餐结束提醒 SHALL 根据完整时间戳判断七天内到期，并保留 `MM-DD HH:MM`。旧数据仅有无年份短字符串时 MUST 保留原文字而不猜年份或虚构临期状态。

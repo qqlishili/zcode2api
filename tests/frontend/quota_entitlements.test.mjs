@@ -34,21 +34,30 @@ for(const value of [1792339199,1792339199000,'2026-10-18T15:59:59Z']){
   });
 }
 
-test('套餐期与额度生效期独立，短结束时间临期提醒保持有效',()=>{
-  const node=render(window.planGroupHtml({name:'夜间活动',starts_at:now,quota_start_ts:1792249200,
-    quota_start:'10-17 23:00',expire:'10-18 23:59',expire_ts:1792339199,items:[],pending:[]}));
-  assert.match(node.textContent,/套餐期 10-17 14:00 ~ 10-18 23:59/);
-  assert.match(node.textContent,/额度生效期 10-17 23:00 ~ 10-18 23:59/);
+test('活动有效期只取活动起止，模型到期与权益生效独立',()=>{
+  const node=render(window.planGroupHtml({pid:'night',name:'夜间活动',starts_at:now,ends_at:1792285200,
+    quota_start_ts:1792249200,quota_start:'10-17 23:00',expire:'10-19 09:00',expire_ts:1792371600,
+    items:[{name:'GLM-5.3',total:3,remaining:3,expires_at_ts:1792249199}],
+    pending:[{name:'GLM-5.3-Flash',grant_units:5,effective_at:1792249200}]}));
+  assert.equal(node.querySelectorAll('.plan-card-exp').length,1);
+  assert.equal(node.querySelector('.plan-card-exp').textContent,'活动有效期 10-17 14:00 ~ 10-18 09:00');
+  assert.doesNotMatch(node.textContent,/套餐期|额度生效期|10-19 09:00/);
+  assert.match(node.querySelector('.is-pending').textContent,/10-17 23:00 生效/);
+  assert.match(node.querySelector('.quota-card-item:not(.is-pending)').textContent,/至 10-17 22:59/);
   assert.ok(node.querySelector('.warn-line'));
-  assert.ok(node.querySelector('.pending-line'));
 });
 
-test('相同区间不重复，缺开始仍保留结束',()=>{
-  const same=render(window.planGroupHtml({starts_at:now,quota_start_ts:now,quota_start:'10-17 14:00',expire:'10-18 23:59'}));
-  assert.match(same.textContent,/套餐期 10-17 14:00 ~ 10-18 23:59/);
-  assert.doesNotMatch(same.textContent,/额度生效期/);
-  const unknown=render(window.planGroupHtml({expire:'10-18 23:59'}));
-  assert.match(unknown.textContent,/套餐期 — ~ 10-18 23:59/);
+test('活动时间缺失显示未知，不借用旧额度或余额时间',()=>{
+  const unknown=render(window.planGroupHtml({pid:'activity',quota_start_ts:now,
+    quota_start:'10-17 14:00',expire:'10-18 23:59',expire_ts:1792339199}));
+  assert.equal(unknown.querySelector('.plan-card-exp').textContent,'活动有效期 — ~ —');
+  assert.ok(!unknown.querySelector('.warn-line'));
+  const onlyEnd=render(window.planGroupHtml({pid:'activity',ends_at:1792285200}));
+  assert.equal(onlyEnd.querySelector('.plan-card-exp').textContent,'活动有效期 — ~ 10-18 09:00');
+  const same=render(window.planGroupHtml({pid:'activity',starts_at:now,ends_at:1792285200,quota_start_ts:now}));
+  assert.equal(same.querySelectorAll('.plan-card-exp').length,1);
+  const loose=render(window.planGroupHtml({pid:'default',expire_ts:1792339199}));
+  assert.ok(!loose.querySelector('.plan-card-exp'));
 });
 
 test('跨年和七天边界按完整时间计算，旧短文字不猜年份',()=>{
