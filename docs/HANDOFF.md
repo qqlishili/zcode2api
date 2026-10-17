@@ -1,10 +1,13 @@
 # zcode2api 当前进度与交接
 
-### 按下游原始大小写回显模型（2026-10-17 16:55 CST，待发布验收）
+### 按下游原始大小写回显模型（2026-10-17 16:58 CST，已发布验收）
 
 - 用户明确规则：请求名与上游返回名忽略大小写相同，才回显下游原始大小写；真实不同保留上游原名。两个 OpenAI 兼容接口的普通/SSE统一执行，未报模型时回退请求名。原始请求名独立于出站规范化保存；`codex-auto-review` 等别名与上游实际名不同，不伪装一致。`/v1/messages` 继续原样透传。本节取代下节 16:41 版本的官方大小写映射。
 - SSE 先发不含模型名的注释，解析上游 `message_start.model` 后再生成带模型名的首帧；修复旧 SSE 忽略上游模型、提前回显请求名的问题。普通响应和两个流转换器共用相同比较逻辑，不新增模型目录或依赖。
-- 新规则回归先 **28 失败 / 10 通过**，修复后相关 **218 项通过**，包括实际路由原始名保留、首帧/后续帧、大小写/不同模型/别名/缺失模型，以及现有用量/取消/异常/终态回归；VPS 独立候选 Ruff 通过。证据 `data/diagnostics/model-case-red-20261017.xml`、`model-case-green-20261017.xml`；尚待 Git 发布、公网 plugin 验收及最终配置核对，不将隔离上游的测试当作线上真实模型变化证据。
+- 新规则回归先 **28 失败 / 10 通过**，修复后相关 **218 项通过**，包括实际路由原始名保留、首帧/后续帧、大小写/不同模型/别名/缺失模型，以及现有用量/取消/异常/终态回归；VPS 独立候选及实际发布文件 Ruff 通过。真实不同模型由隔离回归验证，线上未人为制造模型替换，不将模型名称字段当作底层模型身份的证明。
+- **业务修复 `b7140203a196cedbdaedc45695edd2c3f2729418` 已提交/推送/VPS 快进上线**。等待在途请求归零后，仅重启网关（0.367 秒），PID `1570725` active/running、NRestarts=0；plugin host_alive=true / stale=false。本机/VPS 五份源码及测试的 LF 归一化哈希一致、远端工作树干净；原 15 份未提交文档哈希未变。`.env`、注册表、生命周期、Mihomo 配置哈希与 Mihomo/WARP PID 均未变，chat direct / claim proxy、HK21100/JP21303/TW21202、active=saved、pending_restart=false 保持。回退材料 `/root/model-case-recovery-20261017-mqc6alpb`；本次快速重启不核销此前停机超时根因。
+- **Windows → 公网 → VPS plugin 完整链路共 16 项通过**：`GLM-5.3-Flash`、`gLm-5.3-fLaSh`、`GLM-5.3`、`glm-5.3` × Chat Completions / Responses × 普通/SSE，均 HTTP 200、模型字段精确等于原始请求、正常终态、错误 0；SSE 汇总首帧及后续全部模型字段。11 项逐字 `OK`，另 5 项为 `OK.`，不记作逐字全通过。
+- 证据：`data/diagnostics/model-case-red-20261017.xml`、`model-case-green-20261017.xml`、`model-case-20261017/public-after.json` / `ruff.json` / `deploy.json` / `final-runtime.json`；可复跑脚本 `model-case-20261017/public_check.py`。两端临时网关认证文件、VPS 本次候选目录与压缩包已清理，回退及报告保留。`/v1/messages` 原样透传；HK/JP 对话恢复、新活动到账、容量/长期 health 等独立任务继续开放。
 
 ### 模型名大小写与另一模型实测（2026-10-17 16:41 CST）
 
