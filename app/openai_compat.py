@@ -15,6 +15,8 @@ import json
 import time
 import uuid
 
+from . import constants
+
 # Anthropic stop_reason → OpenAI finish_reason
 _STOP_REASON_MAP = {
     "end_turn": "stop",
@@ -240,6 +242,7 @@ def openai_to_anthropic(payload: dict) -> tuple[dict | None, str | None]:
 
 def anthropic_to_openai(data: dict, model: str) -> dict:
     """Anthropic message 响应 → OpenAI chat.completion。"""
+    response_model = str(data.get("model") or model)
     text_parts: list[str] = []
     thinking_parts: list[str] = []
     tool_calls: list[dict] = []
@@ -271,7 +274,7 @@ def anthropic_to_openai(data: dict, model: str) -> dict:
         "id": str(data.get("id") or f"chatcmpl-{uuid.uuid4().hex[:24]}"),
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": str(data.get("model") or model),
+        "model": constants.MODEL_NAME_MAP.get(response_model.lower(), response_model),
         "choices": [{
             "index": 0,
             "message": message,

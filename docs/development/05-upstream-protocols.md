@@ -78,6 +78,8 @@ X-Aliyun-Captcha-Region: {region}
 
 Body：标准 Anthropic Messages（`model/max_tokens/stream/system/messages`）。上游模型名**大小写敏感**（`GLM-5.2`、`GLM-5-Turbo`）。
 
+响应模型名口径（2026-10-17 VPS 实测）：请求 `GLM-5.3-Flash` / `GLM-5.3`，上游普通响应及 SSE `message_start` 报 `glm-5.3-flash` / `glm-5.3`。OpenAI Chat Completions / Responses 的普通响应复用 `MODEL_NAME_MAP` 归一为官方写法，与模型列表和网关 SSE 一致；上游实际返回其它模型时保留该模型，未知名称原样保留，未上报才回退请求模型。`/v1/messages` 保持上游原样透传，因此仍可能返回小写；名称一致不单独证明底层模型身份。
+
 API Key 通道差异：`x-api-key: {apiKey}.{secret?}` 替代 Bearer，无验证码头。
 
 **验证码 verifyParam**：Node+happy-dom 运行阿里云官方无痕 SDK（`AliyunCaptcha.js`，o.alicdn.com），`startTracelessVerification()` 成功回调给出 `verifyParam = base64(JSON{certifyId, sceneId, isSign, securityToken})`；sceneId/region/prefix 从 `client/configs` 动态取（默认 `11xygtvd/sgp/no8xfe`）。挑战形态：403 + captcha 头；或 400 + body `{"code":3007}`。

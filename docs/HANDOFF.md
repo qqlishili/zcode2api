@@ -1,8 +1,15 @@
 # zcode2api 当前进度与交接
 
-### 分流实施与验收（2026-10-17 16:01 CST）
+### 模型名大小写与另一模型实测（2026-10-17 16:38 CST）
 
-按用户授权执行 `split-claim-and-chat-egress`，采用逐组实现/验收/修复。第 1–4 组已完成，当前 **22/23**，规范和交接已完成，待提交同步。自动审批服务无法找到 `gpt-5.6-luna`，Git 暂存未执行；13 份收尾文档仅在本机，5.3 保持未完成，等待客户端恢复审批或人工批准。业务提交 `78bf7f1` 于 04:22 CST 上线，先以 inherit 保全直连基线，再于 15:52 前后加载显式分流：**plugin 对话 direct，领取 proxy，HK 21100 / JP 21303 / TW 21202**。数据库来源，active=saved、pending_restart=false；入口为 `/admin/settings`「配置管理」，[配置说明](egress_configuration.md)。当前进度以 tasks 为准，以下早期规划和快照均保留各自日期。
+- VPS 真实 plugin 链路已复现：请求 `GLM-5.3-Flash` / `GLM-5.3`，普通响应及原始 Anthropic SSE `message_start` 分别返回小写 `glm-5.3-flash` / `glm-5.3`。当前 Chat SSE 使用请求名，普通响应保留上游名，产生名称大小写不一致；未观察到 Flash 被换成 GLM-5.3。名称字段本身不证明底层模型身份。
+- 两模型的普通/SSE均 HTTP 200、正常结束、无流内错误；GLM-5.3 的严格 `OK` 断言有一轮未通过，原始流补测实际返回 `OK.`，不把逐字输出验证记为全通过。当前 `/v1/models` 仅公布这两个模型，不新增未有套餐证据的模型。
+- 已在两个 OpenAI 兼容层复用 `MODEL_NAME_MAP` 修正普通响应名称；真实返回其它模型及未知名仍保留，未上报才用请求名。`/v1/messages` 维持原样透传小写。新增回归先 6 失败 / 6 通过，修复后相关 122 项通过；候选包在 VPS Ruff 通过。修复尚待提交/上线后的公网三协议核对；VPS 当前仍为下述分流业务版本。
+- 证据：`data/diagnostics/model-name-check-20261017-before.json`、`model-name-red-20261017.xml`、`model-name-green-20261017.xml`，VPS `/root/model-name-check-20261017.json`。本机 Ruff 进程未返回，已仅停止本次进程，候选检查改在 VPS 独立目录完成。
+
+### 分流实施与验收（2026-10-17 16:34 CST）
+
+按用户授权执行 `split-claim-and-chat-egress`，采用逐组实现/验收/修复，当前 **23/23**。13 份收尾文档已提交 `b8c9b62`、推送并 VPS 快进，本机/VPS HEAD 及文档哈希一致、远端工作树干净，原 15 份改动未变。先前自动审批服务故障已恢复，本次走正常审批完成。业务提交 `78bf7f1` 于 04:22 CST 上线，先以 inherit 保全直连基线，再于 15:52 前后加载显式分流：**plugin 对话 direct，领取 proxy，HK 21100 / JP 21303 / TW 21202**。数据库来源，active=saved、pending_restart=false；入口为 `/admin/settings`「配置管理」，[配置说明](egress_configuration.md)。当前进度以 tasks 为准，以下早期规划和快照均保留各自日期。
 
 - 验证：810 个独立 testcase 取最新结果均通过，Ruff app/tests、相关 OpenSpec strict 和页面 DOM 行为通过。切流后 Windows → 公网网关普通/SSE 均 200 / OK / stop，SSE 有 [DONE]、流内错误 0；host_alive=true、stale=false。
 - 领取：三地区真实同区 trace、configs/激活/preview、280 字符服务端验证码、POST HTTP 200 / 1003 通过；真实页面/后台活动查询、无活动跳过及已持有拦截通过。**1003 只核销通路，无新活动 code 0 和到账验收仍开放。**JP 21300/21302 HTTPS 连接失败、21301 求解预算耗尽，人工选择验证通过的 21303；没有自动换槽或跨区。

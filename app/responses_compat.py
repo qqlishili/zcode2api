@@ -18,6 +18,8 @@ import uuid
 
 from app.openai_compat import _apply_reasoning_params, _as_int, _image_block
 
+from . import constants
+
 
 def _text_from_response_part(content: object) -> str:
     """从 Responses message.content 或 summary 数组中提取纯文本。"""
@@ -331,6 +333,7 @@ def _build_usage(usage: dict | None) -> dict:
 
 def anthropic_to_responses(data: dict, model: str, effort: str | None = None) -> dict:
     """Anthropic message 响应 → OpenAI Responses 对象（顶层平铺 output items）。"""
+    response_model = str(data.get("model") or model)
     resp_id = str(data.get("id") or f"resp_{uuid.uuid4().hex[:24]}")
     created_at = int(time.time())
     output: list[dict] = []
@@ -394,7 +397,7 @@ def anthropic_to_responses(data: dict, model: str, effort: str | None = None) ->
         "background": False,
         "error": None,
         "incomplete_details": {"reason": "max_output_tokens"} if is_incomplete else None,
-        "model": str(data.get("model") or model),
+        "model": constants.MODEL_NAME_MAP.get(response_model.lower(), response_model),
         "output": output,
         "output_text": "".join(text_parts),
         "usage": _build_usage(data.get("usage")),

@@ -7,7 +7,7 @@ import json
 import pytest
 
 from app.openai_compat import StreamConverter, anthropic_to_openai, openai_to_anthropic
-from app.responses_compat import responses_to_anthropic
+from app.responses_compat import anthropic_to_responses, responses_to_anthropic
 
 
 class TestOpenaiToAnthropic:
@@ -180,6 +180,20 @@ class TestThinkingParams:
         })
         assert body is None
         assert err is not None and all(level in err for level in ("low", "high", "max"))
+
+
+@pytest.mark.parametrize("convert", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("reported, requested, expected", [
+    ("glm-5.3-flash", "GLM-5.3-Flash", "GLM-5.3-Flash"),
+    ("glm-5.3", "GLM-5.3", "GLM-5.3"),
+    ("GLM-5.3", "GLM-5.3", "GLM-5.3"),
+    ("glm-5.3", "GLM-5.3-Flash", "GLM-5.3"),
+    ("upstream-new-model", "GLM-5.3-Flash", "upstream-new-model"),
+    (None, "GLM-5.3-Flash", "GLM-5.3-Flash"),
+])
+def test_response_model_uses_official_name(convert, reported, requested, expected):
+    out = convert({"model": reported, "content": [], "stop_reason": "end_turn"}, requested)
+    assert out["model"] == expected
 
 
 class TestAnthropicToOpenai:
